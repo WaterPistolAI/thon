@@ -44,16 +44,23 @@ RUN apt update && apt install -y --no-install-recommends \
     vim \
     nano \
     sudo \
-    python3 \
+    python3-full \
+    python3-m2crypto \
+    python3-gunicorn \
+    python3-djoser \
+    python3-jwt \
+    python3-dev \
     python3-venv\
     python3-pip \
     python-is-python3 \
+    python3-pyro5 \
     nodejs \
     npm \
+    default-jre \
     && rm -rf /var/lib/apt/lists/*
 
 # Dotnet
-Run wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+RUN wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
 RUN dpkg -i packages-microsoft-prod.deb
 RUN apt update
 
@@ -81,7 +88,7 @@ COPY --chown=vscode:vscode config/extensions.txt.example /tmp/extensions.txt
 RUN while IFS= read -r ext; do \
       ext="$(echo "$ext" | tr -d '\r')"; \
       [ -z "$ext" ] && continue; \
-      code-server --install-extension "$ext" || echo "WARNING: Failed to install $ext"; \
+    code-server --install-extension "$ext" --force || echo "WARNING: Failed to install $ext"; \
     done < /tmp/extensions.txt \
     && rm /tmp/extensions.txt
 

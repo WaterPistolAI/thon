@@ -36,7 +36,6 @@ sudo apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
     libnss3-tools \
-    default-jre \
     software-properties-common
 
 echo "[Setup] Installing lemonade-server via PPA..."

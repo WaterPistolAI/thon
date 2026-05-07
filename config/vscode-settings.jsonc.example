@@ -112,7 +112,7 @@
     "diffEditor.maxComputationTime": 0,
     "prettier.configPath": "~/prettier",
     "python.testing.unittestEnabled": true,
-    "python.useEnvironmentsExtension": true,
+    "python.useEnvironmentsExtension": false,
     "editor.formatOnSaveMode": "modificationsIfAvailable",
     "notebook.formatOnSave.enabled": true,
     "python.analysis.autoFormatStrings": true,
@@ -183,10 +183,11 @@
         "kilo-code.new.agentManagerOpen",
         "kilo-code.new.agentManager.showTerminal"
     ],
+    "remote.autoForwardPorts": "hybrid",
     "kilo-code.new.browserAutomation.useSystemChrome": false,
     "telemetry.telemetryLevel": "off",
     "kilo-code.new.showTaskTimeline": true,
     "kilo-code.new.browserAutomation.enabled": true,
-    "window.newWindowProfile": "Default"
+    "window.newWindowProfile": "Default",
     "jdk.telemetry.enabled": false
-"}
+}

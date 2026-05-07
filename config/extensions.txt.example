@@ -40,7 +40,6 @@ koszti.snowflake-driver-for-sqltools
 
 mechatroner.rainbow-csv
 mekusuri.jsonl-tool
-mermaidchart.vscode-mermaid-chart
 meta.pyrefly
 ms-azuretools.azure-dev
 ms-azuretools.vscode-azure-mcp-server
@@ -127,7 +126,6 @@ vscjava.vscode-java-dependency
 vscjava.vscode-java-pack
 vscjava.vscode-java-test
 vscjava.vscode-maven
-vstirbu.vscode-mermaid-preview
 watson-devex.ibm-watsonx-orchestrate-agent-builder
 whitphx.vscode-stlite
 wholroyd.jinja

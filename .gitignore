@@ -7,3 +7,6 @@ kilo.json
 vscode-settings.jsonc
 .vscode*
 groups.yaml
+.ruff_cache
+build-log.txt
+extensions.txt

@@ -38,7 +38,6 @@ kokororin.vscode-phpfmt
 koszti.snowflake-driver-for-sqltools
 mechatroner.rainbow-csv
 mekusuri.jsonl-tool
-mermaidchart.vscode-mermaid-chart
 meta.pyrefly
 ms-dotnettools.csdevkit
 ms-dotnettools.csharp
