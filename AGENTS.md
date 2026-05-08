@@ -1,7 +1,7 @@
-# VS Code Remote Example AGENTS
+#THON Example AGENTS
 
 Use this file for all work in `./`. Reference template: `examples/vscode/`.
-This is a hackathon-focused multi-instance VS Code remote development tool with nginx
+This is a hackathon-focused multi-instanceTHON development tool with nginx
 reverse proxy (SSL via mkcert/openssl), groups support, persistent workspace bind mounts,
 and optional local LLM inference via Lemonade Server.
 

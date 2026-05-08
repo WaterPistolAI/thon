@@ -85,13 +85,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(instances_router)
     app.include_router(lemonade_router)
 
-    static_dir = Path(__file__).parent.parent / "dashboard"
+    dashboard_dir = Path(__file__).parent.parent / "dashboard"
+    static_dir = dashboard_dir / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     @app.get("/")
     async def index():
-        index_path = static_dir / "index.html"
+        index_path = dashboard_dir / "index.html"
         if index_path.exists():
             return FileResponse(str(index_path))
         return {"message": "THON API", "docs": "/docs"}

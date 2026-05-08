@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """
-Lemonade Server Manager for VS Code Remote Example
+Lemonade Server Manager forTHON Example
 
 Installs, configures, and manages a local Lemonade inference server
 that provides LLM endpoints for VS Code extensions in sandbox instances.
@@ -788,7 +788,7 @@ async def cmd_run(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Manage Lemonade inference server for VS Code Remote",
+        description="Manage Lemonade inference server forTHON",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """
-Nginx Configuration Generator for VS Code Remote Example
+Nginx Configuration Generator forTHON Example
 
 Generates a single combined nginx config with all location blocks in one
 server block. Multiple server blocks with ``server_name _;`` on the same

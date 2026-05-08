@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """
-Certificate Generation Script for VS Code Remote Example
+Certificate Generation Script forTHON Example
 
 This script generates self-signed certificates using mkcert for local development.
 It creates:
@@ -148,7 +148,7 @@ def generate_per_sandbox_cert(cert_dir: Path, sandbox_id: str) -> tuple[Path, Pa
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate mkcert certificates for VS Code Remote example",
+        description="Generate mkcert certificates forTHON example",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

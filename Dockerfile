@@ -14,7 +14,7 @@
 
 # THON - The Hackathon Organizer Node Sandbox Image
 # This Dockerfile builds a sandbox image with code-server pre-installed
-# for multi-instance VS Code remote hackathon environments.
+# for multi-instanceTHON hackathon environments.
 #
 # HTTPS Support:
 #   - By default, code-server runs over HTTP

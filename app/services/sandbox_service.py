@@ -27,11 +27,8 @@ from opensandbox.models.execd import RunCommandOpts
 from opensandbox.models.sandboxes import Host, Volume, SandboxFilter
 
 from app.config import AppConfig, SandboxConfig
-from app.exceptions import (
-    SandboxCreateError,
-    SandboxNotFoundError,
-    SandboxOperationError,
-)
+from app.db import get_record, get_records, get_setting, mark_terminated, update_endpoint, upsert_record
+from app.exceptions import SandboxOperationError
 from app.models import InstanceInfo, InstanceState, UserInfo
 
 logger = logging.getLogger(__name__)
@@ -51,23 +48,26 @@ class SandboxService:
         self._config = config
         self._sandbox_cfg: SandboxConfig = config.sandbox
         self._manager: Optional[SandboxManager] = None
+        self._closed = False
 
     async def _get_manager(self) -> SandboxManager:
         """Lazy-initialize and return the shared SandboxManager."""
-        if self._manager is None or self._manager._closed:
+        if self._manager is None or self._closed:
             conn = ConnectionConfig(
                 domain=self._sandbox_cfg.domain,
                 api_key=self._sandbox_cfg.api_key,
                 request_timeout=timedelta(seconds=self._sandbox_cfg.request_timeout_seconds),
             )
             self._manager = await SandboxManager.create(conn)
+            self._closed = False
         return self._manager
 
     async def close(self) -> None:
         """Release the manager transport."""
-        if self._manager and not self._manager._closed:
+        if self._manager and not self._closed:
             await self._manager.close()
             self._manager = None
+            self._closed = True
 
     # ── Fleet Operations ──────────────────────────────────────────────
 
@@ -91,6 +91,7 @@ class SandboxService:
         instances = []
         for info in result.sandbox_infos:
             meta = info.metadata or {}
+            image_str = info.image.image if hasattr(info.image, "image") else str(info.image)
             instances.append(
                 InstanceInfo(
                     id=info.id,
@@ -100,13 +101,60 @@ class SandboxService:
                     ),
                     state=InstanceState(info.status.state),
                     port=int(meta.get("port", DEFAULT_PORT)),
-                    endpoint=None,
-                    image=info.image,
+                    endpoint=meta.get("endpoint"),
+                    image=image_str,
                     created_at=info.created_at,
                     expires_at=info.expires_at,
                     metadata=meta,
                 )
             )
+
+        sandbox_ids = [inst.id for inst in instances]
+        db_records = get_records(sandbox_ids, db_path=self._config.database.path)
+        db_external_ip = None
+        for inst in instances:
+            rec = db_records.get(inst.id)
+            if rec:
+                inst.user = UserInfo(group=rec.group_name, username=rec.username)
+                if rec.endpoint and not inst.endpoint:
+                    inst.endpoint = rec.endpoint
+                if rec.port and inst.port == DEFAULT_PORT and rec.port != DEFAULT_PORT:
+                    inst.port = rec.port
+                if rec.password:
+                    inst.password = rec.password
+                if rec.external_ip:
+                    db_external_ip = rec.external_ip
+            elif inst.state in (InstanceState.RUNNING, InstanceState.PAUSED):
+                upsert_record(
+                    sandbox_id=inst.id,
+                    group_name=inst.user.group,
+                    username=inst.user.username,
+                    port=inst.port,
+                    endpoint=inst.endpoint,
+                    image=inst.image,
+                    db_path=self._config.database.path,
+                )
+
+        running_ids = [
+            (inst.id, inst.port)
+            for inst in instances
+            if inst.state == InstanceState.RUNNING and not inst.endpoint
+        ]
+        if running_ids:
+            endpoints = await self._resolve_endpoints(running_ids)
+            for inst in instances:
+                if inst.id in endpoints:
+                    inst.endpoint = endpoints[inst.id]
+                    update_endpoint(inst.id, endpoints[inst.id], db_path=self._config.database.path)
+
+        for inst in instances:
+            if inst.state == InstanceState.TERMINATED:
+                mark_terminated(inst.id, db_path=self._config.database.path)
+
+        for inst in instances:
+            if inst.endpoint:
+                inst.public_url = self._build_public_url(inst.endpoint, fallback_ip=db_external_ip)
+
         return instances, result.pagination.total_items if result.pagination else len(instances)
 
     async def get_instance(self, sandbox_id: str) -> InstanceInfo:
@@ -114,15 +162,33 @@ class SandboxService:
         mgr = await self._get_manager()
         info = await mgr.get_sandbox_info(sandbox_id)
         meta = info.metadata or {}
+        image_str = info.image.image if hasattr(info.image, "image") else str(info.image)
+        user = UserInfo(
+            group=meta.get("group", "default"),
+            username=meta.get("username", "workspace"),
+        )
+        endpoint = meta.get("endpoint")
+        port = int(meta.get("port", DEFAULT_PORT))
+        password = None
+        rec = get_record(sandbox_id, db_path=self._config.database.path)
+        db_external_ip = None
+        if rec:
+            user = UserInfo(group=rec.group_name, username=rec.username)
+            if rec.endpoint and not endpoint:
+                endpoint = rec.endpoint
+            if rec.port and port == DEFAULT_PORT and rec.port != DEFAULT_PORT:
+                port = rec.port
+            password = rec.password
+            db_external_ip = rec.external_ip
         return InstanceInfo(
             id=info.id,
-            user=UserInfo(
-                group=meta.get("group", "default"),
-                username=meta.get("username", "workspace"),
-            ),
+            user=user,
             state=InstanceState(info.status.state),
-            port=int(meta.get("port", DEFAULT_PORT)),
-            image=info.image,
+            port=port,
+            endpoint=endpoint,
+            public_url=self._build_public_url(endpoint, fallback_ip=db_external_ip) if endpoint else None,
+            password=password,
+            image=image_str,
             created_at=info.created_at,
             expires_at=info.expires_at,
             metadata=meta,
@@ -150,6 +216,7 @@ class SandboxService:
         mgr = await self._get_manager()
         try:
             await mgr.kill_sandbox(sandbox_id)
+            mark_terminated(sandbox_id, db_path=self._config.database.path)
         except Exception as e:
             raise SandboxOperationError(f"Failed to kill {sandbox_id}: {e}") from e
 
@@ -255,8 +322,21 @@ class SandboxService:
             opts=RunCommandOpts(background=True),
         )
 
+        sandbox_id = sandbox.id if hasattr(sandbox, "id") else ""
+
+        upsert_record(
+            sandbox_id=sandbox_id,
+            group_name=user.group,
+            username=user.username,
+            port=endpoint_port,
+            endpoint=endpoint_str,
+            image=self._sandbox_cfg.image,
+            password=password,
+            db_path=self._config.database.path,
+        )
+
         return InstanceInfo(
-            id=sandbox.id if hasattr(sandbox, "id") else "",
+            id=sandbox_id,
             user=user,
             state=InstanceState.RUNNING,
             port=endpoint_port,
@@ -264,6 +344,28 @@ class SandboxService:
             password=password,
             image=self._sandbox_cfg.image,
             metadata=metadata,
+        )
+
+    async def recreate_instance(self, sandbox_id: str) -> InstanceInfo:
+        """Re-create a sandbox from its DB record, reusing the same workspace.
+
+        Looks up the terminated/failed sandbox's group, username, and port
+        from the database and creates a fresh instance.  If ``workspace_dir``
+        is configured, the same host bind mount is reattached so files persist.
+
+        Returns:
+            New InstanceInfo with updated endpoint.
+        """
+        rec = get_record(sandbox_id, db_path=self._config.database.path)
+        if not rec:
+            raise SandboxOperationError(f"No DB record for sandbox {sandbox_id}")
+        user = UserInfo(group=rec.group_name, username=rec.username)
+        workspace_dir = self._config.workspace_dir
+        return await self.create_instance(
+            user=user,
+            port=rec.port,
+            secure=bool(rec.password),
+            workspace_dir=workspace_dir,
         )
 
     async def create_instances_for_group(
@@ -305,9 +407,46 @@ class SandboxService:
 
     # ── Internal Helpers ─────────────────────────────────────────────
 
+    async def _resolve_endpoints(
+        self, sandbox_ports: list[tuple[str, int]]
+    ) -> dict[str, str]:
+        """Resolve endpoints for a list of (sandbox_id, port) pairs concurrently."""
+        conn = ConnectionConfig(
+            domain=self._sandbox_cfg.domain,
+            api_key=self._sandbox_cfg.api_key,
+            request_timeout=timedelta(seconds=self._sandbox_cfg.request_timeout_seconds),
+        )
+
+        async def _get(sid: str, port: int) -> tuple[str, str]:
+            try:
+                sb = await Sandbox.connect(sid, connection_config=conn, skip_health_check=True)
+                ep = await sb.get_endpoint(port)
+                return sid, ep.endpoint
+            except Exception as exc:
+                logger.warning("Failed to resolve endpoint for %s port %s: %s", sid, port, exc)
+                return sid, ""
+
+        results = await asyncio.gather(*[_get(sid, port) for sid, port in sandbox_ports])
+        return {sid: ep for sid, ep in results if ep}
+
     @staticmethod
     def _parse_endpoint_port(endpoint_str: str) -> int:
         host_port_part = endpoint_str.split("/", 1)[0]
         if ":" in host_port_part:
             return int(host_port_part.rsplit(":", 1)[1])
         return 80
+
+    def _build_public_url(self, endpoint_str: str, fallback_ip: Optional[str] = None) -> Optional[str]:
+        """Build a public HTTPS URL from an internal endpoint string.
+
+        Converts ``127.0.0.1:47887/proxy/8443`` → ``https://{external_ip}/47887/proxy/8443/``
+        """
+        ext_ip = (
+            self._config.nginx.external_ip
+            or fallback_ip
+            or get_setting("external_ip", db_path=self._config.database.path)
+        )
+        if not ext_ip or not endpoint_str:
+            return None
+        endpoint_path = endpoint_str.split(":", 1)[1] if ":" in endpoint_str else endpoint_str
+        return f"https://{ext_ip}/{endpoint_path}/"

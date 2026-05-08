@@ -20,14 +20,10 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from app.config import AppConfig
-from app.exceptions import (
-    SandboxCreateError,
-    SandboxNotFoundError,
-    SandboxOperationError,
-)
+from app.db import get_setting, set_setting, upsert_record
+from app.exceptions import SandboxOperationError
 from app.models import InstanceInfo, InstanceState, UserInfo
-from app.services.sandbox_service import SandboxService
+from app.services.sandbox_service import SandboxService, DEFAULT_PORT
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/instances", tags=["instances"])
@@ -38,6 +34,16 @@ class CreateInstanceRequest(BaseModel):
     username: str = "workspace"
     port: int = 8443
     secure: bool = False
+
+
+class RegisterInstanceRequest(BaseModel):
+    group: str = "default"
+    username: str = "workspace"
+    port: int = 8443
+
+
+class BulkRegisterRequest(BaseModel):
+    mappings: list[dict]
 
 
 class BulkActionRequest(BaseModel):
@@ -70,7 +76,6 @@ async def list_instances(
     svc = _get_service()
     instances, total = await svc.list_instances(
         states=state,
-        metadata_filter={"managed-by": "thon-client"},
         page=page,
         page_size=page_size,
     )
@@ -80,6 +85,27 @@ async def list_instances(
         page=page,
         page_size=page_size,
     )
+
+
+@router.post("/{instance_id}/register", response_model=InstanceInfo)
+async def register_instance(instance_id: str, req: RegisterInstanceRequest) -> InstanceInfo:
+    """Register or update user mapping for an existing instance."""
+    svc = _get_service()
+    try:
+        inst = await svc.get_instance(instance_id)
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Instance {instance_id} not found: {e}")
+    upsert_record(
+        sandbox_id=instance_id,
+        group_name=req.group,
+        username=req.username,
+        port=req.port or inst.port,
+        endpoint=inst.endpoint,
+        image=inst.image,
+        db_path=svc._config.database.path,
+    )
+    inst.user = UserInfo(group=req.group, username=req.username)
+    return inst
 
 
 @router.get("/{instance_id}", response_model=InstanceInfo)
@@ -103,7 +129,7 @@ async def create_instance(req: CreateInstanceRequest) -> InstanceInfo:
             port=req.port,
             secure=req.secure,
         )
-    except SandboxCreateError as e:
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create instance: {e}")
@@ -141,6 +167,16 @@ async def kill_instance(instance_id: str) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/{instance_id}/recreate", response_model=InstanceInfo)
+async def recreate_instance(instance_id: str) -> InstanceInfo:
+    """Re-create a terminated/failed instance from its DB record with the same workspace."""
+    svc = _get_service()
+    try:
+        return await svc.recreate_instance(instance_id)
+    except SandboxOperationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post("/{instance_id}/renew")
 async def renew_instance(instance_id: str, req: RenewRequest = RenewRequest()) -> dict:
     """Extend an instance's TTL."""
@@ -150,6 +186,30 @@ async def renew_instance(instance_id: str, req: RenewRequest = RenewRequest()) -
         return {"status": "renewed", "id": instance_id, "timeout_minutes": req.timeout_minutes}
     except SandboxOperationError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/bulk/register")
+async def bulk_register(req: BulkRegisterRequest) -> dict:
+    """Bulk register sandbox-to-user mappings."""
+    svc = _get_service()
+    results = []
+    for m in req.mappings:
+        sid = m.get("sandbox_id", "")
+        group = m.get("group", "default")
+        username = m.get("username", "workspace")
+        port = m.get("port", DEFAULT_PORT)
+        if not sid:
+            results.append({"id": sid, "status": "error", "error": "missing sandbox_id"})
+            continue
+        upsert_record(
+            sandbox_id=sid,
+            group_name=group,
+            username=username,
+            port=port,
+            db_path=svc._config.database.path,
+        )
+        results.append({"id": sid, "status": "registered", "label": f"{group}/{username}"})
+    return {"results": results}
 
 
 @router.post("/bulk/pause")
@@ -192,3 +252,24 @@ async def bulk_kill(req: BulkActionRequest) -> dict:
         except SandboxOperationError as e:
             results.append({"id": sid, "status": "error", "error": str(e)})
     return {"results": results}
+
+
+class SetSettingRequest(BaseModel):
+    key: str
+    value: str
+
+
+@router.get("/settings/{key}")
+async def get_setting_endpoint(key: str) -> dict:
+    """Get a global setting value."""
+    svc = _get_service()
+    value = get_setting(key, db_path=svc._config.database.path)
+    return {"key": key, "value": value}
+
+
+@router.put("/settings/{key}")
+async def set_setting_endpoint(key: str, req: SetSettingRequest) -> dict:
+    """Set a global setting value."""
+    svc = _get_service()
+    set_setting(key, req.value, db_path=svc._config.database.path)
+    return {"key": key, "value": req.value}

@@ -18,7 +18,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SSL_DIR="${SSL_DIR:-/etc/nginx/ssl}"
 
-echo "[Setup] Installing prerequisites for VS Code Remote hackathon environment..."
+echo "[Setup] Installing prerequisites forTHON hackathon environment..."
 
 sudo apt-get update
 sudo apt-get upgrade -y
