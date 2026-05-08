@@ -380,6 +380,12 @@ def page_groups() -> None:
         st.error(f"Failed to load groups: {e}")
         return
 
+    events = svc.list_events()
+    if events:
+        for ev in events:
+            ev_title = ev.title or ev.event_id
+            st.caption(f"Event: **{ev_title}** (`{ev.event_id}`)")
+
     total_users = sum(len(g.users) for g in groups)
     c1, c2 = st.columns(2)
     c1.metric("Groups", len(groups))
@@ -410,11 +416,18 @@ def page_groups() -> None:
         st.info("No groups configured.")
         return
 
+    group_id_map = {g.id: g for g in groups}
+
     for group in groups:
+        display_name = group.title or group.name
         with st.expander(
-            f"📁 {group.name} ({len(group.users)} user(s)) — `{_trunc_id(group.id, 8)}`"
+            f"📁 {display_name} ({len(group.users)} user(s)) — `{_trunc_id(group.id, 8)}`"
         ):
             st.write(f"**ID:** `{group.id}`")
+            if group.title and group.title != group.name:
+                st.write(f"**Title:** {group.title}")
+            if group.event_id:
+                st.write(f"**Event:** `{group.event_id}`")
             st.write(f"**Created:** {group.created_at}")
 
             if group.users:
@@ -438,7 +451,7 @@ def page_groups() -> None:
             else:
                 st.info("No users in this group.")
 
-            bc1, bc2, bc3 = st.columns(3)
+            bc1, bc2, bc3, bc4 = st.columns(4)
             with bc1:
                 if st.button("+ User", key=f"add-user-{group.id}"):
                     st.session_state.add_user_group_id = group.id
@@ -449,6 +462,10 @@ def page_groups() -> None:
                     st.session_state.rename_group_name = group.name
                     st.session_state.show_rename_group = True
             with bc3:
+                if st.button("🔄 Transfer", key=f"transfer-group-{group.id}"):
+                    st.session_state.transfer_source_group_id = group.id
+                    st.session_state.show_transfer_user = True
+            with bc4:
                 if st.button("🗑 Delete", key=f"delete-group-{group.id}"):
                     try:
                         svc.delete_group(group.id)
@@ -459,6 +476,7 @@ def page_groups() -> None:
 
     _add_user_dialog(svc)
     _rename_group_dialog(svc)
+    _transfer_user_dialog(svc, group_id_map)
 
 
 def _create_group_dialog() -> None:
@@ -507,6 +525,8 @@ def _add_user_dialog(svc: GroupsService) -> None:
                     st.session_state.show_add_user = False
                     st.toast("User added")
                     st.rerun()
+                except DuplicateError as e:
+                    st.error(str(e))
                 except Exception as e:
                     st.error(f"Failed to add user: {e}")
         with c2:
@@ -539,6 +559,50 @@ def _rename_group_dialog(svc: GroupsService) -> None:
         with c2:
             if st.button("Cancel"):
                 st.session_state.show_rename_group = False
+                st.rerun()
+
+
+def _transfer_user_dialog(
+    svc: GroupsService, group_id_map: dict
+) -> None:
+    if not st.session_state.get("show_transfer_user"):
+        return
+    source_group_id: str = str(
+        st.session_state.get("transfer_source_group_id", "")
+    )
+    source_group = group_id_map.get(source_group_id)
+    if not source_group or not source_group.users:
+        st.session_state.show_transfer_user = False
+        return
+    with _dialog_container("Transfer User"):
+        st.subheader("Transfer User to Another Group")
+        user_options = {f"{u.username} ({_trunc_id(u.id, 8)})": u for u in source_group.users}
+        selected_label = st.selectbox("User", options=list(user_options.keys()))
+        selected_user = user_options.get(selected_label)
+        other_groups = {g.id: g.name for g in group_id_map.values() if g.id != source_group_id}
+        if not other_groups:
+            st.warning("No other groups to transfer to. Create a new group first.")
+        target_group_id = st.selectbox(
+            "Target Group",
+            options=list(other_groups.keys()),
+            format_func=lambda gid: other_groups[gid],
+        )
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Transfer", type="primary"):
+                if selected_user and target_group_id:
+                    try:
+                        svc.transfer_user(selected_user.id, target_group_id)
+                        st.session_state.show_transfer_user = False
+                        st.toast(f"Transferred {selected_user.username} to {other_groups[target_group_id]}")
+                        st.rerun()
+                    except DuplicateError as e:
+                        st.error(str(e))
+                    except Exception as e:
+                        st.error(f"Transfer failed: {e}")
+        with c2:
+            if st.button("Cancel"):
+                st.session_state.show_transfer_user = False
                 st.rerun()
 
 

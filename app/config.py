@@ -125,6 +125,18 @@ class DatabaseConfig:
 
 
 @dataclass
+class EventConfig:
+    """Event (hackathon) identity settings."""
+
+    event_id: Optional[str] = field(
+        default_factory=lambda: os.getenv("THON_EVENT_ID")
+    )
+    title: Optional[str] = field(
+        default_factory=lambda: os.getenv("THON_EVENT_TITLE")
+    )
+
+
+@dataclass
 class GatewayConfig:
     """APISIX AI Gateway settings."""
 
@@ -174,6 +186,7 @@ class AppConfig:
     auth: AuthConfig = field(default_factory=AuthConfig)
     nginx: NginxConfig = field(default_factory=NginxConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    event: EventConfig = field(default_factory=EventConfig)
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     groups_file: Optional[Path] = None
     workspace_dir: str = field(

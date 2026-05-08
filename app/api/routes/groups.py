@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from app.db import GroupRecordWithUsers, UserRecord
+from app.db import EventRecord, GroupRecordWithUsers, UserRecord
 from app.services.groups_service import (
     DuplicateError,
     GroupNotFoundError,
@@ -39,6 +39,10 @@ class UpdateGroupRequest(BaseModel):
 
 class CreateUserRequest(BaseModel):
     username: str
+
+
+class TransferUserRequest(BaseModel):
+    target_group_id: str
 
 
 class UpdateUserRequest(BaseModel):
@@ -83,6 +87,26 @@ async def export_groups() -> dict:
     """Export groups as a groups.yaml-compatible dict."""
     svc = _get_service()
     return svc.export_to_yaml()
+
+
+# ── Events ──────────────────────────────────────────────────────────
+
+
+@router.get("/events", response_model=list[EventRecord])
+async def list_events() -> list[EventRecord]:
+    """List all events."""
+    svc = _get_service()
+    return svc.list_events()
+
+
+@router.get("/events/{event_id}", response_model=EventRecord)
+async def get_event(event_id: str) -> EventRecord:
+    """Get an event by its event_id string."""
+    svc = _get_service()
+    try:
+        return svc.get_event(event_id)
+    except GroupNotFoundError as e:
+        raise _handle_error(e) from e
 
 
 @router.get("/{group_id}", response_model=GroupRecordWithUsers)
@@ -147,4 +171,16 @@ async def delete_user(group_id: str, user_id: str) -> dict:
         svc.delete_user(user_id)
         return {"status": "deleted", "id": user_id}
     except UserNotFoundError as e:
+        raise _handle_error(e) from e
+
+
+@router.post("/{group_id}/users/{user_id}/transfer", response_model=UserRecord)
+async def transfer_user(
+    group_id: str, user_id: str, req: TransferUserRequest
+) -> UserRecord:
+    """Transfer a user to a different group."""
+    svc = _get_service()
+    try:
+        return svc.transfer_user(user_id, req.target_group_id)
+    except (UserNotFoundError, GroupNotFoundError, DuplicateError) as e:
         raise _handle_error(e) from e

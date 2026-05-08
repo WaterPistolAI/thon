@@ -19,6 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 
@@ -57,6 +58,18 @@ class AppSetting(SQLModel, table=True):
     value: str = Field(default="")
 
 
+class EventRecord(SQLModel, table=True):
+    """An event (hackathon, workshop) that owns a collection of groups."""
+
+    __tablename__ = "event_records"
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
+    event_id: str = Field(unique=True, index=True)
+    title: Optional[str] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class GroupRecord(SQLModel, table=True):
     """A named group containing users."""
 
@@ -64,6 +77,8 @@ class GroupRecord(SQLModel, table=True):
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
     name: str = Field(unique=True, index=True)
+    event_id: Optional[str] = Field(default=None, index=True)
+    title: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -73,6 +88,8 @@ class GroupRecordWithUsers(SQLModel):
 
     id: str
     name: str
+    event_id: Optional[str] = None
+    title: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     users: list["UserRecord"] = []
@@ -82,6 +99,9 @@ class UserRecord(SQLModel, table=True):
     """A user within a group, with workspace and storage paths."""
 
     __tablename__ = "user_records"
+    __table_args__ = (
+        UniqueConstraint("group_id", "username", name="uq_user_group_username"),
+    )
 
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
     group_id: str = Field(index=True)
@@ -126,6 +146,12 @@ def _migrate(engine) -> None:
                     conn.execute(sqlalchemy.text(f"ALTER TABLE {table.name} ADD COLUMN {col.name} {col.type}"))
                 except Exception:
                     pass
+        try:
+            conn.execute(sqlalchemy.text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_group_username ON user_records (group_id, username)"
+            ))
+        except Exception:
+            pass
         conn.commit()
 
 
@@ -252,6 +278,46 @@ def set_setting(key: str, value: str, db_path: Optional[str] = None) -> None:
         session.commit()
 
 
+# ── Event CRUD ──────────────────────────────────────────────────────
+
+
+def get_or_create_event(
+    event_id: str, title: Optional[str] = None, db_path: Optional[str] = None
+) -> EventRecord:
+    """Return an existing event by event_id or create a new one."""
+    with get_session(db_path) as session:
+        existing = session.exec(
+            select(EventRecord).where(EventRecord.event_id == event_id)
+        ).first()
+        if existing:
+            if title is not None and existing.title != title:
+                existing.title = title
+                existing.updated_at = datetime.utcnow()
+                session.add(existing)
+                session.commit()
+                session.refresh(existing)
+            return existing
+        event = EventRecord(event_id=event_id, title=title)
+        session.add(event)
+        session.commit()
+        session.refresh(event)
+        return event
+
+
+def get_events(db_path: Optional[str] = None) -> list[EventRecord]:
+    """List all events."""
+    with get_session(db_path) as session:
+        return list(session.exec(select(EventRecord)).all())
+
+
+def get_event(event_id: str, db_path: Optional[str] = None) -> Optional[EventRecord]:
+    """Get an event by its event_id string."""
+    with get_session(db_path) as session:
+        return session.exec(
+            select(EventRecord).where(EventRecord.event_id == event_id)
+        ).first()
+
+
 # ── Group CRUD ──────────────────────────────────────────────────────
 
 
@@ -327,8 +393,18 @@ def create_user(
     storage_path: Optional[str] = None,
     db_path: Optional[str] = None,
 ) -> UserRecord:
-    """Add a user to a group."""
+    """Add a user to a group. Raises ValueError if (group_id, username) already exists."""
     with get_session(db_path) as session:
+        existing = session.exec(
+            select(UserRecord).where(
+                UserRecord.group_id == group_id,
+                UserRecord.username == username,
+            )
+        ).first()
+        if existing:
+            raise ValueError(
+                f"User '{username}' already exists in group '{group_id}'"
+            )
         user = UserRecord(
             group_id=group_id,
             username=username,
@@ -396,23 +472,83 @@ def delete_user(user_id: str, db_path: Optional[str] = None) -> bool:
         return True
 
 
-def load_groups_from_yaml(yaml_path: str, db_path: Optional[str] = None) -> list[GroupRecord]:
-    """Import groups and users from a groups.yaml file, creating DB records."""
+def transfer_user(
+    user_id: str, target_group_id: str, db_path: Optional[str] = None
+) -> Optional[UserRecord]:
+    """Move a user to a different group. Raises ValueError on name conflict."""
+    with get_session(db_path) as session:
+        user = session.exec(
+            select(UserRecord).where(UserRecord.id == user_id)
+        ).first()
+        if not user:
+            return None
+        conflict = session.exec(
+            select(UserRecord).where(
+                UserRecord.group_id == target_group_id,
+                UserRecord.username == user.username,
+            )
+        ).first()
+        if conflict:
+            raise ValueError(
+                f"User '{user.username}' already exists in target group '{target_group_id}'"
+            )
+        user.group_id = target_group_id
+        group = session.exec(
+            select(GroupRecord).where(GroupRecord.id == target_group_id)
+        ).first()
+        if group:
+            user.workspace_path = f"thon-workspace-{group.name}-{user.username}"
+        user.updated_at = datetime.utcnow()
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        return user
+
+
+def load_groups_from_yaml(
+    yaml_path: str,
+    event_id: Optional[str] = None,
+    db_path: Optional[str] = None,
+) -> list[GroupRecord]:
+    """Import groups and users from a groups.yaml file, creating DB records.
+
+    Idempotent: skips groups and users that already exist.
+    If event_id is provided, links all groups to that event.
+    """
     import yaml
     with open(yaml_path) as f:
         data = yaml.safe_load(f)
     groups = data.get("groups", {})
+    if event_id is None:
+        event_id = data.get("event_id")
+    title = data.get("title")
+    if event_id:
+        get_or_create_event(event_id, title=title, db_path=db_path)
     result = []
     for group_name, group_data in groups.items():
-        existing = get_groups(db_path=db_path)
-        group = next((g for g in existing if g.name == group_name), None)
-        try:
-            group = create_group(group_name, db_path=db_path)
-        except ValueError:
-            group = get_groups(db_path=db_path)
-            group = next((g for g in group if g.name == group_name), None)
+        group_data = group_data or {}
+        existing_groups = get_groups(db_path=db_path)
+        group = next((g for g in existing_groups if g.name == group_name), None)
+        if group is None:
+            try:
+                group = create_group(group_name, db_path=db_path)
+            except ValueError:
+                existing_groups = get_groups(db_path=db_path)
+                group = next((g for g in existing_groups if g.name == group_name), None)
         if not group:
             continue
+        if event_id and not group.event_id:
+            with get_session(db_path) as session:
+                db_group = session.exec(
+                    select(GroupRecord).where(GroupRecord.id == group.id)
+                ).first()
+                if db_group:
+                    db_group.event_id = event_id
+                    if title and not db_group.title:
+                        db_group.title = title
+                    db_group.updated_at = datetime.utcnow()
+                    session.add(db_group)
+                    session.commit()
         for username in group_data.get("users", []):
             existing = _find_user_by_group_and_name(group.id, username, db_path=db_path)
             if not existing:

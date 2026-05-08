@@ -93,6 +93,16 @@ class GroupConfig:
 
     name: str
     users: list[str] = field(default_factory=list)
+    title: Optional[str] = None
+    event_id: Optional[str] = None
+
+
+@dataclass
+class EventInfo:
+    """Metadata about an event (hackathon, workshop)."""
+
+    event_id: str
+    title: Optional[str] = None
 
 
 @dataclass
