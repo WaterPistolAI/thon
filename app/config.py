@@ -28,9 +28,13 @@ load_env()
 class SandboxConfig:
     """Sandbox server connection settings."""
 
-    domain: str = field(default_factory=lambda: os.getenv("SANDBOX_DOMAIN", "localhost:8080"))
+    domain: str = field(
+        default_factory=lambda: os.getenv("SANDBOX_DOMAIN", "localhost:8080")
+    )
     api_key: Optional[str] = field(default_factory=lambda: os.getenv("SANDBOX_API_KEY"))
-    image: str = field(default_factory=lambda: os.getenv("SANDBOX_IMAGE", "waterpistol/thon:latest"))
+    image: str = field(
+        default_factory=lambda: os.getenv("SANDBOX_IMAGE", "waterpistol/thon:latest")
+    )
     request_timeout_seconds: int = 60
 
 
@@ -40,9 +44,17 @@ class LemonadeConfig:
 
     host: str = field(default_factory=lambda: os.getenv("LEMONADE_HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(os.getenv("LEMONADE_PORT", "13305")))
-    api_key: Optional[str] = field(default_factory=lambda: os.getenv("LEMONADE_API_KEY"))
-    admin_api_key: Optional[str] = field(default_factory=lambda: os.getenv("LEMONADE_ADMIN_API_KEY"))
-    config_dir: Path = field(default_factory=lambda: Path(os.getenv("LEMONADE_CONFIG_DIR", "/var/lib/lemonade/.cache/lemonade")))
+    api_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("LEMONADE_API_KEY")
+    )
+    admin_api_key: Optional[str] = field(
+        default_factory=lambda: os.getenv("LEMONADE_ADMIN_API_KEY")
+    )
+    config_dir: Path = field(
+        default_factory=lambda: Path(
+            os.getenv("LEMONADE_CONFIG_DIR", "/var/lib/lemonade/.cache/lemonade")
+        )
+    )
 
 
 @dataclass
@@ -51,22 +63,46 @@ class DashboardConfig:
 
     host: str = field(default_factory=lambda: os.getenv("DASHBOARD_HOST", "0.0.0.0"))
     port: int = field(default_factory=lambda: int(os.getenv("DASHBOARD_PORT", "8100")))
-    secret_key: str = field(default_factory=lambda: os.getenv("DASHBOARD_SECRET_KEY", ""))
-    debug: bool = field(default_factory=lambda: os.getenv("DASHBOARD_DEBUG", "").lower() in ("1", "true", "yes"))
+    secret_key: str = field(
+        default_factory=lambda: os.getenv("DASHBOARD_SECRET_KEY", "")
+    )
+    debug: bool = field(
+        default_factory=lambda: (
+            os.getenv("DASHBOARD_DEBUG", "").lower() in ("1", "true", "yes")
+        )
+    )
 
 
 @dataclass
 class AuthConfig:
     """Authentication / OIDC provider settings."""
 
-    enabled: bool = field(default_factory=lambda: os.getenv("AUTH_ENABLED", "").lower() in ("1", "true", "yes"))
-    session_secret: str = field(default_factory=lambda: os.getenv("AUTH_SESSION_SECRET", ""))
-    github_client_id: Optional[str] = field(default_factory=lambda: os.getenv("AUTH_GITHUB_CLIENT_ID"))
-    github_client_secret: Optional[str] = field(default_factory=lambda: os.getenv("AUTH_GITHUB_CLIENT_SECRET"))
-    gitlab_client_id: Optional[str] = field(default_factory=lambda: os.getenv("AUTH_GITLAB_CLIENT_ID"))
-    gitlab_client_secret: Optional[str] = field(default_factory=lambda: os.getenv("AUTH_GITLAB_CLIENT_SECRET"))
-    linkedin_client_id: Optional[str] = field(default_factory=lambda: os.getenv("AUTH_LINKEDIN_CLIENT_ID"))
-    linkedin_client_secret: Optional[str] = field(default_factory=lambda: os.getenv("AUTH_LINKEDIN_CLIENT_SECRET"))
+    enabled: bool = field(
+        default_factory=lambda: (
+            os.getenv("AUTH_ENABLED", "").lower() in ("1", "true", "yes")
+        )
+    )
+    session_secret: str = field(
+        default_factory=lambda: os.getenv("AUTH_SESSION_SECRET", "")
+    )
+    github_client_id: Optional[str] = field(
+        default_factory=lambda: os.getenv("AUTH_GITHUB_CLIENT_ID")
+    )
+    github_client_secret: Optional[str] = field(
+        default_factory=lambda: os.getenv("AUTH_GITHUB_CLIENT_SECRET")
+    )
+    gitlab_client_id: Optional[str] = field(
+        default_factory=lambda: os.getenv("AUTH_GITLAB_CLIENT_ID")
+    )
+    gitlab_client_secret: Optional[str] = field(
+        default_factory=lambda: os.getenv("AUTH_GITLAB_CLIENT_SECRET")
+    )
+    linkedin_client_id: Optional[str] = field(
+        default_factory=lambda: os.getenv("AUTH_LINKEDIN_CLIENT_ID")
+    )
+    linkedin_client_secret: Optional[str] = field(
+        default_factory=lambda: os.getenv("AUTH_LINKEDIN_CLIENT_SECRET")
+    )
 
 
 @dataclass
@@ -81,7 +117,48 @@ class NginxConfig:
 class DatabaseConfig:
     """SQLite database settings."""
 
-    path: str = field(default_factory=lambda: os.getenv("THON_DB_PATH", str(Path.home() / ".thon" / "thon.db")))
+    path: str = field(
+        default_factory=lambda: os.getenv(
+            "THON_DB_PATH", str(Path.home() / ".thon" / "thon.db")
+        )
+    )
+
+
+@dataclass
+class GatewayConfig:
+    """APISIX AI Gateway settings."""
+
+    enabled: bool = field(
+        default_factory=lambda: (
+            os.getenv("GATEWAY_ENABLED", "").lower() in ("1", "true", "yes")
+        )
+    )
+    admin_url: str = field(
+        default_factory=lambda: os.getenv("GATEWAY_ADMIN_URL", "http://127.0.0.1:9180")
+    )
+    admin_key: str = field(
+        default_factory=lambda: os.getenv(
+            "GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1"
+        )
+    )
+    proxy_port: int = field(
+        default_factory=lambda: int(os.getenv("GATEWAY_PROXY_PORT", "9080"))
+    )
+    redis_host: Optional[str] = field(
+        default_factory=lambda: os.getenv("GATEWAY_REDIS_HOST")
+    )
+    redis_port: int = field(
+        default_factory=lambda: int(os.getenv("GATEWAY_REDIS_PORT", "6379"))
+    )
+    redis_password: Optional[str] = field(
+        default_factory=lambda: os.getenv("GATEWAY_REDIS_PASSWORD")
+    )
+    rate_limit_tokens: int = field(
+        default_factory=lambda: int(os.getenv("GATEWAY_RATE_LIMIT_TOKENS", "500"))
+    )
+    rate_limit_window: int = field(
+        default_factory=lambda: int(os.getenv("GATEWAY_RATE_LIMIT_WINDOW", "60"))
+    )
 
 
 @dataclass
@@ -94,6 +171,7 @@ class AppConfig:
     auth: AuthConfig = field(default_factory=AuthConfig)
     nginx: NginxConfig = field(default_factory=NginxConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
+    gateway: GatewayConfig = field(default_factory=GatewayConfig)
     groups_file: Optional[Path] = None
     workspace_dir: str = field(default_factory=lambda: os.getenv("THON_WORKSPACE_DIR", str(Path.home() / ".thon" / "workspace")))
 

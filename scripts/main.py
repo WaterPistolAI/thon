@@ -232,6 +232,8 @@ async def create_instance(
     workspace_dir: Optional[str] = None,
     lemonade_config: Optional[str] = None,
     vscode_settings: Optional[str] = None,
+    gateway_api_key: Optional[str] = None,
+    gateway_external_ip: Optional[str] = None,
     db_user: Optional[object] = None,
 ) -> SandboxInstance:
     env = {"PYTHON_VERSION": python_version}
@@ -320,6 +322,21 @@ async def create_instance(
 
     if vscode_settings:
         await _inject_vscode_settings(user, sandbox, vscode_settings)
+
+    if gateway_api_key:
+        from apisix_gateway import generate_kilo_gateway_config
+
+        gateway_url = f"http://{gateway_external_ip}:9080"
+        kilo_content = generate_kilo_gateway_config(
+            gateway_url=gateway_url,
+            api_key=gateway_api_key,
+        )
+        kilo_dir = "/home/vscode/.config/kilo"
+        await sandbox.commands.run(f"mkdir -p {kilo_dir}")
+        encoded = base64.b64encode(kilo_content.encode()).decode()
+        write_cmd = f"echo {encoded} | base64 -d > {kilo_dir}/config.json"
+        await sandbox.commands.run(write_cmd)
+        print(f"[{user.label}] Injected gateway kilo config -> {kilo_dir}/config.json")
 
     if secure and password:
         config_dir = "/home/vscode/.config/code-server"
@@ -481,6 +498,30 @@ Examples:
         metavar="SETTINGS_JSON",
         help="Path to VS Code settings JSON file; injected into each sandbox's code-server User settings",
     )
+    parser.add_argument(
+        "--gateway",
+        action="store_true",
+        default=False,
+        help="Enable APISIX AI Gateway with rate limiting and per-consumer API keys",
+    )
+    parser.add_argument(
+        "--gateway-redis-host",
+        type=str,
+        default=None,
+        help="Redis host for gateway rate limiting (default: local policy if not set)",
+    )
+    parser.add_argument(
+        "--gateway-rate-limit",
+        type=int,
+        default=500,
+        help="Token limit per consumer per time window (default: 500)",
+    )
+    parser.add_argument(
+        "--gateway-time-window",
+        type=int,
+        default=60,
+        help="Rate limit time window in seconds (default: 60)",
+    )
 
     args = parser.parse_args()
 
@@ -559,6 +600,10 @@ Examples:
         print(f"  Lemonade: {args.lemonade} (Kilo Code config injection)")
     if args.vscode_settings:
         print(f"  VS Code settings: {args.vscode_settings}")
+    if args.gateway:
+        print(f"  AI Gateway: enabled (rate limit: {args.gateway_rate_limit} tokens/{args.gateway_time_window}s)")
+        if args.gateway_redis_host:
+            print(f"  Gateway Redis: {args.gateway_redis_host}")
     if args.groups:
         print(f"  Groups file: {args.groups}")
         if args.group:
@@ -588,9 +633,51 @@ Examples:
 
     instances: list[SandboxInstance] = []
 
+    gateway_consumers: list[dict] = []
+    if args.gateway:
+        from apisix_gateway import ApisixGatewayManager
+
+        admin_key = os.getenv("GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1")
+        gateway_mgr = ApisixGatewayManager(
+            admin_url="http://127.0.0.1:9180",
+            admin_key=admin_key,
+            redis_host=args.gateway_redis_host,
+            redis_port=6379,
+        )
+
+        lemonade_host = os.getenv("LEMONADE_HOST", "127.0.0.1")
+        lemonade_port = os.getenv("LEMONADE_PORT", "13305")
+        lemonade_url = f"http://{lemonade_host}:{lemonade_port}"
+        lemonade_api_key = os.getenv("LEMONADE_API_KEY")
+
+        gateway_mgr.create_ai_route(
+            lemonade_url=lemonade_url,
+            lemonade_api_key=lemonade_api_key,
+        )
+
+        for user in users:
+            consumer = gateway_mgr.create_consumer(
+                username=user.label,
+                rate_limit=args.gateway_rate_limit,
+                time_window=args.gateway_time_window,
+            )
+            gateway_consumers.append({
+                "user": user,
+                "api_key": consumer.api_key,
+                "rate_limit": consumer.rate_limit,
+                "time_window": consumer.time_window,
+            })
+
     try:
         tasks = []
         for i, user in enumerate(users):
+            gateway_api_key = None
+            if gateway_consumers:
+                for gc in gateway_consumers:
+                    if gc["user"].label == user.label:
+                        gateway_api_key = gc["api_key"]
+                        break
+
             db_user = db_user_map.get((user.group, user.username))
             tasks.append(
                 create_instance(
@@ -605,6 +692,8 @@ Examples:
                     workspace_dir=args.workspace_dir,
                     lemonade_config=args.lemonade,
                     vscode_settings=args.vscode_settings,
+                    gateway_api_key=gateway_api_key,
+                    gateway_external_ip=external_ip,
                     db_user=db_user,
                 )
             )
@@ -682,6 +771,15 @@ Examples:
                 print(f"      Password: {inst.password}")
             if args.lemonade:
                 print(f"      Kilo Code: /home/vscode/.config/kilo/config.json")
+            if gateway_consumers:
+                for gc in gateway_consumers:
+                    if gc["user"].label == inst.user.label:
+                        ext_ip = external_ip or "localhost"
+                        gateway_url = f"http://{ext_ip}:9080"
+                        print(f"      Gateway API Key: {gc['api_key']}")
+                        print(f"      Gateway Endpoint: {gateway_url}/v1/chat/completions")
+                        print(f"      Rate Limit: {gc['rate_limit']} tokens / {gc['time_window']}s")
+                        break
 
         print()
         if use_nginx and ca_cert_path:
@@ -705,6 +803,20 @@ Examples:
         print("\nInterrupted by user")
     finally:
         print("\nCleaning up...")
+
+        if args.gateway:
+            try:
+                from apisix_gateway import ApisixGatewayManager
+
+                admin_key = os.getenv("GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1")
+                gateway_mgr = ApisixGatewayManager(
+                    admin_url="http://127.0.0.1:9180",
+                    admin_key=admin_key,
+                    redis_host=args.gateway_redis_host,
+                )
+                gateway_mgr.cleanup()
+            except Exception as e:
+                print(f"  Note: Gateway cleanup error: {e}")
 
         if use_nginx:
             nginx_gen = NginxConfigGenerator()

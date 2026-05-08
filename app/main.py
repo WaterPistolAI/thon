@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
 
 from app.config import AppConfig
+from app.services.apisix_service import ApisixService
 from app.services.groups_service import GroupsService
 from app.services.lemonade_service import LemonadeService
 from app.services.sandbox_service import SandboxService
@@ -30,6 +31,7 @@ logger = logging.getLogger(__name__)
 _app_config: AppConfig | None = None
 _sandbox_service: SandboxService | None = None
 _lemonade_service: LemonadeService | None = None
+_apisix_service: ApisixService | None = None
 _groups_service: GroupsService | None = None
 
 
@@ -54,6 +56,14 @@ def get_lemonade_service() -> LemonadeService:
         cfg = get_app_config()
         _lemonade_service = LemonadeService(cfg.lemonade)
     return _lemonade_service
+
+
+def get_apisix_service() -> ApisixService:
+    global _apisix_service
+    if _apisix_service is None:
+        cfg = get_app_config()
+        _apisix_service = ApisixService(cfg.gateway)
+    return _apisix_service
 
 
 def get_groups_service() -> GroupsService:
@@ -93,11 +103,13 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
 
     from app.api.routes.auth import router as auth_router
+    from app.api.routes.gateway import router as gateway_router
     from app.api.routes.groups import router as groups_router
     from app.api.routes.instances import router as instances_router
     from app.api.routes.lemonade import router as lemonade_router
 
     app.include_router(auth_router)
+    app.include_router(gateway_router)
     app.include_router(groups_router)
     app.include_router(instances_router)
     app.include_router(lemonade_router)

@@ -49,3 +49,15 @@ class GroupsLoadError(VSCRemoteError):
 
 class AuthError(VSCRemoteError):
     """Authentication or authorization failure."""
+
+
+class GatewayNotEnabledError(VSCRemoteError):
+    """AI Gateway feature is not enabled."""
+
+
+class GatewayConnectionError(VSCRemoteError):
+    """Cannot connect to the APISIX Admin API."""
+
+
+class GatewayConfigError(VSCRemoteError):
+    """Gateway configuration is invalid or incomplete."""

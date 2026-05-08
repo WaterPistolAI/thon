@@ -38,6 +38,37 @@ sudo apt-get install -y --no-install-recommends \
     libnss3-tools \
     software-properties-common
 
+INSTALL_GATEWAY="${INSTALL_GATEWAY:-false}"
+
+if [ "$INSTALL_GATEWAY" = "true" ] || [ "$INSTALL_GATEWAY" = "1" ]; then
+    echo "[Setup] Installing AI Gateway prerequisites (APISIX, etcd, Redis)..."
+
+    sudo apt-get install -y --no-install-recommends \
+        etcd-server \
+        redis
+
+    echo "[Setup] Adding APISIX repository..."
+    wget -q -O - http://repos.apiseven.com/pubkey.gpg | sudo apt-key add - 2>/dev/null || {
+        wget -q -O /tmp/apisix-gpg.key http://repos.apiseven.com/pubkey.gpg
+        sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/apisix.gpg /tmp/apisix-gpg.key 2>/dev/null || true
+        rm -f /tmp/apisix-gpg.key
+    }
+    echo "deb http://repos.apiseven.com/packages/debian bullseye main" | \
+        sudo tee /etc/apt/sources.list.d/apisix.list
+
+    sudo apt-get update
+    sudo apt-get install -y --no-install-recommends apisix
+
+    echo "[Setup] Starting etcd and Redis..."
+    sudo systemctl enable etcd
+    sudo systemctl start etcd
+    sudo systemctl enable redis
+    sudo systemctl start redis
+
+    echo "[Setup] AI Gateway packages installed."
+    echo "[Setup] Run 'bash ${SCRIPT_DIR}/setup-apisix.sh' to configure and start APISIX."
+fi
+
 echo "[Setup] Installing lemonade-server via PPA..."
 sudo add-apt-repository -y ppa:lemonade-team/stable
 sudo apt-get update

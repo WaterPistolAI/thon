@@ -173,3 +173,45 @@ class DashboardSession:
     email: str
     provider: str
     created_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class GatewayStatus:
+    """Status snapshot of the APISIX AI Gateway."""
+
+    running: bool = False
+    admin_url: str = ""
+    proxy_url: str = ""
+    consumers_count: int = 0
+    route_configured: bool = False
+    redis_connected: bool = False
+    enabled: bool = False
+
+
+@dataclass
+class ConsumerInfo:
+    """APISIX consumer with API key and rate limit config."""
+
+    username: str
+    api_key: str = ""
+    rate_limit: int = 0
+    time_window: int = 0
+
+
+class ConsumerCreateRequest(BaseModel):
+    """Request body for creating a gateway consumer."""
+
+    username: str
+    api_key: Optional[str] = None
+    rate_limit: int = 500
+    time_window: int = 60
+
+
+class GatewaySetupRequest(BaseModel):
+    """Request body for full gateway setup."""
+
+    lemonade_url: str = "http://127.0.0.1:13305"
+    lemonade_api_key: Optional[str] = None
+    lemonade_model: str = "user.gemma-4-31b-it"
+    rate_limit: int = 500
+    time_window: int = 60
