@@ -1,0 +1,204 @@
+---
+title: Dashboard
+description: Streamlit dashboard for managing VS Code instances, groups, and Lemonade Server
+---
+
+# Dashboard
+
+THON includes a Streamlit-based web dashboard for managing VS Code sandbox instances,
+groups, and Lemonade Server — replacing the original vanilla JS frontend.
+
+## Quick Start
+
+```bash
+# Install dependencies
+pip install streamlit pandas
+
+# Run the dashboard
+streamlit run dashboard/streamlit_app.py --server.port 8501
+```
+
+Dashboard available at `http://localhost:8501`.
+
+## Architecture
+
+The Streamlit dashboard calls backend services directly — no HTTP API needed
+between the frontend and backend. The FastAPI REST API on port 8100 remains
+available for programmatic/scripted access.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                      Host Machine                         │
+│                                                           │
+│  ┌────────────────────────────────────────────────────┐   │
+│  │          Streamlit Dashboard (:8501)                │   │
+│  │                                                    │   │
+│  │  Instances │ Groups │ Lemonade │ Settings          │   │
+│  │       │         │         │          │             │   │
+│  │       ▼         ▼         ▼          ▼             │   │
+│  │  SandboxService  GroupsService  LemonadeService   │   │
+│  │  LemonadeService  app.db         app.db           │   │
+│  │  app.db                                            │   │
+│  └────────────────────────────────────────────────────┘   │
+│                                                           │
+│  ┌────────────────────────────────────────────────────┐   │
+│  │          FastAPI REST API (:8100)                   │   │
+│  │          /docs — Swagger UI                         │   │
+│  │          /api/* — programmatic access               │   │
+│  └────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────┘
+```
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Direct service calls | No HTTP overhead; shared `AppConfig` and SQLite DB |
+| Separate process from FastAPI | Streamlit has its own server; both can run independently |
+| Session-state caching | Service instances cached in `st.session_state` to avoid re-creation |
+| Async bridge via `_run_async()` | `SandboxService` is async; bridged with `asyncio.run()` in a thread pool |
+
+## Pages
+
+### Instances
+
+Full CRUD for VS Code sandbox instances:
+
+| Feature | Details |
+|---------|---------|
+| List | All instances with state, user, endpoint, ID |
+| Search/Filter | By username/group or instance state |
+| Create | Group, username, port, password authentication |
+| Actions | Pause, resume, kill, restart (per instance) |
+| Bulk actions | Multi-select via `st.dataframe` for pause/resume/kill |
+| Detail expanders | Full instance info including URL, password, image |
+
+### Groups
+
+Manage groups and their users:
+
+| Feature | Details |
+|---------|---------|
+| List | All groups with user counts |
+| Search | Filter by group name or username |
+| Create/Rename/Delete | Full group lifecycle |
+| Add/Remove/Rename users | Per-group user management |
+| User detail table | UUID, username, workspace path, storage path |
+
+### Lemonade Server
+
+Monitor and inspect the Lemonade inference server:
+
+| Feature | Details |
+|---------|---------|
+| Status overview | Online/offline, model, context size, users |
+| API information | Endpoint, OpenAI compatibility, key status |
+| Server health | Version, active model, loaded models, WS port |
+| Performance stats | TTFT, tokens/sec, input/output tokens |
+| Slots | llama.cpp slot states and cache info |
+| System info | OS, CPU, memory, GPU devices |
+| Available models | Registered models from `user_models.json` |
+
+Gracefully handles offline servers — non-critical API calls use `_safe_proxy()`
+which catches `LemonadeConnectionError` so the page still renders.
+
+### Settings
+
+| Setting | Description |
+|---------|-------------|
+| External IP | Persisted to SQLite; used for public URL generation |
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `dashboard/streamlit_app.py` | Main app with 4 pages and sidebar navigation |
+| `dashboard/streamlit_styles.py` | Dark theme CSS injection matching the original JS theme |
+| `dashboard/index.html` | Legacy HTML shell (superseded by Streamlit) |
+| `dashboard/static/style.css` | Legacy CSS (superseded by Streamlit) |
+| `dashboard/static/app.js` | Legacy JS (superseded by Streamlit) |
+
+## Configuration
+
+The dashboard reads configuration from the same environment variables as the
+backend services. No separate configuration file is needed.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SANDBOX_DOMAIN` | `localhost:8080` | Sandbox server address |
+| `SANDBOX_API_KEY` | (none) | Sandbox API key |
+| `SANDBOX_IMAGE` | `waterpistol/thon:latest` | Docker image for sandboxes |
+| `LEMONADE_HOST` | `0.0.0.0` | Lemonade server bind address |
+| `LEMONADE_PORT` | `13305` | Lemonade server port |
+| `LEMONADE_API_KEY` | (none) | Lemonade API key |
+| `LEMONADE_ADMIN_API_KEY` | (none) | Lemonade admin API key |
+| `THON_DB_PATH` | `~/.thon/thon.db` | SQLite database path |
+| `THON_WORKSPACE_DIR` | `~/.thon/workspace` | Workspace directory for groups |
+
+## Running Alongside the REST API
+
+Both the Streamlit dashboard and the FastAPI REST API can run simultaneously:
+
+```bash
+# Terminal 1: Streamlit dashboard
+streamlit run dashboard/streamlit_app.py --server.port 8501
+
+# Terminal 2: FastAPI REST API (optional, for programmatic access)
+python -m app.main
+# API docs at http://localhost:8100/docs
+```
+
+Both processes share the same `AppConfig` loaded from environment variables and
+the same SQLite database.
+
+## Dark Theme
+
+The dashboard uses a dark theme that matches the original vanilla JS dashboard's
+color scheme. The CSS is injected once at startup via `inject_dark_theme()` in
+`dashboard/streamlit_styles.py`, which writes CSS variables for:
+
+- Background colors (`--bg-primary`, `--bg-secondary`, `--bg-card`)
+- Border and hover colors
+- Text colors (primary, secondary, muted)
+- Accent color (indigo `#6366f1`)
+- Status colors (success, warning, danger, info)
+
+The theme targets Streamlit's internal CSS class names (`stMetric`, `stDataFrame`,
+`stExpander`, `stButton`, etc.) with `!important` overrides.
+
+## Implementation Notes
+
+### Async Bridge
+
+`SandboxService` methods are async (using `opensandbox` SDK). The Streamlit app
+bridges these calls via `_run_async()`:
+
+1. If no event loop is running, uses `asyncio.run()` directly
+2. If an event loop is already running (rare in Streamlit), runs `asyncio.run()`
+   in a `ThreadPoolExecutor` to avoid blocking
+
+### Dialog Pattern
+
+Since `st.modal` is not available in all Streamlit versions, dialogs use
+`st.container(border=True)` with session state flags:
+
+```python
+if st.button("Create", type="primary"):
+    st.session_state.show_create_instance = True
+
+# Later in the page:
+if st.session_state.get("show_create_instance"):
+    with st.container(border=True):
+        # form fields...
+```
+
+### Multi-Instance Selection
+
+`st.dataframe` with `on_select="rerun"` and `selection_mode="multi-row"` enables
+selecting multiple instances for bulk pause/resume/kill actions. Selected row
+indices are mapped back to instance IDs via a hidden "Full ID" column.
+
+### Lemonade Error Handling
+
+`_safe_proxy()` wraps Lemonade API calls and returns `None` on connection errors,
+allowing the page to render partial data when the server is offline.

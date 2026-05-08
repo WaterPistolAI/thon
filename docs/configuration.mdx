@@ -330,3 +330,40 @@ Environment="LEMONADE_ADMIN_API_KEY=your-admin-key"
 sudo systemctl daemon-reload
 sudo systemctl restart lemonade-server
 ```
+
+---
+
+## Dashboard Configuration
+
+The Streamlit dashboard reads the same environment variables as the backend
+services. No separate configuration file is needed.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SANDBOX_DOMAIN` | `localhost:8080` | Sandbox server address |
+| `SANDBOX_API_KEY` | (none) | Sandbox API key |
+| `SANDBOX_IMAGE` | `waterpistol/thon:latest` | Docker image for sandboxes |
+| `LEMONADE_HOST` | `0.0.0.0` | Lemonade server bind address |
+| `LEMONADE_PORT` | `13305` | Lemonade server port |
+| `LEMONADE_API_KEY` | (none) | Lemonade API key |
+| `LEMONADE_ADMIN_API_KEY` | (none) | Lemonade admin API key |
+| `THON_DB_PATH` | `~/.thon/thon.db` | SQLite database path |
+| `THON_WORKSPACE_DIR` | `~/.thon/workspace` | Workspace directory for groups |
+| `DASHBOARD_HOST` | `0.0.0.0` | FastAPI bind address |
+| `DASHBOARD_PORT` | `8100` | FastAPI port |
+| `DASHBOARD_DEBUG` | `false` | Enable FastAPI debug/reload mode |
+
+### Running
+
+```bash
+# Streamlit dashboard (port 8501)
+streamlit run dashboard/streamlit_app.py --server.port 8501
+
+# FastAPI REST API (port 8100, optional)
+python -m app.main
+```
+
+See [Dashboard](./dashboard) for full documentation including pages and
+implementation details.

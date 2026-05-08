@@ -108,6 +108,27 @@ python ./main.py \
     --external-ip YOUR_EXTERNAL_IP
 ```
 
+### 7. Run the Dashboard (Optional)
+
+The Streamlit dashboard provides a web UI for managing instances, groups,
+and monitoring the Lemonade server:
+
+```bash
+pip install streamlit pandas
+streamlit run dashboard/streamlit_app.py --server.port 8501
+```
+
+Dashboard available at `http://localhost:8501`.
+
+The FastAPI REST API also provides Swagger UI at `http://localhost:8100/docs`
+for programmatic access:
+
+```bash
+python -m app.main
+```
+
+See [Dashboard](./dashboard) for full documentation.
+
 ## Optional: Lemonade Server Setup
 
 For local LLM inference with Kilo Code, Continue, or Cline extensions:

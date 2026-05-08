@@ -429,7 +429,7 @@ extensions making cross-site requests to github.com — cannot be fixed server-s
 ### Backend (FastAPI)
 
 ```
-app/main.py          → FastAPI app, lifespan, static mounts
+app/main.py          → FastAPI app, lifespan, redirects / to /docs
 app/api/routes/      → REST API route handlers
 app/services/        → Business logic layer (wraps sandbox SDK + Lemonade)
 app/auth/            → OIDC providers, session store, FastAPI deps
@@ -442,6 +442,46 @@ app/models.py        → Pydantic domain models
 - `LemonadeService` is read-only (HTTP API calls, no systemd privilege needed)
 - Auth is optional — when `AUTH_ENABLED` is false, all endpoints are open
 - Session tokens are HMAC-signed; replace with Redis/DB for production
+- FastAPI no longer serves the dashboard UI — it only provides the REST API
+- `/` redirects to `/docs` (Swagger UI) since the dashboard is served by Streamlit
+
+### Frontend (Streamlit)
+
+```
+dashboard/streamlit_app.py     → Main Streamlit app with sidebar nav and 4 pages
+dashboard/streamlit_styles.py  → Dark theme CSS injection (matches original JS theme)
+dashboard/index.html           → Legacy HTML shell (superseded by Streamlit)
+dashboard/static/style.css     → Legacy dark theme CSS (superseded by Streamlit)
+dashboard/static/app.js        → Legacy frontend JS (superseded by Streamlit)
+```
+
+**Architecture:**
+- Streamlit calls services directly (`SandboxService`, `LemonadeService`, `GroupsService`, `app.db`)
+  — no HTTP API calls needed between frontend and backend
+- FastAPI REST API on port 8100 still available for programmatic/scripted access
+- Streamlit runs as a separate process on port 8501
+- Both processes share the same `AppConfig` loaded from environment variables
+
+**Pages:**
+| Page | Features |
+|------|----------|
+| Instances | List, search/filter by state, create, pause/resume/kill, bulk actions, detail expanders |
+| Groups | List, search, create/rename/delete groups, add/remove/rename users |
+| Lemonade Server | Status, API info, health, performance stats, slots, system info, available models |
+| Settings | External IP configuration (persisted to SQLite) |
+
+**Key implementation details:**
+- Async service calls are bridged via `_run_async()` which uses `asyncio.run()` in a
+  `ThreadPoolExecutor` when called from within an existing event loop
+- Service instances are cached in `st.session_state` to avoid re-creation on rerun
+- Dialog patterns use `st.container(border=True)` with session state flags
+  (e.g., `st.session_state.show_create_instance`) for open/close toggling
+- `st.dataframe(on_select="rerun", selection_mode="multi-row")` enables multi-instance
+  selection for bulk pause/resume/kill actions
+- Dark theme is injected once at app startup via `inject_dark_theme()` which writes
+  CSS variables matching the original JS dashboard's color scheme
+- `_safe_proxy()` catches `LemonadeConnectionError` for non-critical Lemonade API calls
+  so the page still renders when the server is offline
 
 ### REST API Endpoints
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -38,15 +39,60 @@ from app.services.sandbox_service import SandboxService
 from dashboard.streamlit_styles import inject_dark_theme
 
 
+class _AsyncRunner:
+    _lock = threading.Lock()
+    _loop: Optional[asyncio.AbstractEventLoop] = None
+    _thread: Optional[threading.Thread] = None
+
+    @classmethod
+    def _ensure_loop(cls) -> asyncio.AbstractEventLoop:
+        with cls._lock:
+            loop = getattr(st.session_state, "_async_loop", None)
+            if loop is not None and loop.is_running():
+                cls._loop = loop
+            if cls._loop is None or not cls._loop.is_running():
+                cls._loop = asyncio.new_event_loop()
+                cls._thread = threading.Thread(
+                    target=cls._loop.run_forever, daemon=True
+                )
+                cls._thread.start()
+                st.session_state._async_loop = cls._loop
+                _invalidate_async_services()
+            return cls._loop
+
+    @classmethod
+    def run(cls, coro):
+        loop = cls._ensure_loop()
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result()
+
+
+def _invalidate_async_services() -> None:
+    for key in ("sandbox_service", "lemonade_service"):
+        st.session_state.pop(key, None)
+
+
+def _run_async(coro):
+    return _AsyncRunner.run(coro)
+
+
 def _get_config() -> AppConfig:
     if "app_config" not in st.session_state:
         st.session_state.app_config = AppConfig.from_env()
     return st.session_state.app_config
 
 
+async def _init_sandbox_service(cfg: AppConfig) -> SandboxService:
+    svc = SandboxService(cfg)
+    await svc._get_manager()
+    return svc
+
+
 def _get_sandbox_service() -> SandboxService:
     if "sandbox_service" not in st.session_state:
-        st.session_state.sandbox_service = SandboxService(_get_config())
+        st.session_state.sandbox_service = _run_async(
+            _init_sandbox_service(_get_config())
+        )
     return st.session_state.sandbox_service
 
 
@@ -64,19 +110,6 @@ def _get_groups_service() -> GroupsService:
             workspace_dir=cfg.workspace_dir,
         )
     return st.session_state.groups_service
-
-
-def _run_async(coro):
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        loop = None
-    if loop and loop.is_running():
-        import concurrent.futures
-
-        with concurrent.futures.ThreadPoolExecutor() as pool:
-            return pool.submit(asyncio.run, coro).result()
-    return asyncio.run(coro)
 
 
 def _state_badge(state: str) -> str:
@@ -187,7 +220,7 @@ def page_instances() -> None:
 
     event = st.dataframe(
         df[["User", "Instance ID", "State", "Endpoint"]],
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         on_select="rerun",
         selection_mode="multi-row",
@@ -386,7 +419,7 @@ def page_groups() -> None:
                 st.dataframe(
                     df[["UUID", "Username", "Workspace Path", "Storage Path"]],
                     hide_index=True,
-                    use_container_width=True,
+                    width="stretch",
                 )
             else:
                 st.info("No users in this group.")
@@ -580,7 +613,7 @@ def page_lemonade() -> None:
                         "Last Use": last_use,
                     }
                 )
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         else:
             st.info("No models loaded.")
 
@@ -611,7 +644,7 @@ def page_lemonade() -> None:
                     "Remaining": nt.get("n_remain", "-"),
                 }
             )
-        st.dataframe(pd.DataFrame(slot_rows), hide_index=True, use_container_width=True)
+        st.dataframe(pd.DataFrame(slot_rows), hide_index=True, width="stretch")
     else:
         st.info("No slots available (model may not be loaded).")
 
@@ -663,9 +696,7 @@ def page_lemonade() -> None:
                 }
             )
         if dev_rows:
-            st.dataframe(
-                pd.DataFrame(dev_rows), hide_index=True, use_container_width=True
-            )
+            st.dataframe(pd.DataFrame(dev_rows), hide_index=True, width="stretch")
         else:
             st.info("No device information available.")
 
@@ -691,9 +722,7 @@ def _lemonade_models_section(svc: LemonadeService) -> None:
                     "Labels": ", ".join(labels) if labels else "-",
                 }
             )
-        st.dataframe(
-            pd.DataFrame(model_rows), hide_index=True, use_container_width=True
-        )
+        st.dataframe(pd.DataFrame(model_rows), hide_index=True, width="stretch")
     else:
         st.info("No models configured.")
 
