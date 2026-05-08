@@ -23,6 +23,7 @@ from app.exceptions import GatewayConnectionError, GatewayNotEnabledError
 from app.models import (
     ConsumerCreateRequest,
     ConsumerInfo,
+    GatewayMode,
     GatewaySetupRequest,
     GatewayStatus,
 )
@@ -105,6 +106,22 @@ async def setup_gateway(req: GatewaySetupRequest) -> list[ConsumerInfo]:
         from app.main import get_app_config
 
         cfg = get_app_config()
+
+        if req.mode == GatewayMode.PER_GROUP:
+            db_groups = get_groups(db_path=cfg.database.path)
+            group_data: list[tuple[str, int]] = []
+            if db_groups:
+                for group in db_groups:
+                    group_users = get_users(group.id, db_path=cfg.database.path)
+                    group_data.append((group.name, len(group_users)))
+            return svc.setup_gateway_groups(
+                lemonade_url=req.lemonade_url,
+                lemonade_api_key=req.lemonade_api_key,
+                lemonade_model=req.lemonade_model,
+                groups=group_data if group_data else None,
+                rate_limit_per_user=req.rate_limit,
+                time_window=req.time_window,
+            )
 
         usernames: list[str] | None = None
         db_groups = get_groups(db_path=cfg.database.path)

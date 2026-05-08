@@ -175,6 +175,13 @@ class DashboardSession:
     created_at: datetime = field(default_factory=datetime.utcnow)
 
 
+class GatewayMode(str, Enum):
+    """How gateway consumers map to users."""
+
+    PER_USER = "per-user"
+    PER_GROUP = "per-group"
+
+
 @dataclass
 class GatewayStatus:
     """Status snapshot of the APISIX AI Gateway."""
@@ -186,6 +193,7 @@ class GatewayStatus:
     route_configured: bool = False
     redis_connected: bool = False
     enabled: bool = False
+    mode: GatewayMode = GatewayMode.PER_USER
 
 
 @dataclass
@@ -196,6 +204,8 @@ class ConsumerInfo:
     api_key: str = ""
     rate_limit: int = 0
     time_window: int = 0
+    group_name: Optional[str] = None
+    user_count: int = 1
 
 
 class ConsumerCreateRequest(BaseModel):
@@ -215,3 +225,4 @@ class GatewaySetupRequest(BaseModel):
     lemonade_model: str = "user.gemma-4-31b-it"
     rate_limit: int = 500
     time_window: int = 60
+    mode: GatewayMode = GatewayMode.PER_USER

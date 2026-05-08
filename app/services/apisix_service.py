@@ -28,7 +28,7 @@ from typing import Optional
 
 from app.config import GatewayConfig
 from app.exceptions import GatewayConnectionError, GatewayNotEnabledError
-from app.models import ConsumerInfo, GatewayStatus
+from app.models import ConsumerInfo, GatewayMode, GatewayStatus
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +142,8 @@ class ApisixService:
             except GatewayConnectionError:
                 pass
 
+        mode = GatewayMode.PER_GROUP if self._cfg.gateway_mode == "per-group" else GatewayMode.PER_USER
+
         return GatewayStatus(
             running=running,
             admin_url=self._admin_url,
@@ -150,6 +152,7 @@ class ApisixService:
             route_configured=route_configured,
             redis_connected=self._cfg.redis_host is not None,
             enabled=True,
+            mode=mode,
         )
 
     def list_consumers(self) -> list[ConsumerInfo]:
@@ -309,6 +312,46 @@ class ApisixService:
                     time_window=time_window,
                 )
                 consumers.append(consumer)
+
+        return consumers
+
+    def setup_gateway_groups(
+        self,
+        lemonade_url: str,
+        lemonade_api_key: Optional[str] = None,
+        lemonade_model: str = "user.gemma-4-31b-it",
+        groups: Optional[list[tuple[str, int]]] = None,
+        rate_limit_per_user: Optional[int] = None,
+        time_window: Optional[int] = None,
+    ) -> list[ConsumerInfo]:
+        self._check_enabled()
+
+        self.create_ai_route(
+            lemonade_url=lemonade_url,
+            lemonade_api_key=lemonade_api_key,
+            lemonade_model=lemonade_model,
+        )
+
+        consumers: list[ConsumerInfo] = []
+        if groups:
+            for group_name, user_count in groups:
+                effective_rate_limit = (rate_limit_per_user or self._cfg.rate_limit_tokens) * user_count
+                effective_time_window = time_window or self._cfg.rate_limit_window
+                consumer = self.create_consumer(
+                    username=f"group-{group_name}",
+                    rate_limit=effective_rate_limit,
+                    time_window=effective_time_window,
+                )
+                consumers.append(
+                    ConsumerInfo(
+                        username=consumer.username,
+                        api_key=consumer.api_key,
+                        rate_limit=effective_rate_limit,
+                        time_window=effective_time_window,
+                        group_name=group_name,
+                        user_count=user_count,
+                    )
+                )
 
         return consumers
 

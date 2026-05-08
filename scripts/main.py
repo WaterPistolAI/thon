@@ -667,45 +667,6 @@ Examples:
                 "rate_limit": consumer.rate_limit,
                 "time_window": consumer.time_window,
             })
-
-<<<<<<< HEAD
-    gateway_consumers: list[dict] = []
-    if args.gateway:
-        from apisix_gateway import ApisixGatewayManager
-
-        admin_key = os.getenv("GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1")
-        gateway_mgr = ApisixGatewayManager(
-            admin_url="http://127.0.0.1:9180",
-            admin_key=admin_key,
-            redis_host=args.gateway_redis_host,
-            redis_port=6379,
-        )
-
-        lemonade_host = os.getenv("LEMONADE_HOST", "127.0.0.1")
-        lemonade_port = os.getenv("LEMONADE_PORT", "13305")
-        lemonade_url = f"http://{lemonade_host}:{lemonade_port}"
-        lemonade_api_key = os.getenv("LEMONADE_API_KEY")
-
-        gateway_mgr.create_ai_route(
-            lemonade_url=lemonade_url,
-            lemonade_api_key=lemonade_api_key,
-        )
-
-        for user in users:
-            consumer = gateway_mgr.create_consumer(
-                username=user.label,
-                rate_limit=args.gateway_rate_limit,
-                time_window=args.gateway_time_window,
-            )
-            gateway_consumers.append({
-                "user": user,
-                "api_key": consumer.api_key,
-                "rate_limit": consumer.rate_limit,
-                "time_window": consumer.time_window,
-            })
-
-=======
->>>>>>> 34a6d5e (feat(gateway): add APISIX AI Gateway integration with rate limiting)
     try:
         tasks = []
         for i, user in enumerate(users):

@@ -159,6 +159,9 @@ class GatewayConfig:
     rate_limit_window: int = field(
         default_factory=lambda: int(os.getenv("GATEWAY_RATE_LIMIT_WINDOW", "60"))
     )
+    gateway_mode: str = field(
+        default_factory=lambda: os.getenv("GATEWAY_MODE", "per-user")
+    )
 
 
 @dataclass
