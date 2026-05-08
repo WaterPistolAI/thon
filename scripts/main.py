@@ -175,6 +175,41 @@ def _resolve_file_content(
     return None
 
 
+def _ensure_docker_volume(volume_name: str) -> None:
+    """Create a Docker named volume if it does not already exist."""
+    try:
+        subprocess.run(
+            ["docker", "volume", "create", volume_name],
+            capture_output=True,
+            check=True,
+            timeout=30,
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"Warning: Failed to create Docker volume '{volume_name}': {e}")
+
+
+def _ensure_volumes_for_users(
+    db_user_map: dict[tuple[str, str], object]
+) -> None:
+    """Ensure all PVC volumes referenced by DB user records exist."""
+    ensured = 0
+    for db_user in db_user_map.values():
+        if not hasattr(db_user, "workspace_path") or not db_user.workspace_path:
+            continue
+        if db_user.workspace_path.startswith("thon-"):
+            _ensure_docker_volume(db_user.workspace_path)
+            ensured += 1
+        if (
+            hasattr(db_user, "storage_path")
+            and db_user.storage_path
+            and db_user.storage_path.startswith("thon-")
+        ):
+            _ensure_docker_volume(db_user.storage_path)
+            ensured += 1
+    if ensured:
+        print(f"  Ensured {ensued} Docker volume(s) exist")
+
+
 def generate_password(length: int = 24) -> str:
     return secrets.token_urlsafe(length)
 
@@ -732,6 +767,8 @@ Examples:
                 db_user_map[(gname, db_u.username)] = db_u
     except Exception:
         pass
+
+    _ensure_volumes_for_users(db_user_map)
 
     instances: list[SandboxInstance] = []
 
