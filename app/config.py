@@ -95,7 +95,7 @@ class AppConfig:
     nginx: NginxConfig = field(default_factory=NginxConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     groups_file: Optional[Path] = None
-    workspace_dir: Optional[str] = field(default_factory=lambda: os.getenv("THON_WORKSPACE_DIR"))
+    workspace_dir: str = field(default_factory=lambda: os.getenv("THON_WORKSPACE_DIR", str(Path.home() / ".thon" / "workspace")))
 
     @classmethod
     def from_env(cls, groups_file: Optional[str] = None) -> "AppConfig":

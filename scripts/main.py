@@ -84,7 +84,7 @@ import yaml
 from opensandbox import Sandbox
 from opensandbox.config import ConnectionConfig
 from opensandbox.models.execd import RunCommandOpts
-from opensandbox.models.sandboxes import Host, Volume
+from opensandbox.models.sandboxes import Host, PVC, Volume
 
 from nginx_config import NginxConfigGenerator
 from ssl_cert import SSLCertificateGenerator
@@ -232,11 +232,32 @@ async def create_instance(
     workspace_dir: Optional[str] = None,
     lemonade_config: Optional[str] = None,
     vscode_settings: Optional[str] = None,
+    db_user: Optional[object] = None,
 ) -> SandboxInstance:
     env = {"PYTHON_VERSION": python_version}
 
     volumes: list[Volume] | None = None
-    if workspace_dir:
+    if db_user and hasattr(db_user, "workspace_path") and db_user.workspace_path and db_user.workspace_path.startswith("thon-"):
+        volumes = [
+            Volume(
+                name="workspace",
+                pvc=PVC(claimName=db_user.workspace_path),
+                mountPath="/workspace",
+            ),
+        ]
+        if db_user.storage_path and db_user.storage_path.startswith("thon-"):
+            volumes.append(
+                Volume(
+                    name="storage",
+                    pvc=PVC(claimName=db_user.storage_path),
+                    mountPath="/storage",
+                    readOnly=False,
+                ),
+            )
+        print(f"[{user.label}] Mounting PVC volumes: {db_user.workspace_path} -> /workspace")
+        if len(volumes) > 1:
+            print(f"[{user.label}]   storage: {db_user.storage_path} -> /storage")
+    elif workspace_dir:
         host_path = os.path.join(workspace_dir, user.workspace)
         os.makedirs(host_path, exist_ok=True)
         volumes = [
@@ -551,11 +572,26 @@ Examples:
     )
     sandbox_timeout = timedelta(minutes=args.timeout) if args.timeout > 0 else None
 
+    db_user_map: dict[tuple[str, str], object] = {}
+    try:
+        from app.db import GroupRecord as DBGroupRecord, UserRecord as DBUserRecord, get_session as db_get_session
+        from sqlmodel import select as sql_select
+        with db_get_session(os.getenv("THON_DB_PATH")) as session:
+            group_name_map: dict[str, str] = {}
+            for g in session.exec(sql_select(DBGroupRecord)).all():
+                group_name_map[g.id] = g.name
+            for db_u in session.exec(sql_select(DBUserRecord)).all():
+                gname = group_name_map.get(db_u.group_id, "default")
+                db_user_map[(gname, db_u.username)] = db_u
+    except Exception:
+        pass
+
     instances: list[SandboxInstance] = []
 
     try:
         tasks = []
         for i, user in enumerate(users):
+            db_user = db_user_map.get((user.group, user.username))
             tasks.append(
                 create_instance(
                     user=user,
@@ -569,6 +605,7 @@ Examples:
                     workspace_dir=args.workspace_dir,
                     lemonade_config=args.lemonade,
                     vscode_settings=args.vscode_settings,
+                    db_user=db_user,
                 )
             )
 

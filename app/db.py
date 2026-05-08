@@ -67,7 +67,15 @@ class GroupRecord(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    users: list["UserRecord"] = Field(default_factory=list, exclude=True)
+
+class GroupRecordWithUsers(SQLModel):
+    """GroupRecord with users populated for API responses."""
+
+    id: str
+    name: str
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    users: list["UserRecord"] = []
 
 
 class UserRecord(SQLModel, table=True):

@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from app.db import GroupRecord, UserRecord
+from app.db import GroupRecordWithUsers, UserRecord
 from app.services.groups_service import (
     DuplicateError,
     GroupNotFoundError,
@@ -61,15 +61,15 @@ def _handle_error(e: Exception) -> HTTPException:
     return HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("", response_model=list[GroupRecord])
-async def list_groups() -> list[GroupRecord]:
+@router.get("", response_model=list[GroupRecordWithUsers])
+async def list_groups() -> list[GroupRecordWithUsers]:
     """List all groups with their users."""
     svc = _get_service()
     return svc.list_groups()
 
 
-@router.post("", response_model=GroupRecord, status_code=201)
-async def create_group(req: CreateGroupRequest) -> GroupRecord:
+@router.post("", response_model=GroupRecordWithUsers, status_code=201)
+async def create_group(req: CreateGroupRequest) -> GroupRecordWithUsers:
     """Create a new group."""
     svc = _get_service()
     try:
@@ -85,8 +85,8 @@ async def export_groups() -> dict:
     return svc.export_to_yaml()
 
 
-@router.get("/{group_id}", response_model=GroupRecord)
-async def get_group(group_id: str) -> GroupRecord:
+@router.get("/{group_id}", response_model=GroupRecordWithUsers)
+async def get_group(group_id: str) -> GroupRecordWithUsers:
     """Get a single group by UUID."""
     svc = _get_service()
     try:
@@ -95,8 +95,8 @@ async def get_group(group_id: str) -> GroupRecord:
         raise _handle_error(e) from e
 
 
-@router.put("/{group_id}", response_model=GroupRecord)
-async def update_group(group_id: str, req: UpdateGroupRequest) -> GroupRecord:
+@router.put("/{group_id}", response_model=GroupRecordWithUsers)
+async def update_group(group_id: str, req: UpdateGroupRequest) -> GroupRecordWithUsers:
     """Rename a group."""
     svc = _get_service()
     try:

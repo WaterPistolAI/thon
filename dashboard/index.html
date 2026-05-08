@@ -424,69 +424,10 @@
   <div class="modal-overlay" id="add-user-modal">
     <div class="modal">
       <div class="modal-title">Add User</div>
-      <div class="form-group">
-        <label class="form-label">Username</label>
-        <input type="text" class="form-input" id="add-user-username" placeholder="e.g. alice">
-        <input type="hidden" id="add-user-group-id">
-      </div>
-      <div class="modal-actions">
-        <button class="btn" onclick="closeAddUserModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="addUser()">Add</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Edit User Modal -->
-  <div class="modal-overlay" id="edit-user-modal">
-    <div class="modal">
-      <div class="modal-title">Rename User</div>
-      <div class="form-group">
-        <label class="form-label">Username</label>
-        <input type="text" class="form-input" id="edit-user-username">
-        <input type="hidden" id="edit-user-id">
-        <input type="hidden" id="edit-user-group-id">
-      </div>
-      <div class="modal-actions">
-        <button class="btn" onclick="closeEditUserModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveUser()">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Toast container -->
-  <div class="toast-container" id="toast-container"></div>
-
-  <!-- Create Group Modal -->
-  <div class="modal-overlay" id="create-group-modal">
-    <div class="modal">
-      <div class="modal-title">Create Group</div>
-      <div class="form-group">
-        <label class="form-label">Group Name</label>
-        <input type="text" class="form-input" id="new-group-name" placeholder="e.g. alpha">
-      </div>
-      <div class="modal-actions">
-        <button class="btn" onclick="closeCreateGroupModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="createGroup()">Create</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Add User Modal -->
-  <div class="modal-overlay" id="add-user-modal">
-    <div class="modal">
-      <div class="modal-title">Add User</div>
       <input type="hidden" id="add-user-group-id">
       <div class="form-group">
         <label class="form-label">Username</label>
-        <input type="text" class="form-input" id="new-user-username" placeholder="e.g. alice">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Workspace Path</label>
-        <input type="text" class="form-input" id="new-user-workspace" placeholder="/workspace/alpha/alice">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Storage Path</label>
-        <input type="text" class="form-input" id="new-user-storage" placeholder="/vs-code-remote/alpha/alice">
+        <input type="text" class="form-input" id="add-user-username" placeholder="e.g. alice">
       </div>
       <div class="modal-actions">
         <button class="btn" onclick="closeAddUserModal()">Cancel</button>
@@ -505,20 +446,15 @@
         <label class="form-label">Username</label>
         <input type="text" class="form-input" id="edit-user-username">
       </div>
-      <div class="form-group">
-        <label class="form-label">Workspace Path</label>
-        <input type="text" class="form-input" id="edit-user-workspace">
-      </div>
-      <div class="form-group">
-        <label class="form-label">Storage Path</label>
-        <input type="text" class="form-input" id="edit-user-storage">
-      </div>
       <div class="modal-actions">
         <button class="btn" onclick="closeEditUserModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveEditUser()">Save</button>
+        <button class="btn btn-primary" onclick="saveUser()">Save</button>
       </div>
     </div>
   </div>
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toast-container"></div>
 
   <script src="/static/app.js"></script>
 </body>

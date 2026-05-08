@@ -15,6 +15,8 @@
 """Groups service for CRUD operations on groups and users stored in SQLite."""
 
 import logging
+import os
+import subprocess
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -23,6 +25,7 @@ from sqlmodel import select
 
 from app.db import (
     GroupRecord,
+    GroupRecordWithUsers,
     UserRecord,
     create_group as db_create_group,
     create_user as db_create_user,
@@ -61,42 +64,66 @@ class GroupsService:
 
     def __init__(self, db_path: Optional[str] = None, workspace_dir: Optional[str] = None) -> None:
         self._db_path = db_path
-        self._workspace_dir = workspace_dir
+        self._workspace_dir = os.path.expanduser(workspace_dir) if workspace_dir else None
+
+    @staticmethod
+    def _ensure_volume(volume_name: str) -> None:
+        """Create a Docker named volume if it does not already exist."""
+        try:
+            subprocess.run(
+                ["docker", "volume", "create", volume_name],
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            logger.warning("Failed to create Docker volume '%s': %s", volume_name, e)
+
+    def _with_users(self, group: GroupRecord) -> GroupRecordWithUsers:
+        users = db_get_users(group.id, db_path=self._db_path)
+        return GroupRecordWithUsers(
+            id=group.id,
+            name=group.name,
+            created_at=group.created_at,
+            updated_at=group.updated_at,
+            users=users,
+        )
 
     # ── Groups ────────────────────────────────────────────────────────
 
-    def list_groups(self) -> list[GroupRecord]:
+    def list_groups(self) -> list[GroupRecordWithUsers]:
         """Return all groups with their users populated."""
         groups = db_get_groups(db_path=self._db_path)
-        for group in groups:
-            group.users = db_get_users(group.id, db_path=self._db_path)
-        return groups
+        return [self._with_users(g) for g in groups]
 
-    def get_group(self, group_id: str) -> GroupRecord:
+    def get_group(self, group_id: str) -> GroupRecordWithUsers:
         """Fetch a single group by UUID."""
         group = db_get_group(group_id, db_path=self._db_path)
         if group is None:
             raise GroupNotFoundError(f"Group {group_id} not found")
-        group.users = db_get_users(group_id, db_path=self._db_path)
-        return group
+        return self._with_users(group)
 
-    def create_group(self, name: str) -> GroupRecord:
+    def create_group(self, name: str) -> GroupRecordWithUsers:
         """Create a new group with an auto-generated UUID."""
         try:
             group = db_create_group(name, db_path=self._db_path)
         except ValueError as e:
             raise DuplicateError(str(e)) from e
-        group.users = []
         logger.info("Created group '%s' (id=%s)", name, group.id)
-        return group
+        return GroupRecordWithUsers(
+            id=group.id,
+            name=group.name,
+            created_at=group.created_at,
+            updated_at=group.updated_at,
+            users=[],
+        )
 
-    def update_group(self, group_id: str, name: str) -> GroupRecord:
+    def update_group(self, group_id: str, name: str) -> GroupRecordWithUsers:
         """Rename an existing group."""
         group = db_rename_group(group_id, name, db_path=self._db_path)
         if group is None:
             raise GroupNotFoundError(f"Group {group_id} not found")
-        group.users = db_get_users(group_id, db_path=self._db_path)
-        return group
+        return self._with_users(group)
 
     def delete_group(self, group_id: str) -> None:
         """Delete a group and all its users (cascade)."""
@@ -114,21 +141,18 @@ class GroupsService:
     ) -> UserRecord:
         """Add a user to a group with an auto-generated UUID.
 
-        Derives ``workspace_path`` and ``storage_path``:
-          - workspace_path: ``{ws_dir}/{group_name}/{username}``
-          - storage_path:   ``{ws_dir}/.storage/{user_uuid}``
+        Derives ``workspace_path`` and ``storage_path`` as Docker named
+        volume names (PVC claimName) used by the OpenSandbox ``pvc`` backend:
+          - workspace_path: ``thon-workspace-{group_name}-{username}``
+          - storage_path:   ``thon-storage-{user_uuid}``
         """
-        ws_dir = workspace_dir or self._workspace_dir
         group = db_get_group(group_id, db_path=self._db_path)
         if group is None:
             raise GroupNotFoundError(f"Group {group_id} not found")
 
-        workspace_path: Optional[str] = None
-        storage_path: Optional[str] = None
         user_id = str(uuid.uuid4())
-        if ws_dir:
-            workspace_path = f"{ws_dir}/{group.name}/{username}"
-            storage_path = f"{ws_dir}/.storage/{user_id}"
+        workspace_path = f"thon-workspace-{group.name}-{username}"
+        storage_path = f"thon-storage-{user_id}"
 
         user = db_create_user(
             group_id=group_id,
@@ -137,6 +161,8 @@ class GroupsService:
             storage_path=storage_path,
             db_path=self._db_path,
         )
+        self._ensure_volume(workspace_path)
+        self._ensure_volume(storage_path)
         logger.info("Created user '%s/%s' (id=%s)", group.name, username, user.id)
         return user
 
@@ -158,10 +184,9 @@ class GroupsService:
     def backfill_storage_paths(self) -> int:
         """Populate workspace_path and storage_path for users missing them.
 
-        Uses ``self._workspace_dir`` to derive paths. Returns count updated.
+        Derives Docker named volume names (PVC claimName) and creates the
+        volumes. Returns count updated.
         """
-        if not self._workspace_dir:
-            return 0
         updated = 0
         with get_session(self._db_path) as session:
             users = session.exec(
@@ -172,10 +197,12 @@ class GroupsService:
                     select(GroupRecord).where(GroupRecord.id == user.group_id)
                 ).first()
                 group_name = group.name if group else "default"
-                user.workspace_path = f"{self._workspace_dir}/{group_name}/{user.username}"
-                user.storage_path = f"{self._workspace_dir}/.storage/{user.id}"
+                user.workspace_path = f"thon-workspace-{group_name}-{user.username}"
+                user.storage_path = f"thon-storage-{user.id}"
                 user.updated_at = datetime.utcnow()
                 session.add(user)
+                self._ensure_volume(user.workspace_path)
+                self._ensure_volume(user.storage_path)
                 updated += 1
             if updated:
                 session.commit()
@@ -216,6 +243,5 @@ class GroupsService:
         """Export current groups/users to a groups.yaml-compatible dict."""
         groups: dict[str, dict] = {}
         for group in self.list_groups():
-            users = getattr(group, "users", [])
-            groups[group.name] = {"users": [u.username for u in users]}
+            groups[group.name] = {"users": [u.username for u in group.users]}
         return {"groups": groups}
