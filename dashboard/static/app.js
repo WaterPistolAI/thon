@@ -12,6 +12,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(btn => {
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
     if (btn.dataset.page === 'instances') refreshInstances();
     if (btn.dataset.page === 'lemonade') refreshLemonade();
+    if (btn.dataset.page === 'settings') loadSettings();
   });
 });
 
@@ -81,6 +82,10 @@ function truncId(id) {
   return id.length > 12 ? id.slice(0, 12) + '...' : id;
 }
 
+function fullId(id) {
+  return id || '';
+}
+
 function renderInstances(instances) {
   const tbody = document.getElementById('instances-body');
   const empty = document.getElementById('instances-empty');
@@ -95,11 +100,18 @@ function renderInstances(instances) {
   tbody.innerHTML = instances.map(inst => {
     const checked = selectedIds.has(inst.id) ? 'checked' : '';
     const label = inst.user ? inst.user.group + '/' + inst.user.username : '-';
-    const endpoint = inst.url
-      ? '<a href="' + inst.url + '" target="_blank" class="endpoint-link">' + inst.url + '</a>'
-      : '-';
+    const endpointParts = [];
+    if (inst.public_url) {
+      endpointParts.push('<a href="' + inst.public_url + '" target="_blank" class="endpoint-link">' + inst.public_url + '</a>');
+    }
+    if (inst.endpoint) {
+      const isDup = inst.public_url && inst.public_url.replace('https://', '').replace(/\/$/, '').endsWith(inst.endpoint);
+      if (!isDup) endpointParts.push('<span class="endpoint-internal">' + inst.endpoint + '</span>');
+    }
+    const endpoint = endpointParts.length ? endpointParts.join('<br>') : '-';
     const isRunning = inst.state === 'Running';
     const isPaused = inst.state === 'Paused';
+    const isStopped = inst.state === 'Terminated' || inst.state === 'Failed';
 
     return '<tr data-id="' + inst.id + '">'
       + '<td><input type="checkbox" ' + checked + ' onchange="toggleSelect(\'' + inst.id + '\', this.checked)"></td>'
@@ -110,6 +122,7 @@ function renderInstances(instances) {
       + '<td>'
       + (isRunning ? '<button class="btn btn-warning btn-sm" onclick="actionInstance(\'' + inst.id + '\',\'pause\')">Pause</button> ' : '')
       + (isPaused ? '<button class="btn btn-success btn-sm" onclick="actionInstance(\'' + inst.id + '\',\'resume\')">Resume</button> ' : '')
+      + (isStopped ? '<button class="btn btn-primary btn-sm" onclick="actionInstance(\'' + inst.id + '\',\'recreate\')">Restart</button> ' : '')
       + '<button class="btn btn-danger btn-sm" onclick="actionInstance(\'' + inst.id + '\',\'kill\')">Kill</button>'
       + '</td>'
       + '</tr>';
@@ -154,6 +167,9 @@ async function actionInstance(id, action) {
     if (action === 'kill') {
       await api('/api/instances/' + id, { method: 'DELETE' });
       showToast('Instance terminated', 'info');
+    } else if (action === 'recreate') {
+      await api('/api/instances/' + id + '/recreate', { method: 'POST' });
+      showToast('Instance recreated', 'success');
     } else {
       await api('/api/instances/' + id + '/' + action, { method: 'POST' });
       showToast('Instance ' + action + 'd', 'success');
@@ -256,6 +272,31 @@ async function refreshLemonade() {
     }
   } catch (e) {
     showToast('Failed to load Lemonade data: ' + e.message, 'error');
+  }
+}
+
+// ── Settings ──────────────────────────────────────────────────────
+
+async function loadSettings() {
+  try {
+    const data = await api('/api/instances/settings/external_ip');
+    document.getElementById('setting-external-ip').value = data.value || '';
+  } catch (e) {
+    // ignore
+  }
+}
+
+async function saveExternalIp() {
+  const value = document.getElementById('setting-external-ip').value.trim();
+  try {
+    await api('/api/instances/settings/external_ip', {
+      method: 'PUT',
+      body: JSON.stringify({ key: 'external_ip', value: value }),
+    });
+    showToast('External IP saved', 'success');
+    setTimeout(refreshInstances, 300);
+  } catch (e) {
+    showToast('Failed to save: ' + e.message, 'error');
   }
 }
 

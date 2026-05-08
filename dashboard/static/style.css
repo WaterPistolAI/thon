@@ -512,6 +512,12 @@ tbody tr:last-child td { border-bottom: none; }
   font-size: 12px;
 }
 
+.endpoint-internal {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .sidebar { display: none; }

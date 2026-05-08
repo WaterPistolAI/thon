@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """
-SSL Certificate Generator for VS Code Remote Example
+SSL Certificate Generator forTHON Example
 
 Uses mkcert (preferred) to generate CA-trusted certificates that browsers
 accept without warnings. Falls back to openssl if mkcert is not installed.
@@ -379,7 +379,7 @@ extendedKeyUsage = serverAuth, clientAuth
 def main():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Generate SSL certs for VS Code Remote")
+    parser = argparse.ArgumentParser(description="Generate SSL certs forTHON")
     parser.add_argument("--ip", type=str, help="External IP for SAN")
     parser.add_argument("--output-dir", type=str, default="/etc/nginx/ssl")
     args = parser.parse_args()

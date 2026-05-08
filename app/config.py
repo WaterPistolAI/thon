@@ -70,7 +70,14 @@ class NginxConfig:
     """Nginx reverse proxy settings."""
 
     ssl_dir: str = "/etc/nginx/ssl"
-    external_ip: Optional[str] = None
+    external_ip: Optional[str] = field(default_factory=lambda: os.getenv("EXTERNAL_IP"))
+
+
+@dataclass
+class DatabaseConfig:
+    """SQLite database settings."""
+
+    path: str = field(default_factory=lambda: os.getenv("THON_DB_PATH", str(Path.home() / ".thon" / "thon.db")))
 
 
 @dataclass
@@ -82,6 +89,7 @@ class AppConfig:
     dashboard: DashboardConfig = field(default_factory=DashboardConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     nginx: NginxConfig = field(default_factory=NginxConfig)
+    database: DatabaseConfig = field(default_factory=DatabaseConfig)
     groups_file: Optional[Path] = None
     workspace_dir: Optional[str] = None
 

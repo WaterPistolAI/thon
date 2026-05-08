@@ -3,19 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>VS Code Remote Client</title>
+  <title>THON Client</title>
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
   <div class="layout">
     <nav class="sidebar">
-      <div class="sidebar-brand"><span>&#9670;</span> VS Code Remote</div>
+      <div class="sidebar-brand"><span>&#9670;</span>THON</div>
       <div class="sidebar-nav">
         <button class="nav-item active" data-page="instances">
           <span class="nav-icon">&#9633;</span> Instances
         </button>
         <button class="nav-item" data-page="lemonade">
           <span class="nav-icon">&#9889;</span> Lemonade Server
+        </button>
+        <button class="nav-item" data-page="settings">
+          <span class="nav-icon">&#9881;</span> Settings
         </button>
       </div>
       <div class="sidebar-footer">
@@ -165,6 +168,23 @@
           <div id="lemonade-models-empty" class="empty-state" style="display:none;">
             <p>No models configured</p>
           </div>
+        </div>
+      </section>
+
+      <!-- Settings Page -->
+      <section id="page-settings" class="page-section">
+        <div class="page-header">
+          <h1 class="page-title">Settings</h1>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Network</div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">External IP</label>
+            <input type="text" class="form-input" id="setting-external-ip" placeholder="e.g. 52.162.90.16">
+          </div>
+          <button class="btn btn-primary" onclick="saveExternalIp()">Save</button>
         </div>
       </section>
     </main>

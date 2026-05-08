@@ -21,7 +21,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class InstanceState(str, Enum):
@@ -70,14 +70,18 @@ class InstanceInfo(BaseModel):
     state: InstanceState
     port: int
     endpoint: Optional[str] = None
+    public_url: Optional[str] = None
     password: Optional[str] = None
     image: Optional[str] = None
     created_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
     metadata: dict = Field(default_factory=dict)
 
+    @computed_field
     @property
     def url(self) -> Optional[str]:
+        if self.public_url:
+            return self.public_url
         if self.endpoint:
             return f"http://{self.endpoint}/"
         return None

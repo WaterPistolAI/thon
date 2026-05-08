@@ -60,6 +60,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 
 def resolve_path(path_str: str) -> Path:
@@ -83,6 +85,7 @@ from opensandbox.models.sandboxes import Host, Volume
 
 from nginx_config import NginxConfigGenerator
 from ssl_cert import SSLCertificateGenerator
+from app.db import upsert_record, mark_terminated, set_setting
 
 
 @dataclass
@@ -220,6 +223,7 @@ async def create_instance(
     image: str,
     python_version: str,
     timeout: timedelta,
+    external_ip: Optional[str] = None,
     secure: bool = False,
     workspace_dir: Optional[str] = None,
     lemonade_config: Optional[str] = None,
@@ -240,12 +244,20 @@ async def create_instance(
         ]
         print(f"[{user.label}] Bind-mounting {host_path} -> /workspace")
 
+    metadata = {
+        "group": user.group,
+        "username": user.username,
+        "port": str(port),
+        "managed-by": "thon-client",
+    }
+
     sandbox = await Sandbox.create(
         image,
         connection_config=config,
         env=env,
         timeout=timeout,
         volumes=volumes,
+        metadata=metadata,
     )
 
     endpoint = await sandbox.get_endpoint(port)
@@ -255,6 +267,17 @@ async def create_instance(
     print(
         f"[{user.label}] Endpoint: {endpoint_str} "
         f"(detected {network_mode} mode)"
+    )
+
+    upsert_record(
+        sandbox_id=sandbox.id if hasattr(sandbox, "id") else "",
+        group_name=user.group,
+        username=user.username,
+        port=endpoint_port,
+        endpoint=endpoint_str,
+        external_ip=external_ip,
+        image=image,
+        db_path=os.getenv("THON_DB_PATH"),
     )
 
     password = None
@@ -450,6 +473,9 @@ Examples:
         if external_ip:
             print(f"[Auto] Detected external IP: {external_ip}")
 
+    if external_ip:
+        set_setting("external_ip", external_ip, db_path=os.getenv("THON_DB_PATH"))
+
     domain = args.domain or os.getenv("SANDBOX_DOMAIN", "localhost:8080")
     api_key = args.api_key or os.getenv("SANDBOX_API_KEY")
     image = args.image or os.getenv("SANDBOX_IMAGE", "waterpistol/thon:latest")
@@ -514,6 +540,7 @@ Examples:
                     image=image,
                     python_version=python_version,
                     timeout=sandbox_timeout,
+                    external_ip=external_ip,
                     secure=args.secure,
                     workspace_dir=args.workspace_dir,
                     lemonade_config=args.lemonade,
@@ -628,6 +655,10 @@ Examples:
         for inst in instances:
             try:
                 await inst.sandbox.kill()
+                mark_terminated(
+                    inst.sandbox.id if hasattr(inst.sandbox, "id") else "",
+                    db_path=os.getenv("THON_DB_PATH"),
+                )
             except Exception as e:
                 print(f"  Note: Sandbox {inst.user.label} may already be terminated: {e}")
 
