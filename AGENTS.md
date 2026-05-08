@@ -67,6 +67,28 @@ lemonade config set llamacpp.backend=auto host=0.0.0.0
 
 # Run VS Code instances with Lemonade inference (injects kilo.json into each sandbox)
 python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+
+# AI Gateway: one-time install (APISIX, etcd, Redis)
+INSTALL_GATEWAY=true bash ./setup.sh
+# or: bash ./scripts/setup-apisix.sh
+
+# AI Gateway: setup with per-consumer API keys and rate limiting
+python ./scripts/apisix_gateway.py setup --groups groups.yaml --lemonade-url http://127.0.0.1:13305
+
+# AI Gateway: setup with Redis-backed rate limiting
+python ./scripts/apisix_gateway.py setup --groups groups.yaml --lemonade-url http://127.0.0.1:13305 --redis-host 127.0.0.1
+
+# AI Gateway: create a single consumer
+python ./scripts/apisix_gateway.py create-consumer --username alice --rate-limit 500
+
+# AI Gateway: check status
+python ./scripts/apisix_gateway.py status
+
+# AI Gateway: cleanup all consumers and routes
+python ./scripts/apisix_gateway.py cleanup
+
+# Run VS Code instances with AI Gateway (rate limiting + per-user API keys)
+python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
 ```
 
 ## Code Style
@@ -319,6 +341,115 @@ python lemonade_server.py run --groups groups.yaml --generate-keys --external-ip
 # Terminal 2: Start VS Code sandboxes with Lemonade inference
 python main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
 ```
+
+### AI Gateway (APISIX Rate Limiting & Per-Consumer Keys)
+
+An optional APISIX API Gateway provides token-based rate limiting and per-consumer API keys
+for LLM endpoints. When enabled, each user gets a unique API key and the gateway enforces
+token quotas using the `ai-rate-limiting` plugin. Redis-backed rate limiting ensures
+consistency across multiple gateway instances.
+
+**Components:**
+- **APISIX** — API gateway with `ai-proxy-multi` (LLM load balancing), `ai-rate-limiting`
+  (token-based rate limiting), and `key-auth` (per-consumer API keys) plugins
+- **etcd** — APISIX configuration store
+- **Redis** — Optional shared rate limit counter store (local policy used if not configured)
+
+**Installation:**
+```bash
+# Option 1: During initial setup
+INSTALL_GATEWAY=true bash ./setup.sh
+
+# Option 2: Standalone install script
+bash ./scripts/setup-apisix.sh
+```
+
+This installs `etcd-server`, `redis-server`, and `apisix` apt packages, starts services,
+and configures the APISIX admin key.
+
+**CLI Usage (`scripts/apisix_gateway.py`):**
+```bash
+# Full setup: create route + consumers from groups.yaml
+python scripts/apisix_gateway.py setup \
+  --groups groups.yaml \
+  --lemonade-url http://127.0.0.1:13305 \
+  --redis-host 127.0.0.1
+
+# Create a single consumer
+python scripts/apisix_gateway.py create-consumer --username alice --rate-limit 500
+
+# Delete a consumer
+python scripts/apisix_gateway.py delete-consumer --username alice
+
+# Check gateway status
+python scripts/apisix_gateway.py status
+
+# Remove all consumers and routes
+python scripts/apisix_gateway.py cleanup
+
+# Generate kilo.json pointing to gateway
+python scripts/apisix_gateway.py generate-kilo --username alice --api-key alice-key --external-ip 1.2.3.4
+```
+
+**Integration with `main.py`:**
+```bash
+# Run with gateway enabled (auto-creates consumers from groups.yaml)
+python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+
+# With Redis-backed rate limiting
+python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
+
+# Custom rate limits
+python main.py --groups groups.yaml --external-ip 1.2.3.4 \
+  --gateway --gateway-rate-limit 1000 --gateway-time-window 120
+```
+
+When `--gateway` is enabled:
+1. Gateway consumers are created BEFORE sandbox instances
+2. Each consumer gets `key-auth` credential + `ai-rate-limiting` plugin config
+3. A gateway-aware `kilo.json` is injected into each sandbox, pointing to the gateway
+   instead of directly to Lemonade
+4. Gateway cleanup runs in the `finally` block alongside nginx and sandbox cleanup
+
+**Rate Limiting Modes:**
+
+| Mode | `--gateway-redis-host` | Policy | Scope |
+|------|----------------------|--------|-------|
+| Local | (not set) | `local` | Per-gateway-instance counters |
+| Redis | `127.0.0.1` | `redis` | Shared across all gateway instances |
+
+**Consumer Configuration (APISIX Admin API):**
+
+Each consumer gets:
+- `key-auth` plugin with auto-generated 24-char API key
+- `ai-rate-limiting` plugin with `total_tokens` strategy per Lemonade instance
+
+**Dashboard API Endpoints:**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/gateway/status` | Gateway status (running, consumers, route, redis) |
+| `GET` | `/api/gateway/consumers` | List consumers with API keys and rate limits |
+| `POST` | `/api/gateway/consumers` | Create consumer |
+| `DELETE` | `/api/gateway/consumers/{username}` | Delete consumer |
+| `POST` | `/api/gateway/setup` | Full setup (route + consumers from DB groups) |
+| `POST` | `/api/gateway/route` | Create/update AI proxy route |
+| `DELETE` | `/api/gateway/route` | Delete AI proxy route |
+| `POST` | `/api/gateway/cleanup` | Remove all consumers and routes |
+
+**Environment Variables (Gateway):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GATEWAY_ENABLED` | `false` | Enable AI Gateway features in dashboard |
+| `GATEWAY_ADMIN_URL` | `http://127.0.0.1:9180` | APISIX Admin API URL |
+| `GATEWAY_ADMIN_KEY` | `edd1c9f034335f136f87ad84b625c8f1` | APISIX Admin API key |
+| `GATEWAY_PROXY_PORT` | `9080` | APISIX proxy port |
+| `GATEWAY_REDIS_HOST` | (none) | Redis host for rate limiting |
+| `GATEWAY_REDIS_PORT` | `6379` | Redis port |
+| `GATEWAY_REDIS_PASSWORD` | (none) | Redis password |
+| `GATEWAY_RATE_LIMIT_TOKENS` | `500` | Default token limit per consumer per time window |
+| `GATEWAY_RATE_LIMIT_WINDOW` | `60` | Rate limit time window in seconds |
 
 ## Guardrails
 
