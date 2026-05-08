@@ -668,6 +668,7 @@ Examples:
                 "time_window": consumer.time_window,
             })
 
+<<<<<<< HEAD
     gateway_consumers: list[dict] = []
     if args.gateway:
         from apisix_gateway import ApisixGatewayManager
@@ -703,6 +704,8 @@ Examples:
                 "time_window": consumer.time_window,
             })
 
+=======
+>>>>>>> 34a6d5e (feat(gateway): add APISIX AI Gateway integration with rate limiting)
     try:
         tasks = []
         for i, user in enumerate(users):
