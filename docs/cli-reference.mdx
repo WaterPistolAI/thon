@@ -65,6 +65,16 @@ python ./main.py [OPTIONS]
 | `--lemonade KILO_JSON` | string | (none) | Path to kilo.json for LLM config injection |
 | `--vscode-settings JSON` | string | (none) | VS Code settings file to inject |
 
+#### AI Gateway
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--gateway` | flag | false | Enable APISIX AI Gateway with rate limiting |
+| `--gateway-per-group` | flag | false | One consumer per group (shared API key) instead of per user |
+| `--gateway-redis-host HOST` | string | (none) | Redis host for shared rate limiting |
+| `--gateway-rate-limit N` | int | 500 | Token limit per consumer per time window |
+| `--gateway-time-window N` | int | 60 | Rate limit time window in seconds |
+
 #### Maintenance
 
 | Option | Type | Default | Description |
@@ -105,6 +115,20 @@ python main.py --groups groups.yaml --workspace-dir /vs-code-remote --external-i
 ```bash
 # Local LLM inference
 python main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+```
+
+#### With AI Gateway
+
+```bash
+# Per-user rate limiting (each user gets own API key)
+python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+
+# Per-group rate limiting (shared API key per group)
+python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
+
+# With Redis-backed rate limiting
+python main.py --groups groups.yaml --external-ip 1.2.3.4 \
+    --gateway --gateway-redis-host 127.0.0.1
 ```
 
 #### Custom Settings
@@ -368,3 +392,113 @@ python lemonade_server.py generate-kilo-config --admin-api-key YOUR_KEY --extern
 |----------|-------------|
 | `LEMONADE_API_KEY` | API key for regular endpoints |
 | `LEMONADE_ADMIN_API_KEY` | API key for admin endpoints |
+
+### AI Gateway
+
+| Variable | Description |
+|----------|-------------|
+| `GATEWAY_ENABLED` | Enable AI Gateway (true/false) |
+| `GATEWAY_ADMIN_URL` | APISIX Admin API URL |
+| `GATEWAY_ADMIN_KEY` | APISIX Admin API key |
+| `GATEWAY_PROXY_PORT` | APISIX proxy port |
+| `GATEWAY_REDIS_HOST` | Redis host for rate limiting |
+| `GATEWAY_REDIS_PORT` | Redis port |
+| `GATEWAY_REDIS_PASSWORD` | Redis password |
+| `GATEWAY_RATE_LIMIT_TOKENS` | Token limit per consumer per window |
+| `GATEWAY_RATE_LIMIT_WINDOW` | Time window in seconds |
+| `GATEWAY_MODE` | Consumer mode: per-user or per-group |
+
+---
+
+## apisix_gateway.py - AI Gateway Manager
+
+### Synopsis
+
+```bash
+python scripts/apisix_gateway.py COMMAND [OPTIONS]
+```
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `setup` | Full gateway setup: create route + consumers from groups.yaml |
+| `create-consumer` | Create a single consumer with API key |
+| `delete-consumer` | Delete a consumer by username |
+| `generate-kilo` | Generate kilo.json for a consumer |
+| `status` | Check gateway status |
+| `cleanup` | Remove all consumers and routes |
+
+### setup
+
+```bash
+python scripts/apisix_gateway.py setup [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--groups FILE` | (none) | Path to groups.yaml |
+| `--group GROUP` | (all) | Filter to single group |
+| `--lemonade-url URL` | http://127.0.0.1:13305 | Lemonade server URL |
+| `--lemonade-api-key KEY` | (none) | Lemonade API key |
+| `--lemonade-model MODEL` | user.gemma-4-31b-it | Lemonade model name |
+| `--per-group` | false | One consumer per group with shared API key |
+| `--admin-key KEY` | (default) | APISIX Admin API key |
+| `--admin-port PORT` | 9180 | APISIX Admin API port |
+| `--proxy-port PORT` | 9080 | APISIX proxy port |
+| `--redis-host HOST` | (none) | Redis host for rate limiting |
+| `--redis-port PORT` | 6379 | Redis port |
+| `--redis-password PW` | (none) | Redis password |
+| `--rate-limit N` | 500 | Token limit per consumer per time window |
+| `--time-window N` | 60 | Rate limit time window in seconds |
+| `--generate-kilo` | false | Generate kilo.json for each consumer |
+| `--external-ip IP` | (auto) | External IP for kilo.json base URL |
+
+### create-consumer
+
+```bash
+python scripts/apisix_gateway.py create-consumer --username alice [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--username` | (required) | Consumer username |
+| `--api-key` | (auto) | API key (auto-generated if omitted) |
+| `--rate-limit` | 500 | Token limit per time window |
+| `--time-window` | 60 | Time window in seconds |
+
+### generate-kilo
+
+```bash
+python scripts/apisix_gateway.py generate-kilo --username alice --api-key KEY [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--username` | (required) | Consumer username |
+| `--api-key` | (required) | Consumer API key |
+| `--proxy-port` | 9080 | APISIX proxy port |
+| `--external-ip` | 127.0.0.1 | External IP for gateway URL |
+| `--model` | user.gemma-4-31b-it | Model name for kilo.json |
+
+### Examples
+
+```bash
+# Full setup from groups.yaml
+python scripts/apisix_gateway.py setup --groups groups.yaml \
+    --lemonade-url http://127.0.0.1:13305
+
+# Per-group setup with Redis rate limiting
+python scripts/apisix_gateway.py setup --groups groups.yaml \
+    --lemonade-url http://127.0.0.1:13305 --per-group --redis-host 127.0.0.1
+
+# Create single consumer
+python scripts/apisix_gateway.py create-consumer --username alice --rate-limit 500
+
+# Generate kilo.json
+python scripts/apisix_gateway.py generate-kilo --username alice --api-key KEY \
+    --external-ip 1.2.3.4
+
+# Cleanup all gateway resources
+python scripts/apisix_gateway.py cleanup
+```

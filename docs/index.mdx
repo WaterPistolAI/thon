@@ -13,10 +13,11 @@ via Lemonade Server.
 
 - **Multi-Instance**: Multiple concurrent VS Code sandboxes from a single command
 - **Groups-Based**: Define users and groups in YAML for automatic instance creation
-- **Web Dashboard**: Streamlit dashboard for instance, group, and Lemonade management
+- **Web Dashboard**: Streamlit dashboard for instance, group, Lemonade, and gateway management
 - **SSL/TLS**: Automatic nginx reverse proxy with mkcert or openssl certificates
 - **Persistent Workspaces**: Optional host bind mounts for workspace persistence
 - **Local LLM**: Optional Lemonade Server integration for local inference
+- **AI Gateway**: Optional APISIX gateway with per-user or per-group rate limiting and API keys
 - **Kilo Code Ready**: Auto-generated config for Kilo Code extension
 
 ## Quick Start
@@ -83,6 +84,12 @@ Each user gets their own VS Code sandbox at `https://<ip>/<endpoint_path>/`.
 │  │              OpenAI-compatible API                   │    │
 │  │                   :13305                             │    │
 │  └─────────────────────────────────────────────────────┘    │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │         APISIX AI Gateway (Optional)                 │    │
+│  │    Rate limiting + per-user/group API keys           │    │
+│  │                   :9080                              │    │
+│  └─────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -91,11 +98,12 @@ Each user gets their own VS Code sandbox at `https://<ip>/<endpoint_path>/`.
 | Component | Role |
 |-----------|------|
 | **main.py** | Orchestrates sandbox creation, nginx configs, workspace setup |
-| **Streamlit Dashboard** | Web UI for instance, group, and Lemonade management (:8501) |
-| **FastAPI REST API** | Programmatic API for instances, groups, Lemonade, auth (:8100) |
+| **Streamlit Dashboard** | Web UI for instance, group, Lemonade, and gateway management (:8501) |
+| **FastAPI REST API** | Programmatic API for instances, groups, Lemonade, gateway, auth (:8100) |
 | **nginx** | SSL termination + WebSocket proxy (per-port server blocks) |
 | **code-server** | VS Code in the browser, runs HTTP inside each sandbox |
 | **Lemonade Server** | Optional local LLM inference (OpenAI-compatible API) |
+| **APISIX Gateway** | Optional rate limiting with per-user or per-group API keys |
 
 ### Network Modes
 
@@ -111,6 +119,7 @@ Network mode is **auto-detected** from the server-returned endpoint format:
 - [Installation Guide](./installation) - Detailed setup instructions
 - [Dashboard](./dashboard) - Streamlit web dashboard for instance management
 - [Lemonade Server](./lemonade-server) - Local LLM inference setup
+- [AI Gateway](./gateway) - APISIX rate limiting and API key management
 - [Configuration](./configuration) - Full configuration reference
 - [CLI Reference](./cli-reference) - Command-line options
 - [Troubleshooting](./troubleshooting) - Common issues and solutions

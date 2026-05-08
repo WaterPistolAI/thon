@@ -176,7 +176,11 @@ class AppConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     groups_file: Optional[Path] = None
-    workspace_dir: str = field(default_factory=lambda: os.getenv("THON_WORKSPACE_DIR", str(Path.home() / ".thon" / "workspace")))
+    workspace_dir: str = field(
+        default_factory=lambda: os.getenv(
+            "THON_WORKSPACE_DIR", str(Path.home() / ".thon" / "workspace")
+        )
+    )
 
     @classmethod
     def from_env(cls, groups_file: Optional[str] = None) -> "AppConfig":

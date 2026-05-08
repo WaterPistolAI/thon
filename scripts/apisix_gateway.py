@@ -436,6 +436,12 @@ Examples:
         help="Generate kilo.json for each consumer",
     )
     setup_parser.add_argument(
+        "--per-group",
+        action="store_true",
+        default=False,
+        help="Create one consumer per group with shared API key instead of per user",
+    )
+    setup_parser.add_argument(
         "--external-ip",
         type=str,
         help="External IP for kilo.json base URL",
@@ -530,18 +536,34 @@ Examples:
             with open(args.groups) as f:
                 data = yaml.safe_load(f)
             groups = data.get("groups", {})
-            for group_name, group_data in groups.items():
-                if args.group and group_name != args.group:
-                    continue
-                for username in group_data.get("users", []):
+            if args.per_group:
+                for group_name, group_data in groups.items():
+                    if args.group and group_name != args.group:
+                        continue
+                    group_users = group_data.get("users", [])
+                    user_count = len(group_users)
+                    group_rate_limit = args.rate_limit * user_count
                     users.append(
                         ConsumerConfig(
-                            username=f"{group_name}-{username}",
+                            username=f"group-{group_name}",
                             api_key=secrets.token_urlsafe(24),
-                            rate_limit=args.rate_limit,
+                            rate_limit=group_rate_limit,
                             time_window=args.time_window,
                         )
                     )
+            else:
+                for group_name, group_data in groups.items():
+                    if args.group and group_name != args.group:
+                        continue
+                    for username in group_data.get("users", []):
+                        users.append(
+                            ConsumerConfig(
+                                username=f"{group_name}-{username}",
+                                api_key=secrets.token_urlsafe(24),
+                                rate_limit=args.rate_limit,
+                                time_window=args.time_window,
+                            )
+                        )
         else:
             users.append(
                 ConsumerConfig(
@@ -552,7 +574,10 @@ Examples:
                 )
             )
 
-        print(f"[Gateway] Setting up AI gateway with {len(users)} consumer(s)...")
+        mode_label = "per-group" if args.per_group else "per-user"
+        print(
+            f"[Gateway] Setting up AI gateway ({mode_label}) with {len(users)} consumer(s)..."
+        )
         created = mgr.setup_gateway(
             lemonade_url=args.lemonade_url,
             users=users,

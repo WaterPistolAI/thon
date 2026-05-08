@@ -30,8 +30,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import AppConfig
 from app.db import get_setting, set_setting
-from app.exceptions import LemonadeConnectionError
-from app.models import InstanceState, UserInfo
+from app.exceptions import (
+    GatewayConnectionError,
+    GatewayNotEnabledError,
+    LemonadeConnectionError,
+)
+from app.models import GatewayMode, InstanceState, UserInfo
+from app.services.apisix_service import ApisixService
 from app.services.groups_service import DuplicateError, GroupsService
 from app.services.lemonade_service import LemonadeService
 from app.services.sandbox_service import SandboxService
@@ -68,7 +73,7 @@ class _AsyncRunner:
 
 
 def _invalidate_async_services() -> None:
-    for key in ("sandbox_service", "lemonade_service"):
+    for key in ("sandbox_service", "lemonade_service", "apisix_service"):
         st.session_state.pop(key, None)
 
 
@@ -110,6 +115,13 @@ def _get_groups_service() -> GroupsService:
             workspace_dir=cfg.workspace_dir,
         )
     return st.session_state.groups_service
+
+
+def _get_apisix_service() -> ApisixService:
+    if "apisix_service" not in st.session_state:
+        cfg = _get_config()
+        st.session_state.apisix_service = ApisixService(cfg.gateway)
+    return st.session_state.apisix_service
 
 
 def _state_badge(state: str) -> str:
@@ -732,8 +744,223 @@ def _safe_proxy(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except LemonadeConnectionError:
         return None
+    except (GatewayConnectionError, GatewayNotEnabledError):
+        return None
     except Exception:
         return None
+
+
+def page_gateway() -> None:
+    st.header("AI Gateway")
+
+    cfg = _get_config()
+    svc = _get_apisix_service()
+
+    if st.button("🔄 Refresh"):
+        st.rerun()
+
+    st.subheader("Configuration")
+
+    enabled = st.checkbox(
+        "Enable Gateway",
+        value=cfg.gateway.enabled,
+        help="Toggle APISIX AI Gateway on/off. Requires APISIX to be installed and running.",
+    )
+
+    c_mode, c_rate, c_window = st.columns(3)
+    with c_mode:
+        mode = st.selectbox(
+            "Mode",
+            options=["per-user", "per-group"],
+            index=0 if cfg.gateway.gateway_mode == "per-user" else 1,
+            help="per-user: each user gets their own API key. per-group: all users in a group share one API key with combined rate limit.",
+        )
+    with c_rate:
+        rate_limit = st.number_input(
+            "Rate Limit (tokens)",
+            min_value=1,
+            max_value=100000,
+            value=cfg.gateway.rate_limit_tokens,
+            help="Token limit per consumer (per-user mode) or per-user within group (per-group mode)",
+        )
+    with c_window:
+        time_window = st.number_input(
+            "Time Window (sec)",
+            min_value=1,
+            max_value=86400,
+            value=cfg.gateway.rate_limit_window,
+            help="Rate limit time window in seconds",
+        )
+
+    c_redis, c_redis_port = st.columns(2)
+    with c_redis:
+        redis_host = st.text_input(
+            "Redis Host",
+            value=cfg.gateway.redis_host or "",
+            placeholder="Leave empty for local policy",
+            help="Redis host for shared rate limiting. Empty = local policy.",
+        )
+    with c_redis_port:
+        redis_port = st.number_input(
+            "Redis Port",
+            min_value=1,
+            max_value=65535,
+            value=cfg.gateway.redis_port,
+        )
+
+    lemonade_host = cfg.lemonade.host if cfg.lemonade.host != "0.0.0.0" else "127.0.0.1"
+    lemonade_url = st.text_input(
+        "Lemonade URL",
+        value=f"http://{lemonade_host}:{cfg.lemonade.port}",
+    )
+    lemonade_model = st.text_input(
+        "Lemonade Model",
+        value="user.gemma-4-31b-it",
+    )
+
+    if st.button("Save Gateway Settings", type="primary"):
+        import os
+
+        os.environ["GATEWAY_ENABLED"] = "true" if enabled else "false"
+        os.environ["GATEWAY_MODE"] = mode
+        os.environ["GATEWAY_RATE_LIMIT_TOKENS"] = str(rate_limit)
+        os.environ["GATEWAY_RATE_LIMIT_WINDOW"] = str(time_window)
+        if redis_host:
+            os.environ["GATEWAY_REDIS_HOST"] = redis_host
+        elif "GATEWAY_REDIS_HOST" in os.environ:
+            del os.environ["GATEWAY_REDIS_HOST"]
+        os.environ["GATEWAY_REDIS_PORT"] = str(redis_port)
+        cfg.gateway.enabled = enabled
+        cfg.gateway.gateway_mode = mode
+        cfg.gateway.rate_limit_tokens = rate_limit
+        cfg.gateway.rate_limit_window = time_window
+        cfg.gateway.redis_host = redis_host or None
+        cfg.gateway.redis_port = redis_port
+        st.session_state.pop("apisix_service", None)
+        set_setting("gateway_mode", mode, db_path=cfg.database.path)
+        set_setting("gateway_rate_limit", str(rate_limit), db_path=cfg.database.path)
+        set_setting("gateway_time_window", str(time_window), db_path=cfg.database.path)
+        st.toast("Gateway settings saved")
+        st.rerun()
+
+    st.divider()
+
+    st.subheader("Status")
+    status = _safe_proxy(svc.get_status)
+    if status is None:
+        st.warning("Gateway not reachable — ensure APISIX is installed and running.")
+        return
+
+    mode_label = (
+        "per-group (shared)" if status.mode == GatewayMode.PER_GROUP else "per-user"
+    )
+    status_text = "🟢 Running" if status.running else "🔴 Offline"
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Status", status_text)
+    s2.metric("Consumers", status.consumers_count)
+    s3.metric("Route", "✅ Configured" if status.route_configured else "❌ Not set")
+    s4.metric("Mode", mode_label)
+
+    if not status.running:
+        st.info(
+            "APISIX gateway is offline. Install with `INSTALL_GATEWAY=true bash ./setup.sh` and start APISIX."
+        )
+        return
+
+    st.divider()
+
+    st.subheader("Consumers")
+    consumers = _safe_proxy(svc.list_consumers)
+    if consumers:
+        consumer_rows = []
+        for c in consumers:
+            is_group = c.username.startswith("group-")
+            consumer_rows.append(
+                {
+                    "Username": c.username,
+                    "API Key": c.api_key[:12] + "..."
+                    if len(c.api_key) > 12
+                    else c.api_key,
+                    "Full API Key": c.api_key,
+                    "Rate Limit": f"{c.rate_limit} tokens/{c.time_window}s",
+                    "Type": "Group" if is_group else "User",
+                    "Group": c.group_name or ("-"),
+                    "Users": c.user_count,
+                }
+            )
+        df = pd.DataFrame(consumer_rows)
+        st.dataframe(
+            df[["Username", "API Key", "Rate Limit", "Type", "Group", "Users"]],
+            hide_index=True,
+            width="stretch",
+        )
+
+        selected = st.text_input(
+            "Delete Consumer", placeholder="Enter username to delete"
+        )
+        if selected and st.button("🗑 Delete Consumer"):
+            try:
+                svc.delete_consumer(selected)
+                st.toast(f"Deleted consumer: {selected}")
+                st.rerun()
+            except (GatewayNotEnabledError, GatewayConnectionError) as e:
+                st.error(str(e))
+    else:
+        st.info("No consumers configured.")
+
+    st.divider()
+
+    st.subheader("Actions")
+    a1, a2 = st.columns(2)
+    with a1:
+        if st.button(
+            "⚡ Setup Gateway",
+            type="primary",
+            help="Create route + consumers from DB groups",
+        ):
+            try:
+                from app.db import get_groups, get_users
+
+                db_groups = get_groups(db_path=cfg.database.path)
+                if mode == "per-group":
+                    group_data = []
+                    for g in db_groups:
+                        group_users = get_users(g.id, db_path=cfg.database.path)
+                        group_data.append((g.name, len(group_users)))
+                    created = svc.setup_gateway_groups(
+                        lemonade_url=lemonade_url,
+                        lemonade_api_key=cfg.lemonade.api_key,
+                        lemonade_model=lemonade_model,
+                        groups=group_data,
+                        rate_limit_per_user=rate_limit,
+                        time_window=time_window,
+                    )
+                else:
+                    usernames = []
+                    for g in db_groups:
+                        group_users = get_users(g.id, db_path=cfg.database.path)
+                        for u in group_users:
+                            usernames.append(f"{g.name}-{u.username}")
+                    created = svc.setup_gateway(
+                        lemonade_url=lemonade_url,
+                        lemonade_api_key=cfg.lemonade.api_key,
+                        lemonade_model=lemonade_model,
+                        usernames=usernames,
+                        rate_limit=rate_limit,
+                        time_window=time_window,
+                    )
+                st.success(f"Created {len(created)} consumer(s)")
+                st.rerun()
+            except (GatewayNotEnabledError, GatewayConnectionError) as e:
+                st.error(str(e))
+    with a2:
+        if st.button("🧹 Cleanup Gateway", help="Remove all consumers and routes"):
+            try:
+                svc.cleanup()
+                st.toast("Gateway cleaned up")
+                st.rerun()
+            except (GatewayNotEnabledError, GatewayConnectionError) as e:
+                st.error(str(e))
 
 
 def page_settings() -> None:
@@ -762,7 +989,7 @@ def main() -> None:
 
     page = st.sidebar.radio(
         "Navigation",
-        options=["Instances", "Groups", "Lemonade Server", "Settings"],
+        options=["Instances", "Groups", "Lemonade Server", "AI Gateway", "Settings"],
         label_visibility="collapsed",
     )
 
@@ -772,6 +999,8 @@ def main() -> None:
         page_groups()
     elif page == "Lemonade Server":
         page_lemonade()
+    elif page == "AI Gateway":
+        page_gateway()
     elif page == "Settings":
         page_settings()
 

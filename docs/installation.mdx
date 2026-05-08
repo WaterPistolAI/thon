@@ -19,6 +19,7 @@ description: Complete installation guide for THON - The Hackathon Organizer Node
 
 - Ports 443 (nginx HTTPS) and 80 (nginx HTTP) available
 - Port 13305 available for Lemonade Server (optional)
+- Port 9080 available for APISIX AI Gateway (optional)
 - Unique port per VS Code instance (starting from 8443 by default)
 
 ## Step-by-Step Installation
@@ -42,6 +43,17 @@ This installs:
 - **docker.io** container runtime
 - **mkcert** for local CA certificates
 - **openssl** as SSL fallback
+
+#### With AI Gateway (Optional)
+
+```bash
+INSTALL_GATEWAY=true bash ./setup.sh
+```
+
+Additionally installs:
+- **apisix** API gateway
+- **etcd-server** configuration store for APISIX
+- **redis-server** for shared rate limiting
 
 ### 3. Build Docker Image
 
@@ -165,6 +177,42 @@ bash ./setup-lemonade.sh \
 ```
 
 See [Lemonade Server](./lemonade-server) for detailed configuration options.
+
+## Optional: AI Gateway Setup
+
+For rate limiting LLM API access with per-user or per-group API keys:
+
+### Quick Setup
+
+```bash
+# Install APISIX (or use INSTALL_GATEWAY=true during initial setup)
+INSTALL_GATEWAY=true bash ./setup.sh
+
+# Setup gateway with per-user rate limiting
+python scripts/apisix_gateway.py setup --groups groups.yaml \
+    --lemonade-url http://127.0.0.1:13305
+
+# Or per-group (shared API key per group)
+python scripts/apisix_gateway.py setup --groups groups.yaml \
+    --lemonade-url http://127.0.0.1:13305 --per-group
+```
+
+### Running with Gateway
+
+```bash
+# Per-user: each user gets their own API key and rate limit
+python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+
+# Per-group: all users in a group share an API key with combined rate limit
+python ./main.py --groups groups.yaml --external-ip 1.2.3.4 \
+    --gateway --gateway-per-group
+
+# With Redis-backed rate limiting (recommended for multi-gateway)
+python ./main.py --groups groups.yaml --external-ip 1.2.3.4 \
+    --gateway --gateway-redis-host 127.0.0.1
+```
+
+See [AI Gateway](./gateway) for detailed configuration options.
 
 ## Running with Lemonade
 

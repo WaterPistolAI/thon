@@ -505,6 +505,12 @@ Examples:
         help="Enable APISIX AI Gateway with rate limiting and per-consumer API keys",
     )
     parser.add_argument(
+        "--gateway-per-group",
+        action="store_true",
+        default=False,
+        help="Create one gateway consumer per group (shared API key) instead of per user",
+    )
+    parser.add_argument(
         "--gateway-redis-host",
         type=str,
         default=None,
@@ -655,18 +661,41 @@ Examples:
             lemonade_api_key=lemonade_api_key,
         )
 
-        for user in users:
-            consumer = gateway_mgr.create_consumer(
-                username=user.label,
-                rate_limit=args.gateway_rate_limit,
-                time_window=args.gateway_time_window,
-            )
-            gateway_consumers.append({
-                "user": user,
-                "api_key": consumer.api_key,
-                "rate_limit": consumer.rate_limit,
-                "time_window": consumer.time_window,
-            })
+        if args.gateway_per_group:
+            group_names: dict[str, list[UserInfo]] = {}
+            for user in users:
+                group_names.setdefault(user.group, []).append(user)
+            for group_name, group_users in group_names.items():
+                user_count = len(group_users)
+                group_rate_limit = args.gateway_rate_limit * user_count
+                consumer = gateway_mgr.create_consumer(
+                    username=f"group-{group_name}",
+                    rate_limit=group_rate_limit,
+                    time_window=args.gateway_time_window,
+                )
+                for user in group_users:
+                    gateway_consumers.append({
+                        "user": user,
+                        "api_key": consumer.api_key,
+                        "rate_limit": consumer.rate_limit,
+                        "time_window": consumer.time_window,
+                        "group_name": group_name,
+                        "user_count": user_count,
+                    })
+                print(f"[Gateway] Created group consumer: group-{group_name} ({user_count} users, {group_rate_limit} tokens/{args.gateway_time_window}s)")
+        else:
+            for user in users:
+                consumer = gateway_mgr.create_consumer(
+                    username=user.label,
+                    rate_limit=args.gateway_rate_limit,
+                    time_window=args.gateway_time_window,
+                )
+                gateway_consumers.append({
+                    "user": user,
+                    "api_key": consumer.api_key,
+                    "rate_limit": consumer.rate_limit,
+                    "time_window": consumer.time_window,
+                })
     try:
         tasks = []
         for i, user in enumerate(users):
@@ -777,6 +806,8 @@ Examples:
                         gateway_url = f"http://{ext_ip}:9080"
                         print(f"      Gateway API Key: {gc['api_key']}")
                         print(f"      Gateway Endpoint: {gateway_url}/v1/chat/completions")
+                        if gc.get("group_name"):
+                            print(f"      Gateway Mode: per-group ({gc['group_name']}, {gc.get('user_count', '?')} users sharing)")
                         print(f"      Rate Limit: {gc['rate_limit']} tokens / {gc['time_window']}s")
                         break
 

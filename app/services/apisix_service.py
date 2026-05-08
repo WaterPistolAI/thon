@@ -142,7 +142,11 @@ class ApisixService:
             except GatewayConnectionError:
                 pass
 
-        mode = GatewayMode.PER_GROUP if self._cfg.gateway_mode == "per-group" else GatewayMode.PER_USER
+        mode = (
+            GatewayMode.PER_GROUP
+            if self._cfg.gateway_mode == "per-group"
+            else GatewayMode.PER_USER
+        )
 
         return GatewayStatus(
             running=running,
@@ -335,7 +339,9 @@ class ApisixService:
         consumers: list[ConsumerInfo] = []
         if groups:
             for group_name, user_count in groups:
-                effective_rate_limit = (rate_limit_per_user or self._cfg.rate_limit_tokens) * user_count
+                effective_rate_limit = (
+                    rate_limit_per_user or self._cfg.rate_limit_tokens
+                ) * user_count
                 effective_time_window = time_window or self._cfg.rate_limit_window
                 consumer = self.create_consumer(
                     username=f"group-{group_name}",

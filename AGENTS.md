@@ -87,8 +87,11 @@ python ./scripts/apisix_gateway.py status
 # AI Gateway: cleanup all consumers and routes
 python ./scripts/apisix_gateway.py cleanup
 
-# Run VS Code instances with AI Gateway (rate limiting + per-user API keys)
+# Run VS Code instances with AI Gateway (per-user rate limiting)
 python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
+
+# Run VS Code instances with AI Gateway (per-group shared API keys)
+python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
 ```
 
 ## Code Style
@@ -345,9 +348,13 @@ python main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
 ### AI Gateway (APISIX Rate Limiting & Per-Consumer Keys)
 
 An optional APISIX API Gateway provides token-based rate limiting and per-consumer API keys
-for LLM endpoints. When enabled, each user gets a unique API key and the gateway enforces
-token quotas using the `ai-rate-limiting` plugin. Redis-backed rate limiting ensures
-consistency across multiple gateway instances.
+for LLM endpoints. Supports two modes:
+
+- **per-user** (default): Each user gets their own API key and rate limit
+- **per-group**: Each group shares one API key with a combined rate limit
+  (`rate_limit_per_user * num_users_in_group`)
+
+Redis-backed rate limiting ensures consistency across multiple gateway instances.
 
 **Components:**
 - **APISIX** — API gateway with `ai-proxy-multi` (LLM load balancing), `ai-rate-limiting`
@@ -393,8 +400,11 @@ python scripts/apisix_gateway.py generate-kilo --username alice --api-key alice-
 
 **Integration with `main.py`:**
 ```bash
-# Run with gateway enabled (auto-creates consumers from groups.yaml)
+# Run with gateway enabled — per-user (auto-creates consumers from groups.yaml)
 python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+
+# Per-group: one consumer per group with shared API key
+python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
 
 # With Redis-backed rate limiting
 python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
@@ -407,9 +417,10 @@ python main.py --groups groups.yaml --external-ip 1.2.3.4 \
 When `--gateway` is enabled:
 1. Gateway consumers are created BEFORE sandbox instances
 2. Each consumer gets `key-auth` credential + `ai-rate-limiting` plugin config
-3. A gateway-aware `kilo.json` is injected into each sandbox, pointing to the gateway
+3. In per-group mode, all users in a group share the same API key; rate limit is `per_user_limit * num_users`
+4. A gateway-aware `kilo.json` is injected into each sandbox, pointing to the gateway
    instead of directly to Lemonade
-4. Gateway cleanup runs in the `finally` block alongside nginx and sandbox cleanup
+5. Gateway cleanup runs in the `finally` block alongside nginx and sandbox cleanup
 
 **Rate Limiting Modes:**
 
@@ -450,6 +461,7 @@ Each consumer gets:
 | `GATEWAY_REDIS_PASSWORD` | (none) | Redis password |
 | `GATEWAY_RATE_LIMIT_TOKENS` | `500` | Default token limit per consumer per time window |
 | `GATEWAY_RATE_LIMIT_WINDOW` | `60` | Rate limit time window in seconds |
+| `GATEWAY_MODE` | `per-user` | Consumer mode: `per-user` or `per-group` |
 
 ## Guardrails
 
