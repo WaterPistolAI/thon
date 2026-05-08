@@ -270,6 +270,12 @@ async function refreshLemonade() {
           + '</tr>';
       }).join('');
     }
+
+    if (status.running) {
+      refreshLemonadeServerInfo();
+    } else {
+      clearLemonadeServerInfo();
+    }
   } catch (e) {
     showToast('Failed to load Lemonade data: ' + e.message, 'error');
   }
@@ -297,6 +303,151 @@ async function saveExternalIp() {
     setTimeout(refreshInstances, 300);
   } catch (e) {
     showToast('Failed to save: ' + e.message, 'error');
+  }
+}
+
+async function refreshLemonadeServerInfo() {
+  try {
+    const [health, stats, slots, sysInfo] = await Promise.all([
+      api('/api/lemonade/health').catch(() => null),
+      api('/api/lemonade/stats').catch(() => null),
+      api('/api/lemonade/slots').catch(() => null),
+      api('/api/lemonade/system-info').catch(() => null),
+    ]);
+
+    renderHealth(health);
+    renderStats(stats);
+    renderSlots(slots);
+    renderSystemInfo(sysInfo);
+  } catch (e) {
+    // non-fatal: server info is supplementary
+  }
+}
+
+function clearLemonadeServerInfo() {
+  document.getElementById('lemonade-version').textContent = '-';
+  document.getElementById('lemonade-health-model').textContent = '-';
+  document.getElementById('lemonade-ws-port').textContent = '-';
+  document.getElementById('lemonade-max-llm').textContent = '-';
+  document.getElementById('lemonade-loaded-body').innerHTML = '';
+  document.getElementById('lemonade-loaded-empty').style.display = '';
+  document.getElementById('lemonade-ttft').textContent = '-';
+  document.getElementById('lemonade-tps').textContent = '-';
+  document.getElementById('lemonade-input-tokens').textContent = '-';
+  document.getElementById('lemonade-output-tokens').textContent = '-';
+  document.getElementById('lemonade-slots-body').innerHTML = '';
+  document.getElementById('lemonade-slots-empty').style.display = '';
+  document.getElementById('lemonade-sys-os').textContent = '-';
+  document.getElementById('lemonade-sys-cpu').textContent = '-';
+  document.getElementById('lemonade-sys-mem').textContent = '-';
+  document.getElementById('lemonade-devices-body').innerHTML = '';
+  document.getElementById('lemonade-devices-empty').style.display = '';
+}
+
+function renderHealth(health) {
+  if (!health) return;
+  document.getElementById('lemonade-version').textContent = health.version || '-';
+  document.getElementById('lemonade-health-model').textContent = health.model_loaded || '-';
+  document.getElementById('lemonade-ws-port').textContent = health.websocket_port != null ? health.websocket_port : '-';
+  const maxM = health.max_models || {};
+  document.getElementById('lemonade-max-llm').textContent = maxM.llm != null ? maxM.llm : '-';
+
+  const loadedTbody = document.getElementById('lemonade-loaded-body');
+  const loadedEmpty = document.getElementById('lemonade-loaded-empty');
+  const loaded = health.all_models_loaded || [];
+  if (loaded.length === 0) {
+    loadedTbody.innerHTML = '';
+    loadedEmpty.style.display = '';
+  } else {
+    loadedEmpty.style.display = 'none';
+    loadedTbody.innerHTML = loaded.map(m => {
+      const lastUse = m.last_use ? new Date(m.last_use * 1000).toLocaleTimeString() : '-';
+      return '<tr>'
+        + '<td class="instance-id">' + (m.model_name || '-') + '</td>'
+        + '<td>' + (m.type || '-') + '</td>'
+        + '<td>' + (m.device || '-') + '</td>'
+        + '<td>' + (m.recipe || '-') + '</td>'
+        + '<td>' + (m.pid != null ? m.pid : '-') + '</td>'
+        + '<td>' + lastUse + '</td>'
+        + '</tr>';
+    }).join('');
+  }
+}
+
+function renderStats(stats) {
+  if (!stats) return;
+  document.getElementById('lemonade-ttft').textContent = stats.time_to_first_token != null ? stats.time_to_first_token.toFixed(2) + 's' : '-';
+  document.getElementById('lemonade-tps').textContent = stats.tokens_per_second != null ? stats.tokens_per_second.toFixed(2) : '-';
+  document.getElementById('lemonade-input-tokens').textContent = stats.input_tokens != null ? stats.input_tokens : '-';
+  document.getElementById('lemonade-output-tokens').textContent = stats.output_tokens != null ? stats.output_tokens : '-';
+}
+
+function renderSlots(slots) {
+  const tbody = document.getElementById('lemonade-slots-body');
+  const empty = document.getElementById('lemonade-slots-empty');
+  if (!slots || !Array.isArray(slots) || slots.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  tbody.innerHTML = slots.map(s => {
+    const nt = s.next_token || {};
+    const stateCls = (s.state || '').toLowerCase();
+    return '<tr>'
+      + '<td>' + (s.id != null ? s.id : '-') + '</td>'
+      + '<td><span class="badge badge-' + stateCls + '"><span class="badge-dot"></span>' + (s.state || '-') + '</span></td>'
+      + '<td>' + (s.task_id != null ? s.task_id : '-') + '</td>'
+      + '<td>' + (s.cache_tokens != null ? s.cache_tokens.toLocaleString() : '-') + '</td>'
+      + '<td>' + (nt.n_decoded != null ? nt.n_decoded : '-') + '</td>'
+      + '<td>' + (nt.n_remain != null ? nt.n_remain : '-') + '</td>'
+      + '</tr>';
+  }).join('');
+}
+
+function renderSystemInfo(sysInfo) {
+  if (!sysInfo) return;
+  document.getElementById('lemonade-sys-os').textContent = sysInfo['OS Version'] || '-';
+  document.getElementById('lemonade-sys-cpu').textContent = sysInfo['Processor'] || '-';
+  document.getElementById('lemonade-sys-mem').textContent = sysInfo['Physical Memory'] || '-';
+
+  const tbody = document.getElementById('lemonade-devices-body');
+  const empty = document.getElementById('lemonade-devices-empty');
+  const devices = sysInfo.devices || {};
+  const rows = [];
+  if (devices.cpu) {
+    const d = devices.cpu;
+    rows.push({ kind: 'CPU', name: d.name || '-', details: d.cores + ' cores / ' + d.threads + ' threads', available: d.available });
+  }
+  if (Array.isArray(devices.amd_gpu)) {
+    devices.amd_gpu.forEach((d, i) => {
+      rows.push({ kind: 'AMD GPU ' + i, name: d.name || '-', details: (d.vram_gb || '?') + ' GB VRAM, ' + (d.family || '-'), available: d.available });
+    });
+  }
+  if (Array.isArray(devices.nvidia_gpu)) {
+    devices.nvidia_gpu.forEach((d, i) => {
+      rows.push({ kind: 'NVIDIA GPU ' + i, name: d.name || '-', details: (d.vram_gb || '?') + ' GB VRAM', available: d.available });
+    });
+  }
+  if (devices.amd_npu) {
+    const d = devices.amd_npu;
+    rows.push({ kind: 'AMD NPU', name: d.name || '-', details: d.family || '-', available: d.available });
+  }
+
+  if (rows.length === 0) {
+    tbody.innerHTML = '';
+    empty.style.display = '';
+  } else {
+    empty.style.display = 'none';
+    tbody.innerHTML = rows.map(r => {
+      const avail = r.available ? '<span class="text-success">Yes</span>' : '<span class="text-danger">No</span>';
+      return '<tr>'
+        + '<td>' + r.kind + '</td>'
+        + '<td class="instance-id">' + r.name + '</td>'
+        + '<td>' + r.details + '</td>'
+        + '<td>' + avail + '</td>'
+        + '</tr>';
+    }).join('');
   }
 }
 

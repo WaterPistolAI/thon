@@ -149,6 +149,135 @@
 
         <div class="card">
           <div class="card-header">
+            <div class="card-title">Server Health</div>
+          </div>
+          <div class="lemonade-grid" id="lemonade-health-grid">
+            <div class="lemonade-item">
+              <div class="lemonade-label">Version</div>
+              <div class="lemonade-value" id="lemonade-version">-</div>
+            </div>
+            <div class="lemonade-item">
+              <div class="lemonade-label">Active Model</div>
+              <div class="lemonade-value" id="lemonade-health-model">-</div>
+            </div>
+            <div class="lemonade-item">
+              <div class="lemonade-label">WS Port</div>
+              <div class="lemonade-value" id="lemonade-ws-port">-</div>
+            </div>
+            <div class="lemonade-item">
+              <div class="lemonade-label">Max LLM Models</div>
+              <div class="lemonade-value" id="lemonade-max-llm">-</div>
+            </div>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Model Name</th>
+                  <th>Type</th>
+                  <th>Device</th>
+                  <th>Recipe</th>
+                  <th>PID</th>
+                  <th>Last Use</th>
+                </tr>
+              </thead>
+              <tbody id="lemonade-loaded-body">
+              </tbody>
+            </table>
+          </div>
+          <div id="lemonade-loaded-empty" class="empty-state" style="display:none;">
+            <p>No models loaded</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Performance Stats</div>
+          </div>
+          <div class="lemonade-grid" id="lemonade-stats-grid">
+            <div class="lemonade-item">
+              <div class="lemonade-label">TTFT</div>
+              <div class="lemonade-value" id="lemonade-ttft">-</div>
+            </div>
+            <div class="lemonade-item">
+              <div class="lemonade-label">Tokens/sec</div>
+              <div class="lemonade-value" id="lemonade-tps">-</div>
+            </div>
+            <div class="lemonade-item">
+              <div class="lemonade-label">Input Tokens</div>
+              <div class="lemonade-value" id="lemonade-input-tokens">-</div>
+            </div>
+            <div class="lemonade-item">
+              <div class="lemonade-label">Output Tokens</div>
+              <div class="lemonade-value" id="lemonade-output-tokens">-</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Slots</div>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>State</th>
+                  <th>Task ID</th>
+                  <th>Cache Tokens</th>
+                  <th>Tokens Decoded</th>
+                  <th>Tokens Remaining</th>
+                </tr>
+              </thead>
+              <tbody id="lemonade-slots-body">
+              </tbody>
+            </table>
+          </div>
+          <div id="lemonade-slots-empty" class="empty-state" style="display:none;">
+            <p>No slots available (model may not be loaded)</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">System Info</div>
+          </div>
+          <div class="lemonade-grid" id="lemonade-sysinfo-grid">
+            <div class="lemonade-item">
+              <div class="lemonade-label">OS</div>
+              <div class="lemonade-value" id="lemonade-sys-os">-</div>
+            </div>
+            <div class="lemonade-item">
+              <div class="lemonade-label">Processor</div>
+              <div class="lemonade-value" id="lemonade-sys-cpu">-</div>
+            </div>
+            <div class="lemonade-item">
+              <div class="lemonade-label">Memory</div>
+              <div class="lemonade-value" id="lemonade-sys-mem">-</div>
+            </div>
+          </div>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Device</th>
+                  <th>Name</th>
+                  <th>Details</th>
+                  <th>Available</th>
+                </tr>
+              </thead>
+              <tbody id="lemonade-devices-body">
+              </tbody>
+            </table>
+          </div>
+          <div id="lemonade-devices-empty" class="empty-state" style="display:none;">
+            <p>No device information available</p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
             <div class="card-title">Available Models</div>
           </div>
           <div class="table-container">

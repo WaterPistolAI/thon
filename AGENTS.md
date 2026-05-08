@@ -458,6 +458,21 @@ app/models.py        → Pydantic domain models
 | `GET` | `/api/lemonade/status` | Lemonade server status |
 | `GET` | `/api/lemonade/models` | Available models |
 | `GET` | `/api/lemonade/api-info` | API endpoint info |
+| `GET` | `/api/lemonade/health` | Proxy: server health, loaded models, max_models |
+| `GET` | `/api/lemonade/stats` | Proxy: performance statistics from last request |
+| `GET` | `/api/lemonade/system-info` | Proxy: hardware details and device enumeration |
+| `GET` | `/api/lemonade/live` | Proxy: lightweight liveness probe |
+| `GET` | `/api/lemonade/slots` | Proxy: llama.cpp slots processing state |
+| `POST` | `/api/lemonade/slots/{id}/save` | Proxy: save slot prompt cache |
+| `POST` | `/api/lemonade/slots/{id}/restore` | Proxy: restore slot prompt cache |
+| `POST` | `/api/lemonade/slots/{id}/erase` | Proxy: erase slot prompt cache |
+| `POST` | `/api/lemonade/pull` | Proxy: install or register-and-install a model |
+| `GET` | `/api/lemonade/pull/variants` | Proxy: enumerate GGUF variants for a checkpoint |
+| `POST` | `/api/lemonade/delete` | Proxy: delete a model |
+| `POST` | `/api/lemonade/load` | Proxy: load a model into memory |
+| `POST` | `/api/lemonade/unload` | Proxy: unload a model from memory |
+| `POST` | `/api/lemonade/install` | Proxy: install or update a backend |
+| `POST` | `/api/lemonade/uninstall` | Proxy: remove a backend |
 | `GET` | `/api/auth/providers` | List auth providers |
 | `GET` | `/api/auth/login/{provider}` | Start OAuth flow |
 | `GET` | `/api/auth/callback/{provider}` | OAuth callback |

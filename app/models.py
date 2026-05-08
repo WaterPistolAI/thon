@@ -107,6 +107,63 @@ class LemonadeStatus:
     num_users: int = 0
 
 
+class LemonadePullRequest(BaseModel):
+    """Request body for POST /v1/pull."""
+
+    model_name: str
+    checkpoint: Optional[str] = None
+    recipe: Optional[str] = None
+    reasoning: bool = False
+    vision: bool = False
+    embedding: bool = False
+    reranking: bool = False
+    mmproj: Optional[str] = None
+    stream: bool = False
+
+
+class LemonadeDeleteRequest(BaseModel):
+    """Request body for POST /v1/delete."""
+
+    model_name: str
+
+
+class LemonadeLoadRequest(BaseModel):
+    """Request body for POST /v1/load."""
+
+    model_name: str
+    save_options: bool = False
+    ctx_size: Optional[int] = None
+    llamacpp_backend: Optional[str] = None
+    llamacpp_args: Optional[str] = None
+    whispercpp_backend: Optional[str] = None
+    whispercpp_args: Optional[str] = None
+    steps: Optional[int] = None
+    cfg_scale: Optional[float] = None
+    width: Optional[int] = None
+    height: Optional[int] = None
+
+
+class LemonadeUnloadRequest(BaseModel):
+    """Request body for POST /v1/unload."""
+
+    model_name: Optional[str] = None
+
+
+class LemonadeBackendRequest(BaseModel):
+    """Request body for POST /v1/install and /v1/uninstall."""
+
+    recipe: str
+    backend: str
+    stream: bool = False
+    force: bool = False
+
+
+class LemonadeSlotActionRequest(BaseModel):
+    """Request body for POST /v1/slots/{id}?action=save|restore."""
+
+    filename: Optional[str] = None
+
+
 @dataclass
 class DashboardSession:
     """Authenticated dashboard session."""
