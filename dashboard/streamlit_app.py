@@ -750,10 +750,31 @@ def _safe_proxy(fn, *args, **kwargs):
         return None
 
 
+def _load_gateway_config_from_db(cfg: AppConfig) -> None:
+    """Overlay SQLite-persisted gateway settings onto the config object."""
+    db_path = cfg.database.path
+    mapping = {
+        "gateway_enabled": ("enabled", lambda v: v in ("true", "1", "yes")),
+        "gateway_mode": ("gateway_mode", str),
+        "gateway_rate_limit": ("rate_limit_tokens", int),
+        "gateway_time_window": ("rate_limit_window", int),
+        "gateway_redis_host": ("redis_host", lambda v: v or None),
+        "gateway_redis_port": ("redis_port", int),
+        "gateway_admin_url": ("admin_url", str),
+        "gateway_admin_key": ("admin_key", str),
+        "gateway_proxy_port": ("proxy_port", int),
+    }
+    for db_key, (attr, converter) in mapping.items():
+        val = get_setting(db_key, db_path=db_path)
+        if val is not None:
+            setattr(cfg.gateway, attr, converter(val))
+
+
 def page_gateway() -> None:
     st.header("AI Gateway")
 
     cfg = _get_config()
+    _load_gateway_config_from_db(cfg)
     svc = _get_apisix_service()
 
     if st.button("🔄 Refresh"):
@@ -819,17 +840,13 @@ def page_gateway() -> None:
     )
 
     if st.button("Save Gateway Settings", type="primary"):
-        import os
-
-        os.environ["GATEWAY_ENABLED"] = "true" if enabled else "false"
-        os.environ["GATEWAY_MODE"] = mode
-        os.environ["GATEWAY_RATE_LIMIT_TOKENS"] = str(rate_limit)
-        os.environ["GATEWAY_RATE_LIMIT_WINDOW"] = str(time_window)
-        if redis_host:
-            os.environ["GATEWAY_REDIS_HOST"] = redis_host
-        elif "GATEWAY_REDIS_HOST" in os.environ:
-            del os.environ["GATEWAY_REDIS_HOST"]
-        os.environ["GATEWAY_REDIS_PORT"] = str(redis_port)
+        db_path = cfg.database.path
+        set_setting("gateway_enabled", "true" if enabled else "false", db_path=db_path)
+        set_setting("gateway_mode", mode, db_path=db_path)
+        set_setting("gateway_rate_limit", str(rate_limit), db_path=db_path)
+        set_setting("gateway_time_window", str(time_window), db_path=db_path)
+        set_setting("gateway_redis_host", redis_host, db_path=db_path)
+        set_setting("gateway_redis_port", str(redis_port), db_path=db_path)
         cfg.gateway.enabled = enabled
         cfg.gateway.gateway_mode = mode
         cfg.gateway.rate_limit_tokens = rate_limit
@@ -837,9 +854,6 @@ def page_gateway() -> None:
         cfg.gateway.redis_host = redis_host or None
         cfg.gateway.redis_port = redis_port
         st.session_state.pop("apisix_service", None)
-        set_setting("gateway_mode", mode, db_path=cfg.database.path)
-        set_setting("gateway_rate_limit", str(rate_limit), db_path=cfg.database.path)
-        set_setting("gateway_time_window", str(time_window), db_path=cfg.database.path)
         st.toast("Gateway settings saved")
         st.rerun()
 
@@ -872,39 +886,47 @@ def page_gateway() -> None:
     st.subheader("Consumers")
     consumers = _safe_proxy(svc.list_consumers)
     if consumers:
+        is_per_group = status.mode == GatewayMode.PER_GROUP
         consumer_rows = []
         for c in consumers:
             is_group = c.username.startswith("group-")
-            consumer_rows.append(
-                {
-                    "Username": c.username,
-                    "API Key": c.api_key[:12] + "..."
-                    if len(c.api_key) > 12
-                    else c.api_key,
-                    "Full API Key": c.api_key,
-                    "Rate Limit": f"{c.rate_limit} tokens/{c.time_window}s",
-                    "Type": "Group" if is_group else "User",
-                    "Group": c.group_name or ("-"),
-                    "Users": c.user_count,
-                }
-            )
+            row: dict = {
+                "Username": c.username,
+                "API Key": c.api_key[:12] + "..." if len(c.api_key) > 12 else c.api_key,
+                "Full API Key": c.api_key,
+                "Rate Limit": f"{c.rate_limit} tokens/{c.time_window}s",
+                "Type": "Group" if is_group else "User",
+            }
+            if is_per_group:
+                row["Group"] = c.group_name or "-"
+                row["Users"] = c.user_count if is_group else ""
+            consumer_rows.append(row)
+        display_cols = ["Username", "API Key", "Rate Limit", "Type"]
+        if is_per_group:
+            display_cols += ["Group", "Users"]
         df = pd.DataFrame(consumer_rows)
         st.dataframe(
-            df[["Username", "API Key", "Rate Limit", "Type", "Group", "Users"]],
+            df[display_cols],
             hide_index=True,
             width="stretch",
         )
 
-        selected = st.text_input(
-            "Delete Consumer", placeholder="Enter username to delete"
+        st.markdown("**Delete Consumer**")
+        consumer_names = [c.username for c in consumers]
+        selected = st.selectbox(
+            "Select consumer to delete",
+            options=[""] + consumer_names,
+            label_visibility="collapsed",
         )
-        if selected and st.button("🗑 Delete Consumer"):
-            try:
-                svc.delete_consumer(selected)
-                st.toast(f"Deleted consumer: {selected}")
-                st.rerun()
-            except (GatewayNotEnabledError, GatewayConnectionError) as e:
-                st.error(str(e))
+        if selected:
+            st.warning(f"Will delete consumer: **{selected}**")
+            if st.button("🗑 Confirm Delete"):
+                try:
+                    svc.delete_consumer(selected)
+                    st.toast(f"Deleted consumer: {selected}")
+                    st.rerun()
+                except (GatewayNotEnabledError, GatewayConnectionError) as e:
+                    st.error(str(e))
     else:
         st.info("No consumers configured.")
 
