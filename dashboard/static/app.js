@@ -11,6 +11,7 @@ document.querySelectorAll('.nav-item[data-page]').forEach(btn => {
     document.querySelectorAll('.page-section').forEach(s => s.classList.remove('active'));
     document.getElementById('page-' + btn.dataset.page).classList.add('active');
     if (btn.dataset.page === 'instances') refreshInstances();
+    if (btn.dataset.page === 'groups') refreshGroups();
     if (btn.dataset.page === 'lemonade') refreshLemonade();
     if (btn.dataset.page === 'settings') loadSettings();
   });
@@ -227,6 +228,194 @@ async function createInstance() {
   } catch (e) {
     showToast('Create failed: ' + e.message, 'error');
   }
+}
+
+// ── Groups ──────────────────────────────────────────────────────────
+
+let allGroups = [];
+
+async function refreshGroups() {
+  const loading = document.getElementById('groups-loading');
+  const empty = document.getElementById('groups-empty');
+  const list = document.getElementById('groups-list');
+  loading.style.display = '';
+  empty.style.display = 'none';
+  list.innerHTML = '';
+
+  try {
+    const data = await api('/api/groups');
+    allGroups = data || [];
+    loading.style.display = 'none';
+    document.getElementById('stat-groups').textContent = allGroups.length;
+    const totalUsers = allGroups.reduce((sum, g) => sum + g.user_count, 0);
+    document.getElementById('stat-total-users').textContent = totalUsers;
+    renderGroups(allGroups);
+  } catch (e) {
+    loading.style.display = 'none';
+    showToast('Failed to load groups: ' + e.message, 'error');
+  }
+}
+
+function filterGroups() {
+  const search = document.getElementById('group-search-input').value.toLowerCase();
+  const filtered = allGroups.filter(g => g.name.toLowerCase().includes(search));
+  renderGroups(filtered);
+}
+
+function truncUuid(id) {
+  if (!id) return '-';
+  return id.length > 8 ? id.slice(0, 8) : id;
+}
+
+function renderGroups(groups) {
+  const list = document.getElementById('groups-list');
+  const empty = document.getElementById('groups-empty');
+
+  if (groups.length === 0) {
+    list.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+
+  empty.style.display = 'none';
+  list.innerHTML = groups.map(g => {
+    const detail = g.users ? g : null;
+    const users = detail ? detail.users : [];
+    const userRows = users.map(u =>
+      '<tr>'
+      + '<td class="instance-id" title="' + u.id + '">' + truncUuid(u.id) + '</td>'
+      + '<td>' + u.username + '</td>'
+      + '<td class="instance-id">' + (u.workspace_path || '-') + '</td>'
+      + '<td class="instance-id">' + (u.storage_path || '-') + '</td>'
+      + '<td>'
+      + '<button class="btn btn-sm" onclick="openEditUserModal(\'' + g.id + '\',\'' + u.id + '\',\'' + u.username + '\',\'' + (u.workspace_path || '') + '\',\'' + (u.storage_path || '') + '\')">Edit</button> '
+      + '<button class="btn btn-danger btn-sm" onclick="removeUser(\'' + g.id + '\',\'' + u.id + '\',\'' + u.username + '\')">Remove</button>'
+      + '</td>'
+      + '</tr>'
+    ).join('');
+
+    return '<div class="card" style="margin-bottom:16px">'
+      + '<div class="card-header" style="display:flex;align-items:center;justify-content:space-between">'
+      + '<div class="card-title">' + g.name + ' <span style="color:var(--text-muted);font-size:12px;font-weight:normal">(' + truncUuid(g.id) + ')</span></div>'
+      + '<div>'
+      + '<button class="btn btn-sm" onclick="openAddUserModal(\'' + g.id + '\')">+ User</button> '
+      + '<button class="btn btn-sm" onclick="renameGroupPrompt(\'' + g.id + '\',\'' + g.name + '\')">Rename</button> '
+      + '<button class="btn btn-danger btn-sm" onclick="deleteGroupConfirm(\'' + g.id + '\',\'' + g.name + '\')">Delete</button>'
+      + '</div>'
+      + '</div>'
+      + '<div class="table-container"><table>'
+      + '<thead><tr><th>UUID</th><th>Username</th><th>Workspace Path</th><th>Storage Path</th><th>Actions</th></tr></thead>'
+      + '<tbody>' + userRows + '</tbody>'
+      + '</table></div>'
+      + '</div>';
+  }).join('');
+}
+
+function openCreateGroupModal() {
+  document.getElementById('create-group-modal').classList.add('active');
+  document.getElementById('new-group-name').value = '';
+}
+
+function closeCreateGroupModal() {
+  document.getElementById('create-group-modal').classList.remove('active');
+}
+
+async function createGroup() {
+  const name = document.getElementById('new-group-name').value.trim();
+  if (!name) return;
+  try {
+    await api('/api/groups', { method: 'POST', body: JSON.stringify({ name }) });
+    closeCreateGroupModal();
+    showToast('Group created: ' + name, 'success');
+    refreshGroups();
+  } catch (e) {
+    showToast('Failed to create group: ' + e.message, 'error');
+  }
+}
+
+function renameGroupPrompt(groupId, currentName) {
+  const newName = prompt('Rename group:', currentName);
+  if (!newName || newName === currentName) return;
+  api('/api/groups/' + groupId, { method: 'PUT', body: JSON.stringify({ name: newName }) })
+    .then(() => { showToast('Group renamed', 'success'); refreshGroups(); })
+    .catch(e => showToast('Rename failed: ' + e.message, 'error'));
+}
+
+function deleteGroupConfirm(groupId, name) {
+  if (!confirm('Delete group "' + name + '" and all its users?')) return;
+  api('/api/groups/' + groupId, { method: 'DELETE' })
+    .then(() => { showToast('Group deleted', 'info'); refreshGroups(); })
+    .catch(e => showToast('Delete failed: ' + e.message, 'error'));
+}
+
+function openAddUserModal(groupId) {
+  document.getElementById('add-user-modal').classList.add('active');
+  document.getElementById('add-user-group-id').value = groupId;
+  document.getElementById('new-user-username').value = '';
+  document.getElementById('new-user-workspace').value = '';
+  document.getElementById('new-user-storage').value = '';
+}
+
+function closeAddUserModal() {
+  document.getElementById('add-user-modal').classList.remove('active');
+}
+
+async function addUser() {
+  const groupId = document.getElementById('add-user-group-id').value;
+  const username = document.getElementById('new-user-username').value.trim();
+  if (!username) return;
+  const workspace = document.getElementById('new-user-workspace').value.trim() || null;
+  const storage = document.getElementById('new-user-storage').value.trim() || null;
+  try {
+    await api('/api/groups/' + groupId + '/users', {
+      method: 'POST',
+      body: JSON.stringify({ username, workspace_path: workspace, storage_path: storage }),
+    });
+    closeAddUserModal();
+    showToast('User added: ' + username, 'success');
+    refreshGroups();
+  } catch (e) {
+    showToast('Failed to add user: ' + e.message, 'error');
+  }
+}
+
+function openEditUserModal(groupId, userId, username, workspace, storage) {
+  document.getElementById('edit-user-modal').classList.add('active');
+  document.getElementById('edit-user-id').value = userId;
+  document.getElementById('edit-user-group-id').value = groupId;
+  document.getElementById('edit-user-username').value = username;
+  document.getElementById('edit-user-workspace').value = workspace || '';
+  document.getElementById('edit-user-storage').value = storage || '';
+}
+
+function closeEditUserModal() {
+  document.getElementById('edit-user-modal').classList.remove('active');
+}
+
+async function saveEditUser() {
+  const userId = document.getElementById('edit-user-id').value;
+  const groupId = document.getElementById('edit-user-group-id').value;
+  const username = document.getElementById('edit-user-username').value.trim();
+  const workspace = document.getElementById('edit-user-workspace').value.trim() || null;
+  const storage = document.getElementById('edit-user-storage').value.trim() || null;
+  try {
+    await api('/api/groups/' + groupId + '/users/' + userId, {
+      method: 'PUT',
+      body: JSON.stringify({ username, workspace_path: workspace, storage_path: storage }),
+    });
+    closeEditUserModal();
+    showToast('User updated', 'success');
+    refreshGroups();
+  } catch (e) {
+    showToast('Failed to update user: ' + e.message, 'error');
+  }
+}
+
+function removeUser(groupId, userId, username) {
+  if (!confirm('Remove user "' + username + '"?')) return;
+  api('/api/groups/' + groupId + '/users/' + userId, { method: 'DELETE' })
+    .then(() => { showToast('User removed', 'info'); refreshGroups(); })
+    .catch(e => showToast('Remove failed: ' + e.message, 'error'));
 }
 
 // ── Lemonade ────────────────────────────────────────────────────────
