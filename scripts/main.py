@@ -569,11 +569,12 @@ Examples:
 
         with open(groups_path) as f:
             yaml_data = yaml.safe_load(f)
+        env_event_id = os.getenv("THON_EVENT_ID")
         groups_svc = GroupsService(
             db_path=os.getenv("THON_DB_PATH"),
             workspace_dir=args.workspace_dir,
         )
-        imported = groups_svc.import_from_yaml(yaml_data)
+        imported = groups_svc.import_from_yaml(yaml_data, event_id=env_event_id)
         backfilled = groups_svc.backfill_storage_paths()
         if imported > 0:
             print(f"  Synced {imported} user(s) from groups.yaml to database")

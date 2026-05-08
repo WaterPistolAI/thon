@@ -4,24 +4,34 @@
 # Each user gets their own VS Code sandbox instance with a workspace
 # at /workspace/{group}/{username}.
 #
+# The event_id uniquely identifies this event (hackathon, workshop).
+# Reloading the same file with the same event_id will not duplicate
+# groups or users. You can also set THON_EVENT_ID and THON_EVENT_TITLE
+# as environment variables.
+#
 # Usage:
 #   # Run all groups
-#   uv run python ./main.py --groups groups.yaml
+#   python ./main.py --groups groups.yaml
 #
 #   # Run a single group
-#   uv run python ./main.py --groups groups.yaml --group alpha
+#   python ./main.py --groups groups.yaml --group alpha
 #
 #   # Run with secure auth (generates per-user passwords)
-#   uv run python ./main.py --groups groups.yaml --secure
+#   python ./main.py --groups groups.yaml --secure
+
+event_id: hackathon-2025-spring
+title: "Spring Hackathon 2025"
 
 groups:
   alpha:
+    title: "Team Alpha"
     users:
       - alice
       - bob
       - carol
 
   beta:
+    title: "Team Beta"
     users:
       - dave
       - eve

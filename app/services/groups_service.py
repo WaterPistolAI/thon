@@ -24,6 +24,7 @@ from typing import Optional
 from sqlmodel import select
 
 from app.db import (
+    EventRecord,
     GroupRecord,
     GroupRecordWithUsers,
     UserRecord,
@@ -31,11 +32,15 @@ from app.db import (
     create_user as db_create_user,
     delete_group as db_delete_group,
     delete_user as db_delete_user,
+    get_event as db_get_event,
+    get_events as db_get_events,
     get_group as db_get_group,
     get_groups as db_get_groups,
+    get_or_create_event as db_get_or_create_event,
     get_session,
     get_users as db_get_users,
     rename_group as db_rename_group,
+    transfer_user as db_transfer_user,
     update_user as db_update_user,
 )
 from app.exceptions import GroupsLoadError
@@ -84,6 +89,8 @@ class GroupsService:
         return GroupRecordWithUsers(
             id=group.id,
             name=group.name,
+            event_id=group.event_id,
+            title=group.title,
             created_at=group.created_at,
             updated_at=group.updated_at,
             users=users,
@@ -141,6 +148,7 @@ class GroupsService:
     ) -> UserRecord:
         """Add a user to a group with an auto-generated UUID.
 
+        Raises ``DuplicateError`` if this username already exists in the group.
         Derives ``workspace_path`` and ``storage_path`` as Docker named
         volume names (PVC claimName) used by the OpenSandbox ``pvc`` backend:
           - workspace_path: ``thon-workspace-{group_name}-{username}``
@@ -154,13 +162,16 @@ class GroupsService:
         workspace_path = f"thon-workspace-{group.name}-{username}"
         storage_path = f"thon-storage-{user_id}"
 
-        user = db_create_user(
-            group_id=group_id,
-            username=username,
-            workspace_path=workspace_path,
-            storage_path=storage_path,
-            db_path=self._db_path,
-        )
+        try:
+            user = db_create_user(
+                group_id=group_id,
+                username=username,
+                workspace_path=workspace_path,
+                storage_path=storage_path,
+                db_path=self._db_path,
+            )
+        except ValueError as e:
+            raise DuplicateError(str(e)) from e
         self._ensure_volume(workspace_path)
         self._ensure_volume(storage_path)
         logger.info("Created user '%s/%s' (id=%s)", group.name, username, user.id)
@@ -178,6 +189,30 @@ class GroupsService:
         if not db_delete_user(user_id, db_path=self._db_path):
             raise UserNotFoundError(f"User {user_id} not found")
         logger.info("Deleted user %s", user_id)
+
+    def transfer_user(self, user_id: str, target_group_id: str) -> UserRecord:
+        """Move a user to a different group.
+
+        Raises ``UserNotFoundError`` if the user does not exist.
+        Raises ``GroupNotFoundError`` if the target group does not exist.
+        Raises ``DuplicateError`` if the username already exists in the target group.
+        """
+        target_group = db_get_group(target_group_id, db_path=self._db_path)
+        if target_group is None:
+            raise GroupNotFoundError(f"Target group {target_group_id} not found")
+        try:
+            user = db_transfer_user(user_id, target_group_id, db_path=self._db_path)
+        except ValueError as e:
+            raise DuplicateError(str(e)) from e
+        if user is None:
+            raise UserNotFoundError(f"User {user_id} not found")
+        new_workspace = f"thon-workspace-{target_group.name}-{user.username}"
+        self._ensure_volume(new_workspace)
+        logger.info(
+            "Transferred user '%s' to group '%s' (id=%s)",
+            user.username, target_group.name, user.id,
+        )
+        return user
 
     # ── Storage path backfill ─────────────────────────────────────────
 
@@ -212,17 +247,30 @@ class GroupsService:
 
     # ── Import / Export ───────────────────────────────────────────────
 
-    def import_from_yaml(self, groups_data: dict) -> int:
+    def import_from_yaml(
+        self, groups_data: dict, event_id: Optional[str] = None
+    ) -> int:
         """Import groups and users from a parsed groups.yaml dict.
 
-        Skips groups and users that already exist (idempotent).
+        Idempotent: skips groups and users that already exist.
+        Links all imported groups to the given event_id.
+        Reads event_id and title from the YAML if not provided.
 
         Returns the total number of users created.
         """
+        yaml_event_id = groups_data.get("event_id") or event_id
+        title = groups_data.get("title")
+
+        if yaml_event_id:
+            db_get_or_create_event(
+                yaml_event_id, title=title, db_path=self._db_path
+            )
+
         groups_list = groups_data.get("groups", {})
         total_users = 0
         for group_name, group_data in groups_list.items():
             group_data = group_data or {}
+            group_title = group_data.get("title")
             try:
                 group = self.create_group(group_name)
             except DuplicateError:
@@ -230,11 +278,25 @@ class GroupsService:
                 group = next((g for g in groups if g.name == group_name), None)
                 if group is None:
                     continue
+            if yaml_event_id and not group.event_id:
+                with get_session(self._db_path) as session:
+                    db_group = session.exec(
+                        select(GroupRecord).where(GroupRecord.id == group.id)
+                    ).first()
+                    if db_group:
+                        db_group.event_id = yaml_event_id
+                        if group_title and not db_group.title:
+                            db_group.title = group_title
+                        elif title and not db_group.title:
+                            db_group.title = title
+                        db_group.updated_at = datetime.utcnow()
+                        session.add(db_group)
+                        session.commit()
             for username in group_data.get("users", []):
                 try:
                     self.create_user(group.id, username)
                     total_users += 1
-                except (DuplicateError, ValueError):
+                except DuplicateError:
                     continue
         logger.info("Imported %d groups, %d users from YAML", len(groups_list), total_users)
         return total_users
@@ -242,6 +304,33 @@ class GroupsService:
     def export_to_yaml(self) -> dict:
         """Export current groups/users to a groups.yaml-compatible dict."""
         groups: dict[str, dict] = {}
+        event_id: Optional[str] = None
+        title: Optional[str] = None
+        events = db_get_events(db_path=self._db_path)
+        if events:
+            event_id = events[0].event_id
+            title = events[0].title
         for group in self.list_groups():
-            groups[group.name] = {"users": [u.username for u in group.users]}
-        return {"groups": groups}
+            group_data: dict[str, object] = {"users": [u.username for u in group.users]}
+            if group.title:
+                group_data["title"] = group.title
+            groups[group.name] = group_data
+        result: dict[str, object] = {"groups": groups}
+        if event_id:
+            result["event_id"] = event_id
+        if title:
+            result["title"] = title
+        return result
+
+    # ── Events ────────────────────────────────────────────────────────
+
+    def list_events(self) -> list[EventRecord]:
+        """Return all events."""
+        return db_get_events(db_path=self._db_path)
+
+    def get_event(self, event_id: str) -> EventRecord:
+        """Get an event by its event_id string."""
+        event = db_get_event(event_id, db_path=self._db_path)
+        if event is None:
+            raise GroupNotFoundError(f"Event '{event_id}' not found")
+        return event
