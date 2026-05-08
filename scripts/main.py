@@ -64,6 +64,7 @@ PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.env import load_env
+
 load_env()
 
 
@@ -76,6 +77,8 @@ def resolve_path(path_str: str) -> Path:
     if resolved.exists():
         return resolved
     return p
+
+
 from datetime import timedelta
 from typing import Optional
 
@@ -277,6 +280,15 @@ async def _inject_kilo_config(
 async def _inject_vscode_settings(
     user: UserInfo, sandbox: "Sandbox", settings_content: str
 ) -> None:
+    try:
+        with open(settings_path) as f:
+            settings_content = f.read()
+    except FileNotFoundError:
+        print(
+            f"[{user.label}] Warning: VS Code settings not found at {settings_path}, skipping"
+        )
+        return
+
     settings_dir = "/home/vscode/.local/share/code-server/User"
     await sandbox.commands.run(f"mkdir -p {settings_dir}")
     encoded = base64.b64encode(settings_content.encode()).decode()
@@ -304,7 +316,12 @@ async def create_instance(
     env = {"PYTHON_VERSION": python_version}
 
     volumes: list[Volume] | None = None
-    if db_user and hasattr(db_user, "workspace_path") and db_user.workspace_path and db_user.workspace_path.startswith("thon-"):
+    if (
+        db_user
+        and hasattr(db_user, "workspace_path")
+        and db_user.workspace_path
+        and db_user.workspace_path.startswith("thon-")
+    ):
         volumes = [
             Volume(
                 name="workspace",
@@ -321,7 +338,9 @@ async def create_instance(
                     readOnly=False,
                 ),
             )
-        print(f"[{user.label}] Mounting PVC volumes: {db_user.workspace_path} -> /workspace")
+        print(
+            f"[{user.label}] Mounting PVC volumes: {db_user.workspace_path} -> /workspace"
+        )
         if len(volumes) > 1:
             print(f"[{user.label}]   storage: {db_user.storage_path} -> /storage")
     elif workspace_dir:
@@ -356,10 +375,7 @@ async def create_instance(
     endpoint_str = endpoint.endpoint
     endpoint_port = parse_endpoint_port(endpoint_str)
     network_mode = "bridge" if "/" in endpoint_str else "host"
-    print(
-        f"[{user.label}] Endpoint: {endpoint_str} "
-        f"(detected {network_mode} mode)"
-    )
+    print(f"[{user.label}] Endpoint: {endpoint_str} (detected {network_mode} mode)")
 
     upsert_record(
         sandbox_id=sandbox.id if hasattr(sandbox, "id") else "",
@@ -395,6 +411,7 @@ async def create_instance(
         kilo_content = generate_kilo_gateway_config(
             gateway_url=gateway_url,
             api_key=gateway_api_key,
+            enable_embedding=True,
         )
         kilo_dir = "/home/vscode/.config/kilo"
         await sandbox.commands.run(f"mkdir -p {kilo_dir}")
@@ -412,7 +429,9 @@ async def create_instance(
             f"cert: false\n"
         )
         await sandbox.commands.run(f"mkdir -p {config_dir}")
-        write_config = f"cat > {config_dir}/config.yaml << 'CONFIGEOF'\n{config_content}CONFIGEOF"
+        write_config = (
+            f"cat > {config_dir}/config.yaml << 'CONFIGEOF'\n{config_content}CONFIGEOF"
+        )
         await sandbox.commands.run(write_config)
 
     code_server_cmd = (
@@ -633,7 +652,9 @@ Examples:
 
     groups_path = resolve_path(args.groups) if args.groups else None
 
-    db_path_env = os.getenv("THON_DB_PATH")
+    db_path_env = (
+        os.getenv("THON_DB_PATH")
+    )
 
     users: list[UserInfo]
     if args.groups:
@@ -721,7 +742,9 @@ Examples:
     print(f"  Domain: {domain}")
     print(f"  Image: {image}")
     print(f"  Port range: {port_range}")
-    print(f"  Secure: {'Yes (per-user passwords)' if args.secure else 'No (--auth none)'}")
+    print(
+        f"  Secure: {'Yes (per-user passwords)' if args.secure else 'No (--auth none)'}"
+    )
     print(f"  Nginx: {'Yes (HTTPS)' if use_nginx else 'No (direct HTTP)'}")
     if external_ip:
         print(f"  External IP: {external_ip}")
@@ -734,7 +757,9 @@ Examples:
         src = "file" if args.vscode_settings else "database"
         print(f"  VS Code settings: ({src})")
     if args.gateway:
-        print(f"  AI Gateway: enabled (rate limit: {args.gateway_rate_limit} tokens/{args.gateway_time_window}s)")
+        print(
+            f"  AI Gateway: enabled (rate limit: {args.gateway_rate_limit} tokens/{args.gateway_time_window}s)"
+        )
         if args.gateway_redis_host:
             print(f"  Gateway Redis: {args.gateway_redis_host}")
     if args.groups:
@@ -756,8 +781,13 @@ Examples:
 
     db_user_map: dict[tuple[str, str], object] = {}
     try:
-        from app.db import GroupRecord as DBGroupRecord, UserRecord as DBUserRecord, get_session as db_get_session
+        from app.db import (
+            GroupRecord as DBGroupRecord,
+            UserRecord as DBUserRecord,
+            get_session as db_get_session,
+        )
         from sqlmodel import select as sql_select
+
         with db_get_session(os.getenv("THON_DB_PATH")) as session:
             group_name_map: dict[str, str] = {}
             for g in session.exec(sql_select(DBGroupRecord)).all():
@@ -793,6 +823,10 @@ Examples:
             lemonade_url=lemonade_url,
             lemonade_api_key=lemonade_api_key,
         )
+        gateway_mgr.create_embedding_route(
+            lemonade_url=lemonade_url,
+            lemonade_api_key=lemonade_api_key,
+        )
 
         if args.gateway_per_group:
             group_names: dict[str, list[UserInfo]] = {}
@@ -807,15 +841,19 @@ Examples:
                     time_window=args.gateway_time_window,
                 )
                 for user in group_users:
-                    gateway_consumers.append({
-                        "user": user,
-                        "api_key": consumer.api_key,
-                        "rate_limit": consumer.rate_limit,
-                        "time_window": consumer.time_window,
-                        "group_name": group_name,
-                        "user_count": user_count,
-                    })
-                print(f"[Gateway] Created group consumer: group-{group_name} ({user_count} users, {group_rate_limit} tokens/{args.gateway_time_window}s)")
+                    gateway_consumers.append(
+                        {
+                            "user": user,
+                            "api_key": consumer.api_key,
+                            "rate_limit": consumer.rate_limit,
+                            "time_window": consumer.time_window,
+                            "group_name": group_name,
+                            "user_count": user_count,
+                        }
+                    )
+                print(
+                    f"[Gateway] Created group consumer: group-{group_name} ({user_count} users, {group_rate_limit} tokens/{args.gateway_time_window}s)"
+                )
         else:
             for user in users:
                 consumer = gateway_mgr.create_consumer(
@@ -823,12 +861,14 @@ Examples:
                     rate_limit=args.gateway_rate_limit,
                     time_window=args.gateway_time_window,
                 )
-                gateway_consumers.append({
-                    "user": user,
-                    "api_key": consumer.api_key,
-                    "rate_limit": consumer.rate_limit,
-                    "time_window": consumer.time_window,
-                })
+                gateway_consumers.append(
+                    {
+                        "user": user,
+                        "api_key": consumer.api_key,
+                        "rate_limit": consumer.rate_limit,
+                        "time_window": consumer.time_window,
+                    }
+                )
     try:
         tasks = []
         for i, user in enumerate(users):
@@ -884,11 +924,17 @@ Examples:
                             check=True,
                         )
                     ca_cert_path = ca_serve_path
-                    print(f"[SSL] CA cert available at https://{external_ip or 'localhost'}/ca.crt")
+                    print(
+                        f"[SSL] CA cert available at https://{external_ip or 'localhost'}/ca.crt"
+                    )
                 else:
-                    print(f"[SSL] Warning: mkcert CA root dir exists but no rootCA.pem in {ca_root}")
+                    print(
+                        f"[SSL] Warning: mkcert CA root dir exists but no rootCA.pem in {ca_root}"
+                    )
             else:
-                print("[SSL] No mkcert CA root found (ca.crt download unavailable — install mkcert for browser-trusted certs)")
+                print(
+                    "[SSL] No mkcert CA root found (ca.crt download unavailable — install mkcert for browser-trusted certs)"
+                )
 
             ports = [inst.port for inst in instances]
             nginx_gen.generate_combined_config(
@@ -912,7 +958,11 @@ Examples:
                 print(f"\n  Group: {current_group}")
 
             ext_ip = external_ip or "localhost"
-            endpoint_path = inst.endpoint.split(":", 1)[1] if ":" in inst.endpoint else inst.endpoint
+            endpoint_path = (
+                inst.endpoint.split(":", 1)[1]
+                if ":" in inst.endpoint
+                else inst.endpoint
+            )
 
             if use_nginx:
                 https_url = f"https://{ext_ip}/{endpoint_path}/"
@@ -927,7 +977,9 @@ Examples:
             print(f"      Local: {http_url}")
             print(f"      Workspace: /workspace")
             if args.workspace_dir:
-                print(f"      Host path: {os.path.join(args.workspace_dir, inst.user.workspace)}")
+                print(
+                    f"      Host path: {os.path.join(args.workspace_dir, inst.user.workspace)}"
+                )
             if inst.password:
                 print(f"      Password: {inst.password}")
             if lemonade_config_content:
@@ -938,10 +990,15 @@ Examples:
                         ext_ip = external_ip or "localhost"
                         gateway_url = f"http://{ext_ip}:9080"
                         print(f"      Gateway API Key: {gc['api_key']}")
-                        print(f"      Gateway Endpoint: {gateway_url}/v1/chat/completions")
+                        print(f"      Gateway Chat: {gateway_url}/v1/chat/completions")
+                        print(f"      Gateway Embedding: {gateway_url}/v1/embeddings")
                         if gc.get("group_name"):
-                            print(f"      Gateway Mode: per-group ({gc['group_name']}, {gc.get('user_count', '?')} users sharing)")
-                        print(f"      Rate Limit: {gc['rate_limit']} tokens / {gc['time_window']}s")
+                            print(
+                                f"      Gateway Mode: per-group ({gc['group_name']}, {gc.get('user_count', '?')} users sharing)"
+                            )
+                        print(
+                            f"      Rate Limit: {gc['rate_limit']} tokens / {gc['time_window']}s"
+                        )
                         break
 
         print()
@@ -971,7 +1028,9 @@ Examples:
             try:
                 from apisix_gateway import ApisixGatewayManager
 
-                admin_key = os.getenv("GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1")
+                admin_key = os.getenv(
+                    "GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1"
+                )
                 gateway_mgr = ApisixGatewayManager(
                     admin_url="http://127.0.0.1:9180",
                     admin_key=admin_key,
@@ -996,7 +1055,9 @@ Examples:
                     db_path=os.getenv("THON_DB_PATH"),
                 )
             except Exception as e:
-                print(f"  Note: Sandbox {inst.user.label} may already be terminated: {e}")
+                print(
+                    f"  Note: Sandbox {inst.user.label} may already be terminated: {e}"
+                )
 
         print("Cleanup complete.")
 

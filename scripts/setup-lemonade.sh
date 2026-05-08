@@ -25,6 +25,9 @@ CTX_SIZE="${LEMONADE_CTX_SIZE:-262144}"
 MODEL="${LEMONADE_MODEL:-unsloth/gemma-4-31B-it-GGUF:Q8_K_XL}"
 MODEL_NAME="${LEMONADE_MODEL_NAME:-gemma-4-31b-it}"
 MMPROJ="${LEMONADE_MMPROJ:-mmproj-BF16.gguf}"
+EMBEDDING="${LEMONADE_EMBEDDING:-true}"
+EMBEDDING_MODEL="${LEMONADE_EMBEDDING_MODEL:-SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16}"
+EMBEDDING_MODEL_NAME="${LEMONADE_EMBEDDING_MODEL_NAME:-harrier-oss-v1-0.6b}"
 EXTERNAL_IP="${LEMONADE_EXTERNAL_IP:-}"
 GENERATE_KEYS="${LEMONADE_GENERATE_KEYS:-false}"
 KILO_CONFIG_OUTPUT="${LEMONADE_KILO_CONFIG:-${SCRIPT_DIR}/kilo.json}"
@@ -34,6 +37,7 @@ NUM_USERS="${LEMONADE_NUM_USERS:-1}"
 PREFER_SYSTEM="${LEMONADE_PREFER_SYSTEM:-true}"
 LLAMACPP_BIN="${LEMONADE_LLMACPP_BIN:-/usr/local/bin/llama-server}"
 PER_USER_CTX=262144
+EMBEDDING_PER_USER_CTX=32768
 CONFIG_DIR="/var/lib/lemonade/.cache/lemonade"
 
 usage() {
@@ -58,6 +62,10 @@ Options:
   --model MODEL         HuggingFace checkpoint (default: ${MODEL})
   --model-name NAME     Short model name for user_models.json (default: ${MODEL_NAME})
   --mmproj FILE         Multimodal projection model filename (default: ${MMPROJ})
+  --embedding           Enable embedding model for semantic indexing (default)
+  --no-embedding        Disable embedding model
+  --embedding-model MODEL   HuggingFace checkpoint for embedding model (default: ${EMBEDDING_MODEL})
+  --embedding-model-name NAME  Short name for embedding model (default: ${EMBEDDING_MODEL_NAME})
   --external-ip IP      External IP for kilo.json base URL
   --generate-keys       Generate API key and admin key in systemd override
   --no-prefer-system    Use bundled llama.cpp instead of system-installed
@@ -69,7 +77,8 @@ Environment variables (override defaults):
   LEMONADE_PORT, LEMONADE_HOST, LEMONADE_BACKEND, LEMONADE_CTX_SIZE,
   LEMONADE_MODEL, LEMONADE_MODEL_NAME, LEMONADE_EXTERNAL_IP,
   LEMONADE_GENERATE_KEYS, LEMONADE_NUM_USERS, LEMONADE_KILO_CONFIG,
-  LEMONADE_PREFER_SYSTEM, LEMONADE_LLMACPP_BIN, LEMONADE_MMPROJ
+  LEMONADE_PREFER_SYSTEM, LEMONADE_LLMACPP_BIN, LEMONADE_MMPROJ,
+  LEMONADE_EMBEDDING, LEMONADE_EMBEDDING_MODEL, LEMONADE_EMBEDDING_MODEL_NAME
 
 Examples:
   # Full setup with groups.yaml for user count
@@ -85,23 +94,27 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --groups)        GROUPS_FILE="$2"; shift 2 ;;
-        --group)         GROUP_FILTER="$2"; shift 2 ;;
-        --num-users)     NUM_USERS="$2"; shift 2 ;;
-        --port)          PORT="$2"; shift 2 ;;
-        --host)          HOST="$2"; shift 2 ;;
-        --backend)       BACKEND="$2"; shift 2 ;;
-        --ctx-size)      CTX_SIZE="$2"; shift 2 ;;
-        --model)         MODEL="$2"; shift 2 ;;
-        --model-name)    MODEL_NAME="$2"; shift 2 ;;
-        --mmproj)        MMPROJ="$2"; shift 2 ;;
-        --external-ip)   EXTERNAL_IP="$2"; shift 2 ;;
-        --generate-keys) GENERATE_KEYS="true"; shift ;;
-        --no-prefer-system) PREFER_SYSTEM="false"; shift ;;
-        --llamacpp-bin)  LLAMACPP_BIN="$2"; shift 2 ;;
-        --kilo-config)   KILO_CONFIG_OUTPUT="$2"; shift 2 ;;
-        -h|--help)       usage; exit 0 ;;
-        *)               echo "Unknown option: $1"; usage; exit 1 ;;
+        --groups)              GROUPS_FILE="$2"; shift 2 ;;
+        --group)               GROUP_FILTER="$2"; shift 2 ;;
+        --num-users)           NUM_USERS="$2"; shift 2 ;;
+        --port)                PORT="$2"; shift 2 ;;
+        --host)                HOST="$2"; shift 2 ;;
+        --backend)             BACKEND="$2"; shift 2 ;;
+        --ctx-size)            CTX_SIZE="$2"; shift 2 ;;
+        --model)               MODEL="$2"; shift 2 ;;
+        --model-name)          MODEL_NAME="$2"; shift 2 ;;
+        --mmproj)              MMPROJ="$2"; shift 2 ;;
+        --embedding)           EMBEDDING="true"; shift ;;
+        --no-embedding)        EMBEDDING="false"; shift ;;
+        --embedding-model)     EMBEDDING_MODEL="$2"; shift 2 ;;
+        --embedding-model-name) EMBEDDING_MODEL_NAME="$2"; shift 2 ;;
+        --external-ip)         EXTERNAL_IP="$2"; shift 2 ;;
+        --generate-keys)       GENERATE_KEYS="true"; shift ;;
+        --no-prefer-system)    PREFER_SYSTEM="false"; shift ;;
+        --llamacpp-bin)        LLAMACPP_BIN="$2"; shift 2 ;;
+        --kilo-config)         KILO_CONFIG_OUTPUT="$2"; shift 2 ;;
+        -h|--help)             usage; exit 0 ;;
+        *)                     echo "Unknown option: $1"; usage; exit 1 ;;
     esac
 done
 
@@ -140,21 +153,33 @@ if [[ "${PREFER_SYSTEM}" == "true" ]]; then
 else
     PREFER_SYSTEM_FLAG="--no-prefer-system"
 fi
+MAX_LOADED_MODELS=1
+if [[ "${EMBEDDING}" == "true" ]]; then
+    MAX_LOADED_MODELS=2
+fi
 python3 "${LEMONADE_PY}" configure \
     --port "${PORT}" \
     --host "${HOST}" \
     --llamacpp-backend "${BACKEND}" \
     --ctx-size "${CTX_SIZE}" \
+    --max-loaded-models "${MAX_LOADED_MODELS}" \
     ${PREFER_SYSTEM_FLAG} \
     --llamacpp-bin "${LLAMACPP_BIN}"
 
 echo "[Lemonade] Writing model configs (user_models.json + recipe_options.json)..."
+EMBEDDING_FLAG=""
+if [[ "${EMBEDDING}" == "true" ]]; then
+    EMBEDDING_FLAG="--embedding --embedding-model ${EMBEDDING_MODEL} --embedding-model-name ${EMBEDDING_MODEL_NAME}"
+else
+    EMBEDDING_FLAG="--no-embedding"
+fi
 python3 "${LEMONADE_PY}" write-model-configs \
     --model "${MODEL}" \
     --model-name "${MODEL_NAME}" \
     --num-users "${NUM_USERS}" \
     --llamacpp-backend "${BACKEND}" \
-    --mmproj "${MMPROJ}"
+    --mmproj "${MMPROJ}" \
+    ${EMBEDDING_FLAG}
 LEMONADE_USER="$(systemctl show lemonade-server -p User --value 2>/dev/null || echo lemonade)"
 sudo chown -R "${LEMONADE_USER}:${LEMONADE_USER}" "${CONFIG_DIR}"
 
@@ -194,6 +219,7 @@ else
 fi
 
 PREFIXED_NAME="user.${MODEL_NAME}"
+PREFIXED_EMB_NAME="user.${EMBEDDING_MODEL_NAME}"
 
 echo "[Lemonade] Pulling model: ${PREFIXED_NAME}"
 PULL_ENV=""
@@ -208,6 +234,16 @@ if python3 "${LEMONADE_PY}" status &>/dev/null && lemonade list 2>/dev/null | gr
 else
     eval ${PULL_ENV} lemonade pull "${PREFIXED_NAME}" --checkpoint main "${MODEL}" --recipe llamacpp || \
         echo "[Lemonade] Warning: Model pull failed (files may already be cached)"
+fi
+
+if [[ "${EMBEDDING}" == "true" ]]; then
+    echo "[Lemonade] Pulling embedding model: ${PREFIXED_EMB_NAME}"
+    if eval ${PULL_ENV} lemonade list 2>/dev/null | grep -q "${PREFIXED_EMB_NAME}.*Yes"; then
+        echo "[Lemonade] Embedding model already downloaded: ${PREFIXED_EMB_NAME}"
+    else
+        eval ${PULL_ENV} lemonade pull "${PREFIXED_EMB_NAME}" --checkpoint main "${EMBEDDING_MODEL}" --recipe llamacpp || \
+            echo "[Lemonade] Warning: Embedding model pull failed (files may already be cached)"
+    fi
 fi
 
 echo "[Lemonade] Loading model via API..."
@@ -229,12 +265,32 @@ CURL_ARGS+=(-d "{\"model\": \"${PREFIXED_NAME}\", \"recipe\": \"llamacpp\"}")
 curl "${CURL_ARGS[@]}" && echo "[Lemonade] Model loaded: ${PREFIXED_NAME}" || \
     echo "[Lemonade] Warning: Model load request failed (model may still be loading)"
 
+if [[ "${EMBEDDING}" == "true" ]]; then
+    echo "[Lemonade] Loading embedding model via API..."
+    EMB_CURL_ARGS=(-sf -X POST "http://${LOCAL_HOST}:${PORT}/api/v1/load"
+        -H "Content-Type: application/json")
+    if [[ -n "${ADMIN_KEY}" ]]; then
+        EMB_CURL_ARGS+=(-H "Authorization: Bearer ${ADMIN_KEY}")
+    elif [[ -n "${API_KEY}" ]]; then
+        EMB_CURL_ARGS+=(-H "Authorization: Bearer ${API_KEY}")
+    fi
+    EMB_CURL_ARGS+=(-d "{\"model\": \"${PREFIXED_EMB_NAME}\", \"recipe\": \"llamacpp\"}")
+
+    curl "${EMB_CURL_ARGS[@]}" && echo "[Lemonade] Embedding model loaded: ${PREFIXED_EMB_NAME}" || \
+        echo "[Lemonade] Warning: Embedding model load request failed (model may still be loading)"
+fi
+
 echo "[Lemonade] Generating kilo.json at ${KILO_CONFIG_OUTPUT}"
 KILO_ARGS=(
     --model "${MODEL}"
     --model-name "${MODEL_NAME}"
     --output "${KILO_CONFIG_OUTPUT}"
 )
+if [[ "${EMBEDDING}" == "true" ]]; then
+    KILO_ARGS+=(--embedding-model-name "${EMBEDDING_MODEL_NAME}")
+else
+    KILO_ARGS+=(--no-embedding)
+fi
 if [[ -n "${EXTERNAL_IP}" ]]; then
     KILO_ARGS+=(--external-ip "${EXTERNAL_IP}")
 fi
@@ -270,6 +326,10 @@ if [[ -n "${EXTERNAL_IP}" ]]; then
 fi
 echo "  Model:          ${MODEL}"
 echo "  Model name:     ${PREFIXED_NAME}"
+if [[ "${EMBEDDING}" == "true" ]]; then
+echo "  Embedding:      ${EMBEDDING_MODEL}"
+echo "  Embedding name: ${PREFIXED_EMB_NAME}"
+fi
 echo "  Parallel users: ${NUM_USERS}"
 echo "  Total ctx-size: ${TOTAL_CTX} (${PER_USER_CTX} x ${NUM_USERS})"
 if [[ -n "${API_KEY}" ]]; then

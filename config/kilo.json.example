@@ -16,5 +16,23 @@
       }
     }
   },
-  "model": "lemonade/user.gemma-4-31b-it"
+  "model": "lemonade/user.gemma-4-31b-it",
+  "experimental": {
+    "batch_tool": false,
+    "codebase_search": true,
+    "openTelemetry": false,
+    "continue_loop_on_deny": true,
+    "semantic_indexing": true,
+    "agent_manager_tool": true
+  },
+  "indexing": {
+    "enabled": true,
+    "provider": "openai-compatible",
+    "vectorStore": "lancedb",
+    "openai-compatible": {
+      "baseUrl": "http://localhost:13305/v1",
+      "apiKey": "PLACEHOLDER",
+      "model": "user.harrier-oss-v1-0.6b"
+    }
+  }
 }

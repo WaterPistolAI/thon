@@ -47,6 +47,7 @@ APISIX_ADMIN_API_KEY_DEFAULT = "edd1c9f034335f136f87ad84b625c8f1"
 APISIX_ADMIN_PORT_DEFAULT = 9180
 APISIX_PROXY_PORT_DEFAULT = 9080
 APISIX_ROUTE_ID = "ai-gateway-route"
+APISIX_EMBEDDING_ROUTE_ID = "ai-gateway-embedding-route"
 LEMONADE_INSTANCE_NAME = "lemonade-instance"
 RATE_LIMIT_TOKENS_DEFAULT = 500
 RATE_LIMIT_WINDOW_DEFAULT = 60
@@ -288,6 +289,66 @@ class ApisixGatewayManager:
         except RuntimeError as e:
             print(f"[Gateway] Warning: Could not delete route: {e}")
 
+    def create_embedding_route(
+        self,
+        lemonade_url: str,
+        lemonade_api_key: Optional[str] = None,
+        lemonade_embedding_model: str = "user.harrier-oss-v1-0.6b",
+    ) -> dict:
+        """Create an APISIX route for /v1/embeddings with key-auth and rate limiting.
+
+        Uses simple upstream proxying rather than ai-proxy-multi since
+        embedding requests are straightforward proxy passthrough.
+
+        Args:
+            lemonade_url: Upstream Lemonade server URL.
+            lemonade_api_key: API key for Lemonade authentication.
+            lemonade_embedding_model: Default embedding model name.
+
+        Returns:
+            APISIX Admin API response dict.
+        """
+        from urllib.parse import urlparse
+
+        parsed = urlparse(lemonade_url)
+        upstream_host = parsed.hostname or "127.0.0.1"
+        upstream_port = parsed.port or 13305
+
+        effective_key = lemonade_api_key or self._lemonade_api_key
+        headers: dict = {}
+        if effective_key:
+            headers["Authorization"] = f"Bearer {effective_key}"
+
+        route_data: dict = {
+            "uri": "/v1/embeddings",
+            "methods": ["POST"],
+            "plugins": {
+                "key-auth": {},
+                "proxy-rewrite": {
+                    "headers": headers if headers else {},
+                },
+            },
+            "upstream": {
+                "type": "roundrobin",
+                "nodes": {
+                    f"{upstream_host}:{upstream_port}": 1,
+                },
+            },
+        }
+
+        result = self._request(
+            f"/routes/{APISIX_EMBEDDING_ROUTE_ID}", method="PUT", data=route_data
+        )
+        print(f"[Gateway] Created embedding route: /v1/embeddings -> {lemonade_url}")
+        return result
+
+    def delete_embedding_route(self) -> None:
+        try:
+            self._request(f"/routes/{APISIX_EMBEDDING_ROUTE_ID}", method="DELETE")
+            print(f"[Gateway] Deleted embedding route: {APISIX_EMBEDDING_ROUTE_ID}")
+        except RuntimeError as e:
+            print(f"[Gateway] Warning: Could not delete embedding route: {e}")
+
     def cleanup(self) -> None:
         consumers = self.list_consumers()
         for consumer in consumers:
@@ -301,6 +362,7 @@ class ApisixGatewayManager:
                     )
 
         self.delete_ai_route()
+        self.delete_embedding_route()
         print("[Gateway] Cleanup complete")
 
     def setup_gateway(
@@ -309,7 +371,9 @@ class ApisixGatewayManager:
         users: Optional[list[ConsumerConfig]] = None,
         lemonade_api_key: Optional[str] = None,
         lemonade_model: str = "user.gemma-4-31b-it",
+        lemonade_embedding_model: str = "user.harrier-oss-v1-0.6b",
         route_uri: str = "/v1/chat/completions",
+        enable_embedding: bool = True,
     ) -> list[ConsumerConfig]:
         self.create_ai_route(
             lemonade_url=lemonade_url,
@@ -317,6 +381,13 @@ class ApisixGatewayManager:
             lemonade_model=lemonade_model,
             uri=route_uri,
         )
+
+        if enable_embedding:
+            self.create_embedding_route(
+                lemonade_url=lemonade_url,
+                lemonade_api_key=lemonade_api_key,
+                lemonade_embedding_model=lemonade_embedding_model,
+            )
 
         created: list[ConsumerConfig] = []
         if users:
@@ -336,8 +407,10 @@ def generate_kilo_gateway_config(
     gateway_url: str,
     api_key: str,
     model: str = "user.gemma-4-31b-it",
+    embedding_model: str = "user.harrier-oss-v1-0.6b",
+    enable_embedding: bool = True,
 ) -> str:
-    config = {
+    config: dict = {
         "providers": {
             "lemonade-gateway": {
                 "baseUrl": gateway_url,
@@ -350,7 +423,26 @@ def generate_kilo_gateway_config(
                 "modelId": model,
             }
         },
+        "experimental": {
+            "batch_tool": False,
+            "codebase_search": True,
+            "openTelemetry": False,
+            "continue_loop_on_deny": True,
+            "semantic_indexing": True,
+            "agent_manager_tool": True,
+        },
     }
+    if enable_embedding:
+        config["indexing"] = {
+            "enabled": True,
+            "provider": "openai-compatible",
+            "vectorStore": "lancedb",
+            "openai-compatible": {
+                "baseUrl": f"{gateway_url}/v1",
+                "apiKey": api_key,
+                "model": embedding_model,
+            },
+        }
     return json.dumps(config, indent=2)
 
 
@@ -446,6 +538,18 @@ Examples:
         type=str,
         help="External IP for kilo.json base URL",
     )
+    setup_parser.add_argument(
+        "--embedding-model",
+        type=str,
+        default="user.harrier-oss-v1-0.6b",
+        help="Embedding model name for Lemonade (default: user.harrier-oss-v1-0.6b)",
+    )
+    setup_parser.add_argument(
+        "--no-embedding",
+        action="store_true",
+        default=False,
+        help="Disable embedding route creation",
+    )
 
     consumer_parser = subparsers.add_parser(
         "create-consumer", help="Create a single consumer"
@@ -489,6 +593,18 @@ Examples:
     )
     kilo_parser.add_argument("--external-ip", type=str, default="127.0.0.1")
     kilo_parser.add_argument("--model", type=str, default="user.gemma-4-31b-it")
+    kilo_parser.add_argument(
+        "--embedding-model",
+        type=str,
+        default="user.harrier-oss-v1-0.6b",
+        help="Embedding model name for indexing config (default: user.harrier-oss-v1-0.6b)",
+    )
+    kilo_parser.add_argument(
+        "--no-embedding",
+        action="store_true",
+        default=False,
+        help="Omit indexing section from kilo.json",
+    )
 
     status_parser = subparsers.add_parser("status", help="Check gateway status")
     status_parser.add_argument(
@@ -583,6 +699,8 @@ Examples:
             users=users,
             lemonade_api_key=args.lemonade_api_key,
             lemonade_model=args.lemonade_model,
+            lemonade_embedding_model=args.embedding_model,
+            enable_embedding=not args.no_embedding,
         )
 
         print("\n" + "=" * 70)
@@ -598,13 +716,17 @@ Examples:
             print(
                 f"    Rate Limit: {consumer.rate_limit} tokens / {consumer.time_window}s"
             )
-            print(f"    Endpoint: {gateway_base}/v1/chat/completions")
+            print(f"    Chat Endpoint: {gateway_base}/v1/chat/completions")
+            if not args.no_embedding:
+                print(f"    Embedding Endpoint: {gateway_base}/v1/embeddings")
 
             if args.generate_kilo:
                 kilo_config = generate_kilo_gateway_config(
                     gateway_url=gateway_base,
                     api_key=consumer.api_key,
                     model=args.lemonade_model,
+                    embedding_model=args.embedding_model,
+                    enable_embedding=not args.no_embedding,
                 )
                 kilo_path = f"kilo-{consumer.username}.json"
                 Path(kilo_path).write_text(kilo_config)
@@ -634,6 +756,8 @@ Examples:
             gateway_url=gateway_url,
             api_key=args.api_key,
             model=args.model,
+            embedding_model=args.embedding_model,
+            enable_embedding=not args.no_embedding,
         )
         print(config)
 

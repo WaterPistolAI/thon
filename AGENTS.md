@@ -52,8 +52,14 @@ docker build -t waterpistol/thon:latest ./
 # Lemonade Server: full setup via shell (recommended — service manages its own lifecycle)
 bash ./setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 
+# Lemonade Server: full setup without embedding model
+bash ./setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4 --no-embedding
+
 # Lemonade Server: full setup via Python wrapper (alternative)
 python ./lemonade_server.py run --groups groups.yaml --generate-keys --external-ip 1.2.3.4
+
+# Lemonade Server: full setup with custom embedding model
+python ./lemonade_server.py run --groups groups.yaml --generate-keys --external-ip 1.2.3.4 --embedding-model SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16
 
 # Lemonade Server: service management (it runs as systemd, no long-running process needed)
 sudo systemctl status lemonade-server
@@ -274,15 +280,23 @@ lemonade pull <model>
 - Short name: `gemma-4-31b-it` (registered as `user.gemma-4-31b-it`; the `user.` prefix is required in API requests)
 - Recipe: `llamacpp` with auto-detected backend
 
+**Default Embedding Model:**
+- Checkpoint: `SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16`
+- Short name: `harrier-oss-v1-0.6b` (registered as `user.harrier-oss-v1-0.6b`)
+- Recipe: `llamacpp` with `--embedding` flag (managed by Lemonade, NOT in `llamacpp_args`)
+- Labels: `["custom", "embedding"]`
+- Enabled by default; disable with `--no-embedding`
+- `max_loaded_models` is automatically set to `2` when embedding is enabled (1 chat + 1 embedding)
+
 **Per-User Scaling:**
 When `--groups groups.yaml` is passed, the number of users is counted automatically and
 scales the llama.cpp args in `recipe_options.json`:
 
-| Parameter | Value |
-|-----------|-------|
-| `ctx_size` | `262144` (per-slot, set in recipe_options) |
-| `-np` | `num_users` |
-| Per-slot `ctx_size` | `262144` |
+| Parameter | Chat Model | Embedding Model |
+|-----------|-----------|-----------------|
+| `ctx_size` | `262144` per user | `32768` per user |
+| `-np` | `num_users` | `num_users` |
+| Per-slot `ctx_size` | `262144` | `32768` |
 
 Lemonade-managed args (reserved, must NOT be in `llamacpp_args`):
 `--ctx-size`, `-c`, `-ngl`, `--gpu-layers`, `--n-gpu-layers`, `--jinja`, `--no-jinja`,
@@ -306,6 +320,13 @@ Custom llama.cpp args (safe to override):
         "suggested": true,
         "labels": ["custom", "vision"],
         "mmproj": "mmproj-BF16.gguf"
+    },
+    "harrier-oss-v1-0.6b": {
+        "model_name": "harrier-oss-v1-0.6b",
+        "checkpoint": "SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16",
+        "recipe": "llamacpp",
+        "suggested": true,
+        "labels": ["custom", "embedding"]
     }
 }
 ```
@@ -317,6 +338,11 @@ Custom llama.cpp args (safe to override):
         "ctx_size": 262144,
         "llamacpp_backend": "auto",
         "llamacpp_args": "-b 8192 -ub 8192 -to 3600 -ctk q8_0 -ctv q8_0 --temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.0 --repeat-penalty 1.0 --no-webui --threads-http -1 --threads -1 -np 4"
+    },
+    "user.harrier-oss-v1-0.6b": {
+        "ctx_size": 32768,
+        "llamacpp_backend": "auto",
+        "llamacpp_args": "-b 8192 -ub 8192 -to 3600 -ctk q8_0 -ctv q8_0 --no-webui --threads-http -1 --threads -1 -np 4"
     }
 }
 ```
@@ -331,10 +357,11 @@ When both are set, either key is accepted for regular endpoints; admin key is re
 
 **Kilo Code Integration:**
 1. `setup-lemonade.sh --groups groups.yaml --generate-keys` generates API keys and writes `kilo.json`
-2. `kilo.json` contains: provider name (`lemonade`), base URL (auto-detected), API key, model ID (`user.gemma-4-31b-it`)
+2. `kilo.json` contains: provider name (`lemonade`), base URL (auto-detected), API key, model ID (`user.gemma-4-31b-it`), `experimental` flags, and `indexing` config for semantic code search
 3. Base URL resolution order: `--external-ip` > Docker bridge gateway > `localhost`
 4. `main.py --lemonade kilo.json` injects the config into each sandbox at `/workspace/.kilo/kilo.json`
 5. Kilo Code extension in the sandbox reads the config and connects to the Lemonade server
+6. The `indexing` section configures semantic code search using the embedding model (`user.harrier-oss-v1-0.6b`)
 
 **Full Workflow:**
 ```bash

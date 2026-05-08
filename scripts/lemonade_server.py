@@ -67,15 +67,16 @@ import yaml
 LEMONADE_CONFIG_DIR = Path("/var/lib/lemonade/.cache/lemonade")
 LEMONADE_CONFIG_PATH = LEMONADE_CONFIG_DIR / "config.json"
 SYSTEMD_SERVICE_NAME = "lemonade-server"
-SYSTEMD_OVERRIDE_DIR = Path(
-    f"/etc/systemd/system/{SYSTEMD_SERVICE_NAME}.service.d"
-)
+SYSTEMD_OVERRIDE_DIR = Path(f"/etc/systemd/system/{SYSTEMD_SERVICE_NAME}.service.d")
 DEFAULT_MODEL = "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL"
 DEFAULT_MODEL_NAME = "gemma-4-31b-it"
 DEFAULT_MMPROJ = "mmproj-BF16.gguf"
+DEFAULT_EMBEDDING_MODEL = "SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16"
+DEFAULT_EMBEDDING_MODEL_NAME = "harrier-oss-v1-0.6b"
 DEFAULT_PORT = 13305
 DEFAULT_HOST = "0.0.0.0"
 PER_USER_CTX = 262144
+EMBEDDING_PER_USER_CTX = 32768
 
 DEFAULT_LLMACPP_BIN = "/usr/local/bin/llama-server"
 
@@ -184,12 +185,7 @@ def detect_docker_host_ip() -> Optional[str]:
         if result.returncode == 0:
             data = json.loads(result.stdout)
             if data:
-                gateway = (
-                    data[0]
-                    .get("IPAM", {})
-                    .get("Config", [{}])[0]
-                    .get("Gateway")
-                )
+                gateway = data[0].get("IPAM", {}).get("Config", [{}])[0].get("Gateway")
                 if gateway:
                     return gateway
     except Exception:
@@ -251,9 +247,7 @@ class LemonadeServerManager:
             return
 
         print("[Lemonade] Installing lemonade-server via PPA...")
-        _run_cmd(
-            ["add-apt-repository", "-y", "ppa:lemonade-team/stable"], sudo=True
-        )
+        _run_cmd(["add-apt-repository", "-y", "ppa:lemonade-team/stable"], sudo=True)
         _run_cmd(["apt-get", "update"], sudo=True)
         _run_cmd(["apt-get", "install", "-y", "lemonade-server"], sudo=True)
         _run_cmd(["update-pciids"], sudo=True, check=False)
@@ -285,9 +279,7 @@ class LemonadeServerManager:
             "models_dir": existing.get("models_dir", "auto"),
             "ctx_size": ctx_size,
             "offline": existing.get("offline", False),
-            "disable_model_filtering": existing.get(
-                "disable_model_filtering", False
-            ),
+            "disable_model_filtering": existing.get("disable_model_filtering", False),
             "enable_dgpu_gtt": existing.get("enable_dgpu_gtt", False),
             "llamacpp": {
                 **LLAMACPP_DEFAULTS,
@@ -423,10 +415,14 @@ class LemonadeServerManager:
 
         cache_roots = [
             Path("/var/lib/lemonade/.cache/huggingface"),
-            Path(os.getenv(
-                "HF_HOME",
-                os.getenv("HF_HUB_CACHE", str(Path.home() / ".cache" / "huggingface")),
-            )),
+            Path(
+                os.getenv(
+                    "HF_HOME",
+                    os.getenv(
+                        "HF_HUB_CACHE", str(Path.home() / ".cache" / "huggingface")
+                    ),
+                )
+            ),
         ]
 
         for cache_root in cache_roots:
@@ -446,9 +442,7 @@ class LemonadeServerManager:
         """Load a model via the Lemonade HTTP API so it is ready for inference."""
         endpoint = self.get_endpoint()
         url = f"{endpoint}/api/v1/load"
-        payload = json.dumps(
-            {"model": model, "recipe": "llamacpp"}
-        ).encode()
+        payload = json.dumps({"model": model, "recipe": "llamacpp"}).encode()
         req = urllib.request.Request(
             url,
             data=payload,
@@ -516,7 +510,9 @@ class LemonadeServerManager:
             auto_entry = existing_models[auto_name_key]
             if not mmproj and "mmproj" in auto_entry:
                 mmproj = auto_entry["mmproj"]
-                print(f"[Lemonade] Inherited mmproj from auto-generated entry: {mmproj}")
+                print(
+                    f"[Lemonade] Inherited mmproj from auto-generated entry: {mmproj}"
+                )
             del existing_models[auto_name_key]
             print(f"[Lemonade] Removed auto-generated entry: {auto_name_key}")
 
@@ -559,9 +555,14 @@ class LemonadeServerManager:
         existing_options = _sudo_read_json(recipe_options_path) or {}
 
         prefixed_auto_name = f"user.{auto_name}"
-        if prefixed_auto_name in existing_options and prefixed_auto_name != prefixed_name:
+        if (
+            prefixed_auto_name in existing_options
+            and prefixed_auto_name != prefixed_name
+        ):
             del existing_options[prefixed_auto_name]
-            print(f"[Lemonade] Removed auto-generated recipe options: {prefixed_auto_name}")
+            print(
+                f"[Lemonade] Removed auto-generated recipe options: {prefixed_auto_name}"
+            )
 
         prefixed_name = f"user.{model_name}"
         existing_options[prefixed_name] = {
@@ -571,7 +572,74 @@ class LemonadeServerManager:
         }
         _sudo_write_json(recipe_options_path, existing_options)
         print(f"[Lemonade] recipe_options.json updated for {prefixed_name}")
-        print(f"[Lemonade]   ctx-size: {total_ctx} ({PER_USER_CTX} x {num_users} users)")
+        print(
+            f"[Lemonade]   ctx-size: {total_ctx} ({PER_USER_CTX} x {num_users} users)"
+        )
+        print(f"[Lemonade]   -np: {num_users}")
+        print(f"[Lemonade]   llamacpp_args: {llamacpp_args}")
+
+    def write_embedding_model_configs(
+        self,
+        model: str = DEFAULT_EMBEDDING_MODEL,
+        model_name: str = DEFAULT_EMBEDDING_MODEL_NAME,
+        num_users: int = 1,
+        llamacpp_backend: str = "auto",
+    ) -> None:
+        """Write embedding model entries into user_models.json and recipe_options.json.
+
+        Args:
+            model: HuggingFace checkpoint for the embedding model.
+            model_name: Short model name for config keys.
+            num_users: Number of parallel users; scales ctx-size and -np.
+            llamacpp_backend: llama.cpp backend (auto, vulkan, cpu).
+        """
+        user_models_path = self.config_dir / "user_models.json"
+        server_models_path = self.config_dir / "server_models.json"
+        recipe_options_path = self.config_dir / "recipe_options.json"
+
+        existing_models = _sudo_read_json(user_models_path) or {}
+
+        model_entry: dict = {
+            "model_name": model_name,
+            "checkpoint": model,
+            "recipe": "llamacpp",
+            "suggested": True,
+            "labels": ["custom", "embedding"],
+        }
+        existing_models[model_name] = model_entry
+        _sudo_write_json(user_models_path, existing_models)
+        print(f"[Lemonade] user_models.json updated with embedding model {model_name}")
+
+        server_models = _sudo_read_json(server_models_path) or {}
+        server_models[model_name] = model_entry
+        _sudo_write_json(server_models_path, server_models)
+        print(
+            f"[Lemonade] server_models.json updated with embedding model {model_name}"
+        )
+
+        total_ctx = EMBEDDING_PER_USER_CTX * num_users
+        llamacpp_args = (
+            f"-b 8192 -ub 8192 "
+            f"-to 3600 "
+            f"-ctk q8_0 -ctv q8_0 "
+            f"--no-webui "
+            f"--threads-http -1 --threads -1 "
+            f"-np {num_users}"
+        )
+
+        existing_options = _sudo_read_json(recipe_options_path) or {}
+
+        prefixed_name = f"user.{model_name}"
+        existing_options[prefixed_name] = {
+            "ctx_size": total_ctx,
+            "llamacpp_backend": llamacpp_backend,
+            "llamacpp_args": llamacpp_args,
+        }
+        _sudo_write_json(recipe_options_path, existing_options)
+        print(f"[Lemonade] recipe_options.json updated for embedding {prefixed_name}")
+        print(
+            f"[Lemonade]   ctx-size: {total_ctx} ({EMBEDDING_PER_USER_CTX} x {num_users} users)"
+        )
         print(f"[Lemonade]   -np: {num_users}")
         print(f"[Lemonade]   llamacpp_args: {llamacpp_args}")
 
@@ -581,6 +649,7 @@ class LemonadeServerManager:
         model_name: str = DEFAULT_MODEL_NAME,
         external_ip: Optional[str] = None,
         output_path: Optional[Path] = None,
+        embedding_model_name: Optional[str] = DEFAULT_EMBEDDING_MODEL_NAME,
     ) -> Path:
         """Generate a kilo.json config for Kilo Code pointing at this Lemonade server.
 
@@ -592,6 +661,7 @@ class LemonadeServerManager:
             model_name: Short model name used as kilo.json model ID.
             external_ip: External IP for sandbox access.
             output_path: Path to write kilo.json. Defaults to ./kilo.json.
+            embedding_model_name: Short name of the embedding model for indexing.
 
         Returns:
             Path to the generated kilo.json file.
@@ -629,16 +699,39 @@ class LemonadeServerManager:
                 },
             },
             "model": f"lemonade/{prefixed_model_name}",
+            "experimental": {
+                "batch_tool": False,
+                "codebase_search": True,
+                "openTelemetry": False,
+                "continue_loop_on_deny": True,
+                "semantic_indexing": True,
+                "agent_manager_tool": True,
+            },
+            "indexing": {
+                "enabled": True,
+                "provider": "openai-compatible",
+                "vectorStore": "lancedb",
+                "openai-compatible": {
+                    "baseUrl": base_url,
+                    "apiKey": auth_key,
+                },
+            },
         }
+
+        if embedding_model_name:
+            prefixed_emb = f"user.{embedding_model_name}"
+            config["indexing"]["openai-compatible"]["model"] = prefixed_emb
 
         target = output_path or Path("kilo.json")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(config, indent=2))
 
         print(f"[Lemonade] Kilo Code config written to {target}")
-        print(f"[Lemonade]   Provider:  lemonade")
+        print("[Lemonade]   Provider:  lemonade")
         print(f"[Lemonade]   Base URL:  {base_url}")
         print(f"[Lemonade]   Model:     lemonade/{prefixed_model_name}")
+        if embedding_model_name:
+            print(f"[Lemonade]   Embedding: user.{embedding_model_name}")
         if auth_key != "none":
             print(f"[Lemonade]   API Key:   {auth_key}")
         return target
@@ -710,6 +803,9 @@ async def cmd_run(
     kilo_config: Optional[str] = None,
     prefer_system: bool = True,
     llamacpp_bin: str = DEFAULT_LLMACPP_BIN,
+    embedding: bool = True,
+    embedding_model: str = DEFAULT_EMBEDDING_MODEL,
+    embedding_model_name: str = DEFAULT_EMBEDDING_MODEL_NAME,
 ) -> None:
     if groups_file:
         num_users = load_user_count(groups_file, group_filter)
@@ -721,6 +817,9 @@ async def cmd_run(
         num_users = 1
 
     total_ctx = PER_USER_CTX * num_users
+
+    if embedding and max_loaded_models < 2:
+        max_loaded_models = 2
 
     manager = LemonadeServerManager(
         api_key=api_key,
@@ -737,6 +836,14 @@ async def cmd_run(
         llamacpp_backend=llamacpp_backend,
         mmproj=mmproj,
     )
+
+    if embedding:
+        manager.write_embedding_model_configs(
+            model=embedding_model,
+            model_name=embedding_model_name,
+            num_users=num_users,
+            llamacpp_backend=llamacpp_backend,
+        )
 
     manager.configure(
         port=port,
@@ -761,8 +868,16 @@ async def cmd_run(
     prefixed_model = f"user.{model_name}"
     manager.pull_model(prefixed_model, checkpoint=model)
 
+    if embedding:
+        prefixed_emb = f"user.{embedding_model_name}"
+        manager.pull_model(prefixed_emb, checkpoint=embedding_model)
+
     await asyncio.sleep(2)
     manager.load_model(prefixed_model)
+
+    if embedding:
+        await asyncio.sleep(2)
+        manager.load_model(prefixed_emb)
 
     _print_endpoint_info(manager, model, port, external_ip)
 
@@ -773,6 +888,7 @@ async def cmd_run(
             model_name=model_name,
             external_ip=external_ip,
             output_path=output,
+            embedding_model_name=embedding_model_name if embedding else None,
         )
 
     print("Keeping server alive. Press Ctrl+C to exit.")
@@ -822,14 +938,18 @@ Examples:
 
     subparsers.add_parser("install", help="Install lemonade-server via PPA")
 
-    config_parser = subparsers.add_parser(
-        "configure", help="Configure server settings"
+    config_parser = subparsers.add_parser("configure", help="Configure server settings")
+    config_parser.add_argument(
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help=f"Server port (default: {DEFAULT_PORT})",
     )
     config_parser.add_argument(
-        "--port", type=int, default=DEFAULT_PORT, help=f"Server port (default: {DEFAULT_PORT})"
-    )
-    config_parser.add_argument(
-        "--host", type=str, default=DEFAULT_HOST, help=f"Bind address (default: {DEFAULT_HOST})"
+        "--host",
+        type=str,
+        default=DEFAULT_HOST,
+        help=f"Bind address (default: {DEFAULT_HOST})",
     )
     config_parser.add_argument(
         "--llamacpp-backend",
@@ -856,7 +976,10 @@ Examples:
         help=f"Path to system llama-server binary (default: {DEFAULT_LLMACPP_BIN})",
     )
     config_parser.add_argument(
-        "--ctx-size", type=int, default=4096, help="Default context size (default: 4096)"
+        "--ctx-size",
+        type=int,
+        default=4096,
+        help="Default context size (default: 4096)",
     )
     config_parser.add_argument(
         "--max-loaded-models",
@@ -871,7 +994,10 @@ Examples:
         help="Generate API key and admin API key, store in systemd override",
     )
     config_parser.add_argument(
-        "--api-key", type=str, default=None, help="Set a specific API key (overrides generate)"
+        "--api-key",
+        type=str,
+        default=None,
+        help="Set a specific API key (overrides generate)",
     )
     config_parser.add_argument(
         "--admin-api-key",
@@ -946,10 +1072,16 @@ Examples:
         help="Override number of parallel users (default: 1, or auto from --groups)",
     )
     run_parser.add_argument(
-        "--port", type=int, default=DEFAULT_PORT, help=f"Server port (default: {DEFAULT_PORT})"
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
+        help=f"Server port (default: {DEFAULT_PORT})",
     )
     run_parser.add_argument(
-        "--host", type=str, default=DEFAULT_HOST, help=f"Bind address (default: {DEFAULT_HOST})"
+        "--host",
+        type=str,
+        default=DEFAULT_HOST,
+        help=f"Bind address (default: {DEFAULT_HOST})",
     )
     run_parser.add_argument(
         "--llamacpp-backend",
@@ -976,7 +1108,10 @@ Examples:
         help=f"Path to system llama-server binary (default: {DEFAULT_LLMACPP_BIN})",
     )
     run_parser.add_argument(
-        "--ctx-size", type=int, default=4096, help="Default context size (default: 4096)"
+        "--ctx-size",
+        type=int,
+        default=4096,
+        help="Default context size (default: 4096)",
     )
     run_parser.add_argument(
         "--max-loaded-models",
@@ -1022,6 +1157,30 @@ Examples:
         type=str,
         default=None,
         help="Generate kilo.json for Kilo Code at this path (default: ./kilo.json when --generate-keys is set)",
+    )
+    run_parser.add_argument(
+        "--embedding",
+        action="store_true",
+        default=True,
+        help="Enable embedding model for semantic indexing (default: True)",
+    )
+    run_parser.add_argument(
+        "--no-embedding",
+        action="store_false",
+        dest="embedding",
+        help="Disable embedding model",
+    )
+    run_parser.add_argument(
+        "--embedding-model",
+        type=str,
+        default=DEFAULT_EMBEDDING_MODEL,
+        help=f"HuggingFace checkpoint for embedding model (default: {DEFAULT_EMBEDDING_MODEL})",
+    )
+    run_parser.add_argument(
+        "--embedding-model-name",
+        type=str,
+        default=DEFAULT_EMBEDDING_MODEL_NAME,
+        help=f"Short name for embedding model (default: {DEFAULT_EMBEDDING_MODEL_NAME})",
     )
 
     count_users_parser = subparsers.add_parser(
@@ -1075,6 +1234,30 @@ Examples:
         default=DEFAULT_MMPROJ,
         help=f"Multimodal projection model filename (default: {DEFAULT_MMPROJ})",
     )
+    write_model_configs_parser.add_argument(
+        "--embedding",
+        action="store_true",
+        default=True,
+        help="Also write embedding model configs (default: True)",
+    )
+    write_model_configs_parser.add_argument(
+        "--no-embedding",
+        action="store_false",
+        dest="embedding",
+        help="Skip embedding model configs",
+    )
+    write_model_configs_parser.add_argument(
+        "--embedding-model",
+        type=str,
+        default=DEFAULT_EMBEDDING_MODEL,
+        help=f"Embedding model HuggingFace checkpoint (default: {DEFAULT_EMBEDDING_MODEL})",
+    )
+    write_model_configs_parser.add_argument(
+        "--embedding-model-name",
+        type=str,
+        default=DEFAULT_EMBEDDING_MODEL_NAME,
+        help=f"Short name for embedding model (default: {DEFAULT_EMBEDDING_MODEL_NAME})",
+    )
 
     generate_kilo_parser = subparsers.add_parser(
         "generate-kilo-config",
@@ -1116,6 +1299,18 @@ Examples:
         default=None,
         help="Admin API key (preferred over --api-key)",
     )
+    generate_kilo_parser.add_argument(
+        "--embedding-model-name",
+        type=str,
+        default=DEFAULT_EMBEDDING_MODEL_NAME,
+        help=f"Short name for embedding model in indexing config (default: {DEFAULT_EMBEDDING_MODEL_NAME})",
+    )
+    generate_kilo_parser.add_argument(
+        "--no-embedding",
+        action="store_true",
+        default=False,
+        help="Omit indexing section from kilo.json",
+    )
 
     subparsers.add_parser("cleanup", help="Stop server and clean up")
 
@@ -1151,7 +1346,9 @@ Examples:
                 output_path=Path(args.kilo_config) if args.kilo_config else None,
             )
         elif args.kilo_config:
-            print("[Lemonade] Warning: --kilo-config requires --generate-keys or --api-key to set authentication")
+            print(
+                "[Lemonade] Warning: --kilo-config requires --generate-keys or --api-key to set authentication"
+            )
     elif args.command == "start":
         manager.start()
     elif args.command == "stop":
@@ -1184,6 +1381,9 @@ Examples:
                 prefer_system=args.prefer_system,
                 llamacpp_bin=args.llamacpp_bin,
                 mmproj=args.mmproj,
+                embedding=args.embedding,
+                embedding_model=args.embedding_model,
+                embedding_model_name=args.embedding_model_name,
             )
         )
     elif args.command == "count-users":
@@ -1197,16 +1397,25 @@ Examples:
             llamacpp_backend=args.llamacpp_backend,
             mmproj=args.mmproj,
         )
+        if args.embedding:
+            manager.write_embedding_model_configs(
+                model=args.embedding_model,
+                model_name=args.embedding_model_name,
+                num_users=args.num_users,
+                llamacpp_backend=args.llamacpp_backend,
+            )
     elif args.command == "generate-kilo-config":
         mgr = LemonadeServerManager(
             api_key=args.api_key,
             admin_api_key=args.admin_api_key,
         )
+        emb_name = None if args.no_embedding else args.embedding_model_name
         mgr.generate_kilo_config(
             model=args.model,
             model_name=args.model_name,
             external_ip=args.external_ip,
             output_path=Path(args.output),
+            embedding_model_name=emb_name,
         )
     elif args.command == "cleanup":
         manager.cleanup()
