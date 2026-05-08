@@ -418,9 +418,11 @@ extensions making cross-site requests to github.com — cannot be fixed server-s
 
 | File | Purpose |
 |------|---------|
-| `dashboard/index.html` | Single-page HTML shell with sidebar nav, modals, table layout |
-| `dashboard/static/style.css` | Dark theme CSS (CSS variables, cards, badges, modals, toasts) |
-| `dashboard/static/app.js` | Frontend JS: instance CRUD, bulk actions, lemonade status, filtering, toasts |
+| `dashboard/streamlit_app.py` | Streamlit dashboard: instance CRUD, groups management, lemonade status, settings |
+| `dashboard/streamlit_styles.py` | Dark theme CSS injection for Streamlit (matches original JS dashboard theme) |
+| `dashboard/index.html` | Legacy single-page HTML shell (superseded by Streamlit) |
+| `dashboard/static/style.css` | Legacy dark theme CSS (superseded by Streamlit) |
+| `dashboard/static/app.js` | Legacy frontend JS (superseded by Streamlit) |
 
 ## Dashboard Architecture
 
@@ -505,20 +507,26 @@ app/models.py        → Pydantic domain models
 
 ### Running the Dashboard
 
+The dashboard is a Streamlit application that calls the backend services directly.
+The FastAPI server still provides the REST API on port 8100 for programmatic access.
+
 ```bash
 # Install dashboard dependencies
-pip install fastapi uvicorn pydantic
+pip install streamlit pandas fastapi uvicorn pydantic
 
-# Run the dashboard (auth disabled)
+# Run the Streamlit dashboard
+streamlit run dashboard/streamlit_app.py --server.port 8501
+
+# Dashboard available at http://localhost:8501
+
+# Run the REST API server separately (optional, for API access)
 python -m app.main
+# API docs at http://localhost:8100/docs
 
-# Run with auth enabled
+# Run with auth enabled (FastAPI only — Streamlit uses services directly)
 AUTH_ENABLED=true AUTH_SESSION_SECRET=my-secret \
 AUTH_GITHUB_CLIENT_ID=xxx AUTH_GITHUB_CLIENT_SECRET=xxx \
 python -m app.main
-
-# Dashboard available at http://localhost:8100
-# API docs at http://localhost:8100/docs
 ```
 
 ### Future Roadmap

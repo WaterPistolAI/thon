@@ -12,15 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""FastAPI application entry point for THON dashboard."""
+"""FastAPI REST API entry point for THON — dashboard served via Streamlit."""
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import RedirectResponse
 
 from app.config import AppConfig
 from app.services.groups_service import GroupsService
@@ -104,17 +102,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(instances_router)
     app.include_router(lemonade_router)
 
-    dashboard_dir = Path(__file__).parent.parent / "dashboard"
-    static_dir = dashboard_dir / "static"
-    if static_dir.exists():
-        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-
     @app.get("/")
     async def index():
-        index_path = dashboard_dir / "index.html"
-        if index_path.exists():
-            return FileResponse(str(index_path))
-        return {"message": "THON API", "docs": "/docs"}
+        return RedirectResponse(url="/docs")
 
     return app
 
