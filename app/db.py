@@ -278,6 +278,35 @@ def set_setting(key: str, value: str, db_path: Optional[str] = None) -> None:
         session.commit()
 
 
+def get_settings_by_prefix(prefix: str, db_path: Optional[str] = None) -> dict[str, str]:
+    """Retrieve all settings whose key starts with prefix."""
+    with get_session(db_path) as session:
+        settings = session.exec(
+            select(AppSetting).where(AppSetting.key.startswith(prefix))
+        ).all()
+        return {s.key: s.value for s in settings}
+
+
+def delete_setting(key: str, db_path: Optional[str] = None) -> bool:
+    """Delete a global setting by key."""
+    with get_session(db_path) as session:
+        setting = session.exec(
+            select(AppSetting).where(AppSetting.key == key)
+        ).first()
+        if not setting:
+            return False
+        session.delete(setting)
+        session.commit()
+        return True
+
+
+CONFIG_FILE_KEYS = (
+    "config_groups_yaml",
+    "config_kilo_json",
+    "config_vscode_settings",
+)
+
+
 # ── Event CRUD ──────────────────────────────────────────────────────
 
 

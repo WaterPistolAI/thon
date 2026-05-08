@@ -103,12 +103,14 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     )
 
     from app.api.routes.auth import router as auth_router
+    from app.api.routes.config_files import router as config_files_router
     from app.api.routes.gateway import router as gateway_router
     from app.api.routes.groups import router as groups_router
     from app.api.routes.instances import router as instances_router
     from app.api.routes.lemonade import router as lemonade_router
 
     app.include_router(auth_router)
+    app.include_router(config_files_router)
     app.include_router(gateway_router)
     app.include_router(groups_router)
     app.include_router(instances_router)

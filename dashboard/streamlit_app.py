@@ -1066,6 +1066,83 @@ def page_settings() -> None:
         st.toast("External IP saved")
         st.rerun()
 
+    st.divider()
+
+    _config_files_section(db_path)
+
+
+def _config_files_section(db_path: str) -> None:
+    st.subheader("Configuration Files")
+    st.caption(
+        "Upload or edit config files here. When `main.py` runs without flags, "
+        "it reads these from the database."
+    )
+
+    from app.db import CONFIG_FILE_KEYS
+
+    labels = {
+        "config_groups_yaml": "Groups YAML",
+        "config_kilo_json": "Kilo Code Config (kilo.json)",
+        "config_vscode_settings": "VS Code Settings",
+    }
+    descriptions = {
+        "config_groups_yaml": "Groups and users definition. Used by `main.py --groups` and `--from-db`.",
+        "config_kilo_json": "Kilo Code provider config injected into each sandbox for LLM inference.",
+        "config_vscode_settings": "VS Code settings injected into each sandbox's code-server.",
+    }
+    extensions = {
+        "config_groups_yaml": ["yaml", "yml"],
+        "config_kilo_json": ["json", "jsonc"],
+        "config_vscode_settings": ["json", "jsonc"],
+    }
+
+    for key in CONFIG_FILE_KEYS:
+        label = labels.get(key, key)
+        current = get_setting(key, db_path=db_path) or ""
+        has_content = current.strip() != ""
+        status = "✅ Configured" if has_content else "❌ Not set"
+
+        with st.expander(f"{label} — {status}"):
+            st.caption(descriptions.get(key, ""))
+
+            tab_upload, tab_edit = st.tabs(["Upload File", "Edit"])
+
+            with tab_upload:
+                uploaded = st.file_uploader(
+                    f"Upload {label}",
+                    type=extensions.get(key, []),
+                    key=f"upload-{key}",
+                    label_visibility="collapsed",
+                )
+                if uploaded is not None:
+                    content = uploaded.read().decode("utf-8", errors="replace")
+                    if st.button("Save Upload", key=f"save-upload-{key}"):
+                        set_setting(key, content, db_path=db_path)
+                        st.toast(f"{label} saved from upload")
+                        st.rerun()
+
+            with tab_edit:
+                editor_height = min(max(current.count("\n") + 5, 10), 40)
+                edited = st.text_area(
+                    "Content",
+                    value=current,
+                    height=editor_height * 25,
+                    key=f"edit-{key}",
+                    label_visibility="collapsed",
+                )
+                c1, c2 = st.columns(2)
+                with c1:
+                    if st.button("Save", key=f"save-edit-{key}"):
+                        set_setting(key, edited, db_path=db_path)
+                        st.toast(f"{label} saved")
+                        st.rerun()
+                with c2:
+                    if has_content and st.button("Delete", key=f"delete-{key}"):
+                        from app.db import delete_setting
+                        delete_setting(key, db_path=db_path)
+                        st.toast(f"{label} removed")
+                        st.rerun()
+
 
 def main() -> None:
     inject_dark_theme()
