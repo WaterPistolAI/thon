@@ -65,6 +65,9 @@ class GroupRecord(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
     name: str = Field(unique=True, index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+    users: list["UserRecord"] = Field(default_factory=list, exclude=True)
 
 
 class UserRecord(SQLModel, table=True):
@@ -78,6 +81,7 @@ class UserRecord(SQLModel, table=True):
     workspace_path: Optional[str] = Field(default=None)
     storage_path: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
     @property
     def workspace(self) -> str:

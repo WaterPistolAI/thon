@@ -19,6 +19,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from app.env import load_env
+
+load_env()
+
 
 @dataclass
 class SandboxConfig:
@@ -91,7 +95,7 @@ class AppConfig:
     nginx: NginxConfig = field(default_factory=NginxConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     groups_file: Optional[Path] = None
-    workspace_dir: Optional[str] = None
+    workspace_dir: Optional[str] = field(default_factory=lambda: os.getenv("THON_WORKSPACE_DIR"))
 
     @classmethod
     def from_env(cls, groups_file: Optional[str] = None) -> "AppConfig":

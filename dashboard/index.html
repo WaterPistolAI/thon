@@ -15,7 +15,7 @@
           <span class="nav-icon">&#9633;</span> Instances
         </button>
         <button class="nav-item" data-page="groups">
-          <span class="nav-icon">&#9674;</span> Groups
+          <span class="nav-icon">&#128101;</span> Groups
         </button>
         <button class="nav-item" data-page="lemonade">
           <span class="nav-icon">&#9889;</span> Lemonade Server
@@ -115,21 +115,22 @@
           </div>
           <div class="stat-card">
             <div class="stat-label">Total Users</div>
-            <div class="stat-value text-info" id="stat-total-users">-</div>
+            <div class="stat-value" id="stat-users">-</div>
           </div>
         </div>
 
         <div class="card">
           <div class="toolbar">
-            <input type="text" class="search-input" placeholder="Search groups..." id="group-search-input" oninput="filterGroups()">
+            <input type="text" class="search-input" placeholder="Search groups..." id="groups-search-input" oninput="filterGroups()">
+            <div style="flex:1"></div>
           </div>
-          <div id="groups-list"></div>
+          <div id="groups-container"></div>
           <div id="groups-loading" class="loading">
             <div class="spinner"></div>
             <p>Loading groups...</p>
           </div>
           <div id="groups-empty" class="empty-state" style="display:none;">
-            <p>No groups found</p>
+            <p>No groups configured</p>
             <button class="btn btn-primary" onclick="openCreateGroupModal()">Create your first group</button>
           </div>
         </div>
@@ -384,6 +385,70 @@
       <div class="modal-actions">
         <button class="btn" onclick="closeCreateModal()">Cancel</button>
         <button class="btn btn-primary" onclick="createInstance()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create Group Modal -->
+  <div class="modal-overlay" id="create-group-modal">
+    <div class="modal">
+      <div class="modal-title">Create Group</div>
+      <div class="form-group">
+        <label class="form-label">Group Name</label>
+        <input type="text" class="form-input" id="create-group-name" placeholder="e.g. alpha">
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeCreateGroupModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createGroup()">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Group Modal -->
+  <div class="modal-overlay" id="edit-group-modal">
+    <div class="modal">
+      <div class="modal-title">Rename Group</div>
+      <div class="form-group">
+        <label class="form-label">Group Name</label>
+        <input type="text" class="form-input" id="edit-group-name">
+        <input type="hidden" id="edit-group-id">
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeEditGroupModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveGroup()">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add User Modal -->
+  <div class="modal-overlay" id="add-user-modal">
+    <div class="modal">
+      <div class="modal-title">Add User</div>
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input type="text" class="form-input" id="add-user-username" placeholder="e.g. alice">
+        <input type="hidden" id="add-user-group-id">
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeAddUserModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="addUser()">Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit User Modal -->
+  <div class="modal-overlay" id="edit-user-modal">
+    <div class="modal">
+      <div class="modal-title">Rename User</div>
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input type="text" class="form-input" id="edit-user-username">
+        <input type="hidden" id="edit-user-id">
+        <input type="hidden" id="edit-user-group-id">
+      </div>
+      <div class="modal-actions">
+        <button class="btn" onclick="closeEditUserModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveUser()">Save</button>
       </div>
     </div>
   </div>

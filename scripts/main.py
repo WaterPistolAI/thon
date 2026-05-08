@@ -63,6 +63,9 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.env import load_env
+load_env()
+
 
 def resolve_path(path_str: str) -> Path:
     """Resolve a path relative to SCRIPT_DIR if not absolute."""
@@ -86,6 +89,7 @@ from opensandbox.models.sandboxes import Host, Volume
 from nginx_config import NginxConfigGenerator
 from ssl_cert import SSLCertificateGenerator
 from app.db import upsert_record, mark_terminated, set_setting
+from app.services.groups_service import GroupsService
 
 
 @dataclass
@@ -494,8 +498,28 @@ Examples:
         if args.group and not any(u.group == args.group for u in users):
             print(f"Error: Group '{args.group}' not found in {args.groups}")
             sys.exit(1)
+
+        with open(groups_path) as f:
+            yaml_data = yaml.safe_load(f)
+        groups_svc = GroupsService(
+            db_path=os.getenv("THON_DB_PATH"),
+            workspace_dir=args.workspace_dir,
+        )
+        imported = groups_svc.import_from_yaml(yaml_data)
+        backfilled = groups_svc.backfill_storage_paths()
+        if imported > 0:
+            print(f"  Synced {imported} user(s) from groups.yaml to database")
+        if backfilled > 0:
+            print(f"  Backfilled storage paths for {backfilled} user(s)")
     else:
         users = [UserInfo(group="default", username="workspace")]
+        groups_svc = GroupsService(
+            db_path=os.getenv("THON_DB_PATH"),
+            workspace_dir=args.workspace_dir,
+        )
+        yaml_data = {"groups": {"default": {"users": ["workspace"]}}}
+        groups_svc.import_from_yaml(yaml_data)
+        groups_svc.backfill_storage_paths()
 
     total = len(users)
     port_range = f"{args.port} - {args.port + total - 1}"

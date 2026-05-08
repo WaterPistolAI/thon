@@ -4,6 +4,8 @@ let selectedIds = new Set();
 
 // ── Navigation ──────────────────────────────────────────────────────
 
+let allGroups = [];
+
 document.querySelectorAll('.nav-item[data-page]').forEach(btn => {
   btn.addEventListener('click', () => {
     document.querySelectorAll('.nav-item').forEach(b => b.classList.remove('active'));
@@ -637,6 +639,239 @@ function renderSystemInfo(sysInfo) {
         + '<td>' + avail + '</td>'
         + '</tr>';
     }).join('');
+  }
+}
+
+// ── Groups ──────────────────────────────────────────────────────────
+
+async function refreshGroups() {
+  const loading = document.getElementById('groups-loading');
+  const empty = document.getElementById('groups-empty');
+  const container = document.getElementById('groups-container');
+  loading.style.display = '';
+  empty.style.display = 'none';
+  container.innerHTML = '';
+
+  try {
+    const data = await api('/api/groups');
+    allGroups = data || [];
+    loading.style.display = 'none';
+    updateGroupStats();
+    renderGroups(allGroups);
+  } catch (e) {
+    loading.style.display = 'none';
+    showToast('Failed to load groups: ' + e.message, 'error');
+    empty.style.display = '';
+  }
+}
+
+function updateGroupStats() {
+  const totalUsers = allGroups.reduce((sum, g) => sum + (g.users ? g.users.length : 0), 0);
+  document.getElementById('stat-groups').textContent = allGroups.length;
+  document.getElementById('stat-users').textContent = totalUsers;
+}
+
+function truncUuid(id) {
+  if (!id) return '-';
+  return id.length > 8 ? id.slice(0, 8) : id;
+}
+
+function renderGroups(groups) {
+  const container = document.getElementById('groups-container');
+  const empty = document.getElementById('groups-empty');
+
+  if (groups.length === 0) {
+    container.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+
+  empty.style.display = 'none';
+  container.innerHTML = groups.map(group => {
+    const users = group.users || [];
+    const usersHtml = users.length > 0
+      ? users.map(u => {
+          return '<tr>'
+            + '<td class="instance-id" title="' + u.id + '">' + truncUuid(u.id) + '</td>'
+            + '<td>' + escapeHtml(u.username) + '</td>'
+            + '<td class="instance-id">' + (u.workspace_path || '-') + '</td>'
+            + '<td class="instance-id">' + (u.storage_path || '-') + '</td>'
+            + '<td>'
+            + '<button class="btn btn-sm" onclick="openEditUserModal(\'' + group.id + '\',\'' + u.id + '\',\'' + escapeHtml(u.username) + '\')">Edit</button> '
+            + '<button class="btn btn-danger btn-sm" onclick="deleteUser(\'' + group.id + '\',\'' + u.id + '\',\'' + escapeHtml(u.username) + '\')">Remove</button>'
+            + '</td>'
+            + '</tr>';
+        }).join('')
+      : '<tr><td colspan="5" style="text-align:center;color:var(--text-muted);padding:24px;">No users</td></tr>';
+
+    return '<div class="group-card">'
+      + '<div class="group-header">'
+      + '<div class="group-title">'
+      + '<span class="group-name">' + escapeHtml(group.name) + '</span>'
+      + '<span class="instance-id" title="' + group.id + '">(' + truncUuid(group.id) + ')</span>'
+      + '</div>'
+      + '<div class="group-actions">'
+      + '<button class="btn btn-sm" onclick="openAddUserModal(\'' + group.id + '\')">+ User</button> '
+      + '<button class="btn btn-sm" onclick="openEditGroupModal(\'' + group.id + '\',\'' + escapeHtml(group.name) + '\')">Rename</button> '
+      + '<button class="btn btn-danger btn-sm" onclick="deleteGroup(\'' + group.id + '\',\'' + escapeHtml(group.name) + '\')">Delete</button>'
+      + '</div>'
+      + '</div>'
+      + '<table>'
+      + '<thead><tr>'
+      + '<th>UUID</th>'
+      + '<th>Username</th>'
+      + '<th>Workspace Path</th>'
+      + '<th>Storage Path</th>'
+      + '<th>Actions</th>'
+      + '</tr></thead>'
+      + '<tbody>' + usersHtml + '</tbody>'
+      + '</table>'
+      + '</div>';
+  }).join('');
+}
+
+function filterGroups() {
+  const search = document.getElementById('groups-search-input').value.toLowerCase();
+  const filtered = allGroups.filter(g => {
+    const userNames = (g.users || []).map(u => u.username).join(' ');
+    return g.name.toLowerCase().includes(search) || userNames.toLowerCase().includes(search);
+  });
+  renderGroups(filtered);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function openCreateGroupModal() {
+  document.getElementById('create-group-name').value = '';
+  document.getElementById('create-group-modal').classList.add('active');
+}
+
+function closeCreateGroupModal() {
+  document.getElementById('create-group-modal').classList.remove('active');
+}
+
+async function createGroup() {
+  const name = document.getElementById('create-group-name').value.trim();
+  if (!name) { showToast('Group name is required', 'error'); return; }
+  try {
+    await api('/api/groups', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+    closeCreateGroupModal();
+    showToast('Group created', 'success');
+    refreshGroups();
+  } catch (e) {
+    showToast('Failed to create group: ' + e.message, 'error');
+  }
+}
+
+function openEditGroupModal(groupId, groupName) {
+  document.getElementById('edit-group-id').value = groupId;
+  document.getElementById('edit-group-name').value = groupName;
+  document.getElementById('edit-group-modal').classList.add('active');
+}
+
+function closeEditGroupModal() {
+  document.getElementById('edit-group-modal').classList.remove('active');
+}
+
+async function saveGroup() {
+  const id = document.getElementById('edit-group-id').value;
+  const name = document.getElementById('edit-group-name').value.trim();
+  if (!name) { showToast('Group name is required', 'error'); return; }
+  try {
+    await api('/api/groups/' + id, {
+      method: 'PUT',
+      body: JSON.stringify({ name }),
+    });
+    closeEditGroupModal();
+    showToast('Group renamed', 'success');
+    refreshGroups();
+  } catch (e) {
+    showToast('Failed to rename group: ' + e.message, 'error');
+  }
+}
+
+async function deleteGroup(groupId, groupName) {
+  if (!confirm('Delete group "' + groupName + '" and all its users?')) return;
+  try {
+    await api('/api/groups/' + groupId, { method: 'DELETE' });
+    showToast('Group deleted', 'info');
+    refreshGroups();
+  } catch (e) {
+    showToast('Failed to delete group: ' + e.message, 'error');
+  }
+}
+
+function openAddUserModal(groupId) {
+  document.getElementById('add-user-group-id').value = groupId;
+  document.getElementById('add-user-username').value = '';
+  document.getElementById('add-user-modal').classList.add('active');
+}
+
+function closeAddUserModal() {
+  document.getElementById('add-user-modal').classList.remove('active');
+}
+
+async function addUser() {
+  const groupId = document.getElementById('add-user-group-id').value;
+  const username = document.getElementById('add-user-username').value.trim();
+  if (!username) { showToast('Username is required', 'error'); return; }
+  try {
+    await api('/api/groups/' + groupId + '/users', {
+      method: 'POST',
+      body: JSON.stringify({ username }),
+    });
+    closeAddUserModal();
+    showToast('User added', 'success');
+    refreshGroups();
+  } catch (e) {
+    showToast('Failed to add user: ' + e.message, 'error');
+  }
+}
+
+function openEditUserModal(groupId, userId, username) {
+  document.getElementById('edit-user-group-id').value = groupId;
+  document.getElementById('edit-user-id').value = userId;
+  document.getElementById('edit-user-username').value = username;
+  document.getElementById('edit-user-modal').classList.add('active');
+}
+
+function closeEditUserModal() {
+  document.getElementById('edit-user-modal').classList.remove('active');
+}
+
+async function saveUser() {
+  const groupId = document.getElementById('edit-user-group-id').value;
+  const userId = document.getElementById('edit-user-id').value;
+  const username = document.getElementById('edit-user-username').value.trim();
+  if (!username) { showToast('Username is required', 'error'); return; }
+  try {
+    await api('/api/groups/' + groupId + '/users/' + userId, {
+      method: 'PUT',
+      body: JSON.stringify({ username }),
+    });
+    closeEditUserModal();
+    showToast('User renamed', 'success');
+    refreshGroups();
+  } catch (e) {
+    showToast('Failed to rename user: ' + e.message, 'error');
+  }
+}
+
+async function deleteUser(groupId, userId, username) {
+  if (!confirm('Remove user "' + username + '"?')) return;
+  try {
+    await api('/api/groups/' + groupId + '/users/' + userId, { method: 'DELETE' });
+    showToast('User removed', 'info');
+    refreshGroups();
+  } catch (e) {
+    showToast('Failed to remove user: ' + e.message, 'error');
   }
 }
 

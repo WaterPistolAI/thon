@@ -23,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from app.config import AppConfig
+from app.services.groups_service import GroupsService
 from app.services.lemonade_service import LemonadeService
 from app.services.sandbox_service import SandboxService
 
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 _app_config: AppConfig | None = None
 _sandbox_service: SandboxService | None = None
 _lemonade_service: LemonadeService | None = None
+_groups_service: GroupsService | None = None
 
 
 def get_app_config() -> AppConfig:
@@ -56,9 +58,24 @@ def get_lemonade_service() -> LemonadeService:
     return _lemonade_service
 
 
+def get_groups_service() -> GroupsService:
+    global _groups_service
+    if _groups_service is None:
+        cfg = get_app_config()
+        _groups_service = GroupsService(
+            db_path=cfg.database.path,
+            workspace_dir=cfg.workspace_dir,
+        )
+    return _groups_service
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     svc = get_sandbox_service()
+    gs = get_groups_service()
+    backfilled = gs.backfill_storage_paths()
+    if backfilled:
+        logger.info("Backfilled storage paths for %d user(s)", backfilled)
     logger.info("THON dashboard starting")
     yield
     await svc.close()
