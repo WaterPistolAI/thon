@@ -61,7 +61,7 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
-sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT))  # noqa: E402
 
 from app.env import load_env
 
@@ -79,20 +79,23 @@ def resolve_path(path_str: str) -> Path:
     return p
 
 
-from datetime import timedelta
-from typing import Optional
+from datetime import timedelta  # noqa: E402
+from typing import Optional, TYPE_CHECKING  # noqa: E402
 
-import yaml
+import yaml  # noqa: E402
 
-from opensandbox import Sandbox
-from opensandbox.config import ConnectionConfig
-from opensandbox.models.execd import RunCommandOpts
-from opensandbox.models.sandboxes import Host, PVC, Volume
+from opensandbox import Sandbox  # noqa: E402
+from opensandbox.config import ConnectionConfig  # noqa: E402
+from opensandbox.models.execd import RunCommandOpts  # noqa: E402
+from opensandbox.models.sandboxes import Host, PVC, Volume  # noqa: E402
 
-from nginx_config import NginxConfigGenerator
-from ssl_cert import SSLCertificateGenerator
-from app.db import upsert_record, mark_terminated, set_setting
-from app.services.groups_service import GroupsService
+from nginx_config import NginxConfigGenerator  # noqa: E402
+from ssl_cert import SSLCertificateGenerator  # noqa: E402
+from app.db import upsert_record, mark_terminated, set_setting  # noqa: E402
+from app.services.groups_service import GroupsService  # noqa: E402
+
+if TYPE_CHECKING:
+    from thon.config import ThonConfig
 
 
 @dataclass
@@ -455,6 +458,372 @@ async def create_instance(
         endpoint=endpoint_str,
         password=password,
     )
+
+
+async def run_from_config(
+    thon_cfg: "ThonConfig",
+    group_filter: Optional[str] = None,
+) -> None:
+    """Run VS Code instances directly from a ThonConfig object.
+
+    This is the programmatic entry point used by ``thon run`` so it
+    doesn't need to shell out to a subprocess.
+    """
+    use_nginx = thon_cfg.nginx.enabled
+
+    external_ip = thon_cfg.external_ip or detect_external_ip()
+    if external_ip and not thon_cfg.external_ip:
+        print(f"[Auto] Detected external IP: {external_ip}")
+
+    if external_ip:
+        set_setting("external_ip", external_ip, db_path=os.getenv("THON_DB_PATH"))
+
+    domain = thon_cfg.sandbox.domain or os.getenv("SANDBOX_DOMAIN", "localhost:8080")
+    api_key = thon_cfg.sandbox.api_key or os.getenv("SANDBOX_API_KEY")
+    image = thon_cfg.sandbox.image or os.getenv(
+        "SANDBOX_IMAGE", "waterpistol/thon:latest"
+    )
+    python_version = thon_cfg.sandbox.python_version or "3.11"
+    starting_port = thon_cfg.sandbox.starting_port
+    timeout_minutes = thon_cfg.sandbox.timeout_minutes
+    secure = thon_cfg.vscode.secure
+    workspace_dir = thon_cfg.workspace.dir or None
+    lemonade_path = thon_cfg.kilo.config_file or None
+    vscode_settings_path = thon_cfg.vscode.settings_file or None
+
+    user_tuples = thon_cfg.get_users(group_filter)
+    users = [UserInfo(group=g, username=u) for g, u in user_tuples]
+    if not users:
+        users = [UserInfo(group="default", username="workspace")]
+
+    groups_svc = GroupsService(
+        db_path=os.getenv("THON_DB_PATH"),
+        workspace_dir=workspace_dir,
+    )
+    yaml_data = {
+        "groups": {
+            name: {"users": user_list} for name, user_list in thon_cfg.groups.items()
+        }
+    }
+    groups_svc.import_from_yaml(yaml_data)
+    groups_svc.backfill_storage_paths()
+
+    total = len(users)
+    port_range = f"{starting_port} - {starting_port + total - 1}"
+
+    print(f"Starting {total} VS Code sandbox instance(s)...")
+    print(f"  Domain: {domain}")
+    print(f"  Image: {image}")
+    print(f"  Port range: {port_range}")
+    print(f"  Secure: {'Yes (per-user passwords)' if secure else 'No (--auth none)'}")
+    print(f"  Nginx: {'Yes (HTTPS)' if use_nginx else 'No (direct HTTP)'}")
+    if external_ip:
+        print(f"  External IP: {external_ip}")
+    if workspace_dir:
+        print(f"  Workspace dir: {workspace_dir} (persistent bind mounts)")
+    if lemonade_path:
+        print(f"  Lemonade: {lemonade_path} (Kilo Code config injection)")
+    if vscode_settings_path:
+        print(f"  VS Code settings: {vscode_settings_path}")
+    if thon_cfg.gateway.enabled:
+        print(
+            f"  AI Gateway: enabled (rate limit: {thon_cfg.gateway.rate_limit} tokens/{thon_cfg.gateway.time_window}s)"
+        )
+        if thon_cfg.gateway.redis_host:
+            print(f"  Gateway Redis: {thon_cfg.gateway.redis_host}")
+    if group_filter:
+        print(f"  Group filter: {group_filter}")
+    print()
+
+    conn_config = ConnectionConfig(
+        domain=domain,
+        api_key=api_key,
+        request_timeout=timedelta(seconds=60),
+    )
+    sandbox_timeout = (
+        timedelta(minutes=timeout_minutes) if timeout_minutes > 0 else None
+    )
+
+    db_user_map: dict[tuple[str, str], object] = {}
+    try:
+        from app.db import (
+            GroupRecord as DBGroupRecord,
+            UserRecord as DBUserRecord,
+            get_session as db_get_session,
+        )
+        from sqlmodel import select as sql_select
+
+        with db_get_session(os.getenv("THON_DB_PATH")) as session:
+            group_name_map: dict[str, str] = {}
+            for g in session.exec(sql_select(DBGroupRecord)).all():
+                group_name_map[g.id] = g.name
+            for db_u in session.exec(sql_select(DBUserRecord)).all():
+                gname = group_name_map.get(db_u.group_id, "default")
+                db_user_map[(gname, db_u.username)] = db_u
+    except Exception:
+        pass
+
+    instances: list[SandboxInstance] = []
+
+    gateway_consumers: list[dict] = []
+    if thon_cfg.gateway.enabled:
+        from apisix_gateway import ApisixGatewayManager
+
+        admin_key = thon_cfg.gateway.admin_key or os.getenv(
+            "GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1"
+        )
+        gateway_mgr = ApisixGatewayManager(
+            admin_url="http://127.0.0.1:9180",
+            admin_key=admin_key,
+            redis_host=thon_cfg.gateway.redis_host or None,
+            redis_port=thon_cfg.gateway.redis_port,
+        )
+
+        lemonade_host = thon_cfg.lemonade.host or "127.0.0.1"
+        if lemonade_host == "0.0.0.0":
+            lemonade_host = "127.0.0.1"
+        lemonade_port = str(thon_cfg.lemonade.port)
+        lemonade_url = f"http://{lemonade_host}:{lemonade_port}"
+        lemonade_api_key = thon_cfg.lemonade.api_key or os.getenv("LEMONADE_API_KEY")
+
+        gateway_mgr.create_ai_route(
+            lemonade_url=lemonade_url,
+            lemonade_api_key=lemonade_api_key,
+        )
+
+        if thon_cfg.gateway.mode == "per-group":
+            group_names: dict[str, list[UserInfo]] = {}
+            for user in users:
+                group_names.setdefault(user.group, []).append(user)
+            for gn, group_users in group_names.items():
+                user_count = len(group_users)
+                group_rate_limit = thon_cfg.gateway.rate_limit * user_count
+                consumer = gateway_mgr.create_consumer(
+                    username=f"group-{gn}",
+                    rate_limit=group_rate_limit,
+                    time_window=thon_cfg.gateway.time_window,
+                )
+                for user in group_users:
+                    gateway_consumers.append(
+                        {
+                            "user": user,
+                            "api_key": consumer.api_key,
+                            "rate_limit": consumer.rate_limit,
+                            "time_window": consumer.time_window,
+                            "group_name": gn,
+                            "user_count": user_count,
+                        }
+                    )
+                print(
+                    f"[Gateway] Created group consumer: group-{gn} ({user_count} users, {group_rate_limit} tokens/{thon_cfg.gateway.time_window}s)"
+                )
+        else:
+            for user in users:
+                consumer = gateway_mgr.create_consumer(
+                    username=user.label,
+                    rate_limit=thon_cfg.gateway.rate_limit,
+                    time_window=thon_cfg.gateway.time_window,
+                )
+                gateway_consumers.append(
+                    {
+                        "user": user,
+                        "api_key": consumer.api_key,
+                        "rate_limit": consumer.rate_limit,
+                        "time_window": consumer.time_window,
+                    }
+                )
+    try:
+        tasks = []
+        for i, user in enumerate(users):
+            gw_api_key = None
+            if gateway_consumers:
+                for gc in gateway_consumers:
+                    if gc["user"].label == user.label:
+                        gw_api_key = gc["api_key"]
+                        break
+
+            db_user = db_user_map.get((user.group, user.username))
+            tasks.append(
+                create_instance(
+                    user=user,
+                    port=starting_port + i,
+                    config=conn_config,
+                    image=image,
+                    python_version=python_version,
+                    timeout=sandbox_timeout,
+                    external_ip=external_ip,
+                    secure=secure,
+                    workspace_dir=workspace_dir,
+                    lemonade_config=lemonade_path,
+                    vscode_settings=vscode_settings_path,
+                    gateway_api_key=gw_api_key,
+                    gateway_external_ip=external_ip,
+                    db_user=db_user,
+                )
+            )
+
+        instances = list(await asyncio.gather(*tasks))
+
+        if use_nginx:
+            nginx_gen = NginxConfigGenerator()
+            nginx_gen._remove_default_site()
+
+            ssl_gen = SSLCertificateGenerator(output_dir=thon_cfg.nginx.ssl_dir)
+            cert_path, key_path = ssl_gen.generate_server_cert(
+                server_ip=external_ip,
+            )
+
+            ca_cert_path = ""
+            ca_root = ssl_gen.get_mkcert_ca_root()
+            if ca_root:
+                ca_root_pem = os.path.join(ca_root, "rootCA.pem")
+                if os.path.exists(ca_root_pem):
+                    ca_serve_path = os.path.join(thon_cfg.nginx.ssl_dir, "rootCA.pem")
+                    try:
+                        shutil.copy2(ca_root_pem, ca_serve_path)
+                    except PermissionError:
+                        subprocess.run(
+                            ["sudo", "cp", ca_root_pem, ca_serve_path],
+                            check=True,
+                        )
+                    ca_cert_path = ca_serve_path
+                    print(
+                        f"[SSL] CA cert available at https://{external_ip or 'localhost'}/ca.crt"
+                    )
+                else:
+                    print(
+                        f"[SSL] Warning: mkcert CA root dir exists but no rootCA.pem in {ca_root}"
+                    )
+            else:
+                print(
+                    "[SSL] No mkcert CA root found (ca.crt download unavailable — install mkcert for browser-trusted certs)"
+                )
+
+            ports = [inst.port for inst in instances]
+            nginx_gen.generate_combined_config(
+                ports=ports,
+                cert_path=cert_path,
+                key_path=key_path,
+                ca_cert_path=ca_cert_path,
+            )
+
+            nginx_gen.test_config()
+            nginx_gen.reload_nginx()
+
+        print("\n" + "=" * 70)
+        print("VS Code Web Endpoints")
+        print("=" * 70)
+
+        current_group: Optional[str] = None
+        for inst in instances:
+            if inst.user.group != current_group:
+                current_group = inst.user.group
+                print(f"\n  Group: {current_group}")
+
+            ext_ip = external_ip or "localhost"
+            endpoint_path = (
+                inst.endpoint.split(":", 1)[1]
+                if ":" in inst.endpoint
+                else inst.endpoint
+            )
+
+            if use_nginx:
+                https_url = f"https://{ext_ip}/{endpoint_path}/"
+            else:
+                https_url = None
+
+            http_url = f"http://{inst.endpoint}/"
+
+            print(f"    {inst.user.username}:")
+            if https_url:
+                print(f"      URL: {https_url}")
+            print(f"      Local: {http_url}")
+            print("      Workspace: /workspace")
+            if workspace_dir:
+                print(
+                    f"      Host path: {os.path.join(workspace_dir, inst.user.workspace)}"
+                )
+            if inst.password:
+                print(f"      Password: {inst.password}")
+            if lemonade_path:
+                print("      Kilo Code: /home/vscode/.config/kilo/config.json")
+            if gateway_consumers:
+                for gc in gateway_consumers:
+                    if gc["user"].label == inst.user.label:
+                        ext_ip = external_ip or "localhost"
+                        gateway_url = f"http://{ext_ip}:9080"
+                        print(f"      Gateway API Key: {gc['api_key']}")
+                        print(
+                            f"      Gateway Endpoint: {gateway_url}/v1/chat/completions"
+                        )
+                        if gc.get("group_name"):
+                            print(
+                                f"      Gateway Mode: per-group ({gc['group_name']}, {gc.get('user_count', '?')} users sharing)"
+                            )
+                        print(
+                            f"      Rate Limit: {gc['rate_limit']} tokens / {gc['time_window']}s"
+                        )
+                        break
+
+        print()
+        if use_nginx and ca_cert_path:
+            ext_ip = external_ip or "localhost"
+            print(f"  CA Certificate: https://{ext_ip}/ca.crt")
+            print("  (Download and import into browser to trust HTTPS)")
+        print(
+            f"Keeping sandboxes alive {'indefinitely' if timeout_minutes == 0 else f'for {timeout_minutes} minutes'}. "
+            f"Press Ctrl+C to exit."
+        )
+
+        try:
+            if timeout_minutes > 0:
+                await asyncio.sleep(timeout_minutes * 60)
+            else:
+                await asyncio.Event().wait()
+        except KeyboardInterrupt:
+            print("\nStopping...")
+
+    except KeyboardInterrupt:
+        print("\nInterrupted by user")
+    finally:
+        print("\nCleaning up...")
+
+        if thon_cfg.gateway.enabled:
+            try:
+                from apisix_gateway import ApisixGatewayManager
+
+                admin_key = thon_cfg.gateway.admin_key or os.getenv(
+                    "GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1"
+                )
+                gateway_mgr = ApisixGatewayManager(
+                    admin_url="http://127.0.0.1:9180",
+                    admin_key=admin_key,
+                    redis_host=thon_cfg.gateway.redis_host or None,
+                )
+                gateway_mgr.cleanup()
+            except Exception as e:
+                print(f"  Note: Gateway cleanup error: {e}")
+
+        if use_nginx:
+            nginx_gen = NginxConfigGenerator()
+            try:
+                nginx_gen.cleanup_all()
+            except Exception as e:
+                print(f"  Note: Nginx cleanup error: {e}")
+
+        for inst in instances:
+            try:
+                await inst.sandbox.kill()
+                mark_terminated(
+                    inst.sandbox.id if hasattr(inst.sandbox, "id") else "",
+                    db_path=os.getenv("THON_DB_PATH"),
+                )
+            except Exception as e:
+                print(
+                    f"  Note: Sandbox {inst.user.label} may already be terminated: {e}"
+                )
+
+        print("Cleanup complete.")
 
 
 async def main() -> None:
@@ -975,7 +1344,7 @@ Examples:
             if https_url:
                 print(f"      URL: {https_url}")
             print(f"      Local: {http_url}")
-            print(f"      Workspace: /workspace")
+            print("      Workspace: /workspace")
             if args.workspace_dir:
                 print(
                     f"      Host path: {os.path.join(args.workspace_dir, inst.user.workspace)}"

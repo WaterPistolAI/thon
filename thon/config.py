@@ -1,0 +1,273 @@
+# Copyright 2025 Alibaba Group Holding Ltd.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Pydantic models for thon.yaml configuration — single source of truth.
+
+All THON settings (groups, sandbox, lemonade, gateway, dashboard, auth,
+nginx, vscode, kilo) are expressed in one thon.yaml file. The CLI reads
+this file; the API/dashboard reads .env generated from it.
+"""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Optional
+
+import yaml
+from pydantic import BaseModel, Field
+
+
+DEFAULT_CONFIG_PATH = Path("thon.yaml")
+
+
+class SandboxSettings(BaseModel):
+    """Sandbox server connection and instance settings."""
+
+    domain: str = "localhost:8080"
+    api_key: str = ""
+    image: str = "waterpistol/thon:latest"
+    python_version: str = "3.11"
+    starting_port: int = 8443
+    timeout_minutes: int = 0
+
+
+class VscodeSettings(BaseModel):
+    """VS Code instance security and customization settings."""
+
+    secure: bool = False
+    settings_file: str = ""
+    extensions_file: str = ""
+
+
+class NginxSettings(BaseModel):
+    """Nginx reverse proxy and SSL settings."""
+
+    enabled: bool = True
+    ssl_dir: str = "/etc/nginx/ssl"
+
+
+class WorkspaceSettings(BaseModel):
+    """Persistent workspace bind-mount settings."""
+
+    dir: str = ""
+
+
+class LemonadeSettings(BaseModel):
+    """Lemonade local LLM inference server settings."""
+
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 13305
+    model: str = "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL"
+    model_name: str = "gemma-4-31b-it"
+    mmproj: str = "mmproj-BF16.gguf"
+    llamacpp_backend: str = "auto"
+    prefer_system: bool = True
+    llamacpp_bin: str = "/usr/local/bin/llama-server"
+    generate_keys: bool = True
+    api_key: str = ""
+    admin_api_key: str = ""
+
+
+class KiloSettings(BaseModel):
+    """Kilo Code extension settings injected into sandboxes."""
+
+    config_file: str = ""
+
+
+class GatewaySettings(BaseModel):
+    """APISIX AI Gateway settings for rate limiting and per-consumer keys."""
+
+    enabled: bool = False
+    mode: str = "per-user"
+    admin_key: str = "edd1c9f034335f136f87ad84b625c8f1"
+    redis_host: str = ""
+    redis_port: int = 6379
+    rate_limit: int = 500
+    time_window: int = 60
+
+
+class DashboardSettings(BaseModel):
+    """Web dashboard settings."""
+
+    host: str = "0.0.0.0"
+    port: int = 8100
+    debug: bool = False
+
+
+class OAuthProviderSettings(BaseModel):
+    """OAuth/OIDC provider credentials."""
+
+    client_id: str = ""
+    client_secret: str = ""
+
+
+class AuthSettings(BaseModel):
+    """Authentication / OIDC provider settings."""
+
+    enabled: bool = False
+    session_secret: str = ""
+    github: OAuthProviderSettings = Field(default_factory=OAuthProviderSettings)
+    gitlab: OAuthProviderSettings = Field(default_factory=OAuthProviderSettings)
+    linkedin: OAuthProviderSettings = Field(default_factory=OAuthProviderSettings)
+
+
+class ThonConfig(BaseModel):
+    """Root configuration model — maps 1:1 to thon.yaml."""
+
+    external_ip: str = ""
+    groups: dict[str, list[str]] = Field(default_factory=dict)
+    sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
+    vscode: VscodeSettings = Field(default_factory=VscodeSettings)
+    nginx: NginxSettings = Field(default_factory=NginxSettings)
+    workspace: WorkspaceSettings = Field(default_factory=WorkspaceSettings)
+    lemonade: LemonadeSettings = Field(default_factory=LemonadeSettings)
+    kilo: KiloSettings = Field(default_factory=KiloSettings)
+    gateway: GatewaySettings = Field(default_factory=GatewaySettings)
+    dashboard: DashboardSettings = Field(default_factory=DashboardSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> ThonConfig:
+        """Load configuration from a thon.yaml file."""
+        p = Path(path)
+        if not p.is_file():
+            raise FileNotFoundError(f"Config file not found: {p}")
+        with open(p) as f:
+            data = yaml.safe_load(f) or {}
+        return cls(**data)
+
+    def to_yaml(self, path: str | Path) -> Path:
+        """Write configuration to a YAML file."""
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w") as f:
+            f.write("# THON Configuration\n")
+            f.write("# Generated by `thon init`\n\n")
+            yaml.dump(
+                self.model_dump(exclude_defaults=False),
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+            )
+        return p
+
+    def to_env_dict(self) -> dict[str, str]:
+        """Export configuration as a flat dict of environment variable names to values.
+
+        Only non-empty / non-default values are included.
+        """
+        env: dict[str, str] = {}
+
+        if self.external_ip:
+            env["EXTERNAL_IP"] = self.external_ip
+
+        if self.sandbox.domain:
+            env["SANDBOX_DOMAIN"] = self.sandbox.domain
+        if self.sandbox.api_key:
+            env["SANDBOX_API_KEY"] = self.sandbox.api_key
+        if self.sandbox.image:
+            env["SANDBOX_IMAGE"] = self.sandbox.image
+
+        if self.workspace.dir:
+            env["THON_WORKSPACE_DIR"] = self.workspace.dir
+
+        if self.lemonade.host:
+            env["LEMONADE_HOST"] = self.lemonade.host
+        if self.lemonade.port:
+            env["LEMONADE_PORT"] = str(self.lemonade.port)
+        if self.lemonade.api_key:
+            env["LEMONADE_API_KEY"] = self.lemonade.api_key
+        if self.lemonade.admin_api_key:
+            env["LEMONADE_ADMIN_API_KEY"] = self.lemonade.admin_api_key
+
+        if self.dashboard.host:
+            env["DASHBOARD_HOST"] = self.dashboard.host
+        if self.dashboard.port:
+            env["DASHBOARD_PORT"] = str(self.dashboard.port)
+        if self.dashboard.debug:
+            env["DASHBOARD_DEBUG"] = "true"
+
+        if self.auth.enabled:
+            env["AUTH_ENABLED"] = "true"
+        if self.auth.session_secret:
+            env["AUTH_SESSION_SECRET"] = self.auth.session_secret
+        if self.auth.github.client_id:
+            env["AUTH_GITHUB_CLIENT_ID"] = self.auth.github.client_id
+        if self.auth.github.client_secret:
+            env["AUTH_GITHUB_CLIENT_SECRET"] = self.auth.github.client_secret
+        if self.auth.gitlab.client_id:
+            env["AUTH_GITLAB_CLIENT_ID"] = self.auth.gitlab.client_id
+        if self.auth.gitlab.client_secret:
+            env["AUTH_GITLAB_CLIENT_SECRET"] = self.auth.gitlab.client_secret
+        if self.auth.linkedin.client_id:
+            env["AUTH_LINKEDIN_CLIENT_ID"] = self.auth.linkedin.client_id
+        if self.auth.linkedin.client_secret:
+            env["AUTH_LINKEDIN_CLIENT_SECRET"] = self.auth.linkedin.client_secret
+
+        if self.gateway.enabled:
+            env["GATEWAY_ENABLED"] = "true"
+        if self.gateway.admin_key:
+            env["GATEWAY_ADMIN_KEY"] = self.gateway.admin_key
+        if self.gateway.redis_host:
+            env["GATEWAY_REDIS_HOST"] = self.gateway.redis_host
+        if self.gateway.rate_limit:
+            env["GATEWAY_RATE_LIMIT_TOKENS"] = str(self.gateway.rate_limit)
+        if self.gateway.time_window:
+            env["GATEWAY_RATE_LIMIT_WINDOW"] = str(self.gateway.time_window)
+        if self.gateway.mode:
+            env["GATEWAY_MODE"] = self.gateway.mode
+
+        return env
+
+    def to_env_file(self, path: str | Path) -> Path:
+        """Export configuration as a .env file."""
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        lines = [
+            "# THON Environment Configuration",
+            "# Generated from thon.yaml by `thon config env`",
+            "",
+        ]
+        for key, value in sorted(self.to_env_dict().items()):
+            lines.append(f"{key}={value}")
+        lines.append("")
+        p.write_text("\n".join(lines))
+        return p
+
+    def total_users(self, group_filter: Optional[str] = None) -> int:
+        """Count total users across all groups (or a single group)."""
+        total = 0
+        for name, users in self.groups.items():
+            if group_filter and name != group_filter:
+                continue
+            total += len(users)
+        return total
+
+    def get_users(self, group_filter: Optional[str] = None) -> list[tuple[str, str]]:
+        """Return list of (group, username) tuples."""
+        result: list[tuple[str, str]] = []
+        for name, users in self.groups.items():
+            if group_filter and name != group_filter:
+                continue
+            for username in users:
+                result.append((name, username))
+        return result
+
+    def apply_env(self) -> None:
+        """Push config values into os.environ (non-overwriting)."""
+        for key, value in self.to_env_dict().items():
+            os.environ.setdefault(key, value)
