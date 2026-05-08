@@ -131,6 +131,50 @@ def load_groups(groups_file: str, group_filter: Optional[str] = None) -> list[Us
     return users
 
 
+def _load_users_from_db(
+    db_path: Optional[str] = None, group_filter: Optional[str] = None
+) -> list[UserInfo]:
+    """Read users from the database, optionally filtered by group name."""
+    from app.db import GroupRecord as DBGroupRecord, UserRecord as DBUserRecord, get_session as db_get_session
+    from sqlmodel import select as sql_select
+
+    users: list[UserInfo] = []
+    try:
+        with db_get_session(db_path) as session:
+            group_name_map: dict[str, str] = {}
+            for g in session.exec(sql_select(DBGroupRecord)).all():
+                group_name_map[g.id] = g.name
+            for db_u in session.exec(sql_select(DBUserRecord)).all():
+                gname = group_name_map.get(db_u.group_id, "default")
+                if group_filter and gname != group_filter:
+                    continue
+                users.append(UserInfo(group=gname, username=db_u.username))
+    except Exception as e:
+        print(f"Error reading from database: {e}")
+    return users
+
+
+def _resolve_file_content(
+    file_path: Optional[str], db_key: str, label: str, db_path: Optional[str] = None
+) -> Optional[str]:
+    """Resolve config file content from a file path or the database.
+
+    Priority: file_path (if provided and exists) > database (if stored) > None.
+    """
+    if file_path:
+        resolved = resolve_path(file_path)
+        if resolved.exists():
+            with open(resolved) as f:
+                content = f.read()
+            return content
+        print(f"Warning: {label} not found at {file_path}")
+    from app.db import get_setting
+    db_content = get_setting(db_key, db_path=db_path)
+    if db_content and db_content.strip():
+        return db_content
+    return None
+
+
 def generate_password(length: int = 24) -> str:
     return secrets.token_urlsafe(length)
 
@@ -179,15 +223,8 @@ async def _print_logs(label: str, execution) -> None:
 
 
 async def _inject_kilo_config(
-    user: UserInfo, sandbox: "Sandbox", config_path: str
+    user: UserInfo, sandbox: "Sandbox", config_content: str
 ) -> None:
-    try:
-        with open(config_path) as f:
-            config_content = f.read()
-    except FileNotFoundError:
-        print(f"[{user.label}] Warning: kilo.json not found at {config_path}, skipping")
-        return
-
     if "PLACEHOLDER" in config_content:
         print(
             f"[{user.label}] Warning: kilo.json contains PLACEHOLDER — "
@@ -203,15 +240,8 @@ async def _inject_kilo_config(
 
 
 async def _inject_vscode_settings(
-    user: UserInfo, sandbox: "Sandbox", settings_path: str
+    user: UserInfo, sandbox: "Sandbox", settings_content: str
 ) -> None:
-    try:
-        with open(settings_path) as f:
-            settings_content = f.read()
-    except FileNotFoundError:
-        print(f"[{user.label}] Warning: VS Code settings not found at {settings_path}, skipping")
-        return
-
     settings_dir = "/home/vscode/.local/share/code-server/User"
     await sandbox.commands.run(f"mkdir -p {settings_dir}")
     encoded = base64.b64encode(settings_content.encode()).decode()
@@ -230,8 +260,8 @@ async def create_instance(
     external_ip: Optional[str] = None,
     secure: bool = False,
     workspace_dir: Optional[str] = None,
-    lemonade_config: Optional[str] = None,
-    vscode_settings: Optional[str] = None,
+    lemonade_config_content: Optional[str] = None,
+    vscode_settings_content: Optional[str] = None,
     gateway_api_key: Optional[str] = None,
     gateway_external_ip: Optional[str] = None,
     db_user: Optional[object] = None,
@@ -317,11 +347,11 @@ async def create_instance(
         await sandbox.commands.run("mkdir -p /workspace")
         await sandbox.commands.run("chown -R vscode:vscode /workspace")
 
-    if lemonade_config:
-        await _inject_kilo_config(user, sandbox, lemonade_config)
+    if lemonade_config_content:
+        await _inject_kilo_config(user, sandbox, lemonade_config_content)
 
-    if vscode_settings:
-        await _inject_vscode_settings(user, sandbox, vscode_settings)
+    if vscode_settings_content:
+        await _inject_vscode_settings(user, sandbox, vscode_settings_content)
 
     if gateway_api_key:
         from apisix_gateway import generate_kilo_gateway_config
@@ -388,6 +418,12 @@ Examples:
   # Run a single group
   python main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
 
+  # Start instances for remaining groups from the database
+  python main.py --from-db --group beta --external-ip 1.2.3.4
+
+  # Start instances for ALL groups from the database
+  python main.py --from-db --external-ip 1.2.3.4
+
   # With per-user passwords
   python main.py --groups groups.yaml --secure --external-ip 1.2.3.4
 
@@ -409,7 +445,14 @@ Examples:
         "--group",
         type=str,
         default=None,
-        help="Run only this group from groups.yaml",
+        help="Run only this group (works with --groups or --from-db)",
+    )
+    parser.add_argument(
+        "--from-db",
+        action="store_true",
+        default=False,
+        help="Read groups/users from the database instead of a YAML file. "
+        "Use --group to filter to a specific group.",
     )
     parser.add_argument(
         "--port",
@@ -554,8 +597,8 @@ Examples:
     python_version = args.python_version or os.getenv("PYTHON_VERSION", "3.11")
 
     groups_path = resolve_path(args.groups) if args.groups else None
-    lemonade_path = str(resolve_path(args.lemonade)) if args.lemonade else None
-    vscode_settings_path = str(resolve_path(args.vscode_settings)) if args.vscode_settings else None
+
+    db_path_env = os.getenv("THON_DB_PATH")
 
     users: list[UserInfo]
     if args.groups:
@@ -571,7 +614,7 @@ Examples:
             yaml_data = yaml.safe_load(f)
         env_event_id = os.getenv("THON_EVENT_ID")
         groups_svc = GroupsService(
-            db_path=os.getenv("THON_DB_PATH"),
+            db_path=db_path_env,
             workspace_dir=args.workspace_dir,
         )
         imported = groups_svc.import_from_yaml(yaml_data, event_id=env_event_id)
@@ -580,15 +623,61 @@ Examples:
             print(f"  Synced {imported} user(s) from groups.yaml to database")
         if backfilled > 0:
             print(f"  Backfilled storage paths for {backfilled} user(s)")
-    else:
-        users = [UserInfo(group="default", username="workspace")]
-        groups_svc = GroupsService(
-            db_path=os.getenv("THON_DB_PATH"),
-            workspace_dir=args.workspace_dir,
+    elif args.from_db:
+        users = _load_users_from_db(
+            db_path=db_path_env,
+            group_filter=args.group,
         )
-        yaml_data = {"groups": {"default": {"users": ["workspace"]}}}
-        groups_svc.import_from_yaml(yaml_data)
-        groups_svc.backfill_storage_paths()
+        if not users:
+            if args.group:
+                print(f"Error: No users found in database for group '{args.group}'")
+            else:
+                print("Error: No users found in database. Load a groups.yaml first.")
+            sys.exit(1)
+        print(f"  Loaded {len(users)} user(s) from database")
+    else:
+        db_users = _load_users_from_db(db_path=db_path_env, group_filter=args.group)
+        if db_users:
+            users = db_users
+            print(f"  Loaded {len(users)} user(s) from database (no flags — using DB config)")
+        else:
+            from app.db import get_setting
+            db_yaml = get_setting("config_groups_yaml", db_path=db_path_env)
+            if db_yaml and db_yaml.strip():
+                yaml_data = yaml.safe_load(db_yaml)
+                groups_list = yaml_data.get("groups", {})
+                users = []
+                env_event_id = os.getenv("THON_EVENT_ID")
+                for group_name, group_data in groups_list.items():
+                    group_data = group_data or {}
+                    if args.group and group_name != args.group:
+                        continue
+                    for username in group_data.get("users", []):
+                        users.append(UserInfo(group=group_name, username=username))
+                if users:
+                    groups_svc = GroupsService(
+                        db_path=db_path_env,
+                        workspace_dir=args.workspace_dir,
+                    )
+                    groups_svc.import_from_yaml(yaml_data, event_id=env_event_id)
+                    groups_svc.backfill_storage_paths()
+                    print(f"  Loaded {len(users)} user(s) from DB-stored groups.yaml")
+            if not users:
+                users = [UserInfo(group="default", username="workspace")]
+                groups_svc = GroupsService(
+                    db_path=db_path_env,
+                    workspace_dir=args.workspace_dir,
+                )
+                yaml_data = {"groups": {"default": {"users": ["workspace"]}}}
+                groups_svc.import_from_yaml(yaml_data)
+                groups_svc.backfill_storage_paths()
+
+    lemonade_config_content = _resolve_file_content(
+        args.lemonade, "config_kilo_json", "kilo.json", db_path=db_path_env
+    )
+    vscode_settings_content = _resolve_file_content(
+        args.vscode_settings, "config_vscode_settings", "VS Code settings", db_path=db_path_env
+    )
 
     total = len(users)
     port_range = f"{args.port} - {args.port + total - 1}"
@@ -603,16 +692,22 @@ Examples:
         print(f"  External IP: {external_ip}")
     if args.workspace_dir:
         print(f"  Workspace dir: {args.workspace_dir} (persistent bind mounts)")
-    if args.lemonade:
-        print(f"  Lemonade: {args.lemonade} (Kilo Code config injection)")
-    if args.vscode_settings:
-        print(f"  VS Code settings: {args.vscode_settings}")
+    if lemonade_config_content:
+        src = "file" if args.lemonade else "database"
+        print(f"  Lemonade: ({src}) Kilo Code config injection")
+    if vscode_settings_content:
+        src = "file" if args.vscode_settings else "database"
+        print(f"  VS Code settings: ({src})")
     if args.gateway:
         print(f"  AI Gateway: enabled (rate limit: {args.gateway_rate_limit} tokens/{args.gateway_time_window}s)")
         if args.gateway_redis_host:
             print(f"  Gateway Redis: {args.gateway_redis_host}")
     if args.groups:
         print(f"  Groups file: {args.groups}")
+        if args.group:
+            print(f"  Group filter: {args.group}")
+    elif args.from_db:
+        print("  Source: database")
         if args.group:
             print(f"  Group filter: {args.group}")
     print()
@@ -719,8 +814,8 @@ Examples:
                     external_ip=external_ip,
                     secure=args.secure,
                     workspace_dir=args.workspace_dir,
-                    lemonade_config=args.lemonade,
-                    vscode_settings=args.vscode_settings,
+                    lemonade_config_content=lemonade_config_content,
+                    vscode_settings_content=vscode_settings_content,
                     gateway_api_key=gateway_api_key,
                     gateway_external_ip=external_ip,
                     db_user=db_user,
@@ -798,8 +893,8 @@ Examples:
                 print(f"      Host path: {os.path.join(args.workspace_dir, inst.user.workspace)}")
             if inst.password:
                 print(f"      Password: {inst.password}")
-            if args.lemonade:
-                print(f"      Kilo Code: /home/vscode/.config/kilo/config.json")
+            if lemonade_config_content:
+                print("      Kilo Code: /home/vscode/.config/kilo/config.json")
             if gateway_consumers:
                 for gc in gateway_consumers:
                     if gc["user"].label == inst.user.label:
