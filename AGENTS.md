@@ -214,10 +214,19 @@ With `--workspace-dir /vs-code-remote`, each user gets a host bind mount:
 
 ### Security Modes
 
+**Sandbox instances (code-server):**
+
 | Flag | code-server auth | Password |
 |------|-----------------|----------|
 | (default) | `--auth none` | None |
 | `--secure` | `--auth password` | Auto-generated per-user (24-char token) |
+
+**Streamlit dashboard:**
+
+| Env Variable | Auth Mode | Description |
+|-------------|-----------|-------------|
+| (unset) | None | No authentication |
+| `AUTH_LOCAL_PASSWORD` | Single password | Password gate on dashboard access |
 
 ### Certificate Flow
 
@@ -714,6 +723,7 @@ dashboard/static/app.js        → Legacy frontend JS (superseded by Streamlit)
 | `AUTH_GITLAB_CLIENT_SECRET` | (none) | GitLab OAuth app client secret |
 | `AUTH_LINKEDIN_CLIENT_ID` | (none) | LinkedIn OIDC client ID |
 | `AUTH_LINKEDIN_CLIENT_SECRET` | (none) | LinkedIn OIDC client secret |
+| `AUTH_LOCAL_PASSWORD` | (none) | Single-password auth for Streamlit dashboard; unset = no auth |
 
 ### Running the Dashboard
 
@@ -737,6 +747,9 @@ python -m app.main
 AUTH_ENABLED=true AUTH_SESSION_SECRET=my-secret \
 AUTH_GITHUB_CLIENT_ID=xxx AUTH_GITHUB_CLIENT_SECRET=xxx \
 python -m app.main
+
+# Run with local password auth for Streamlit dashboard
+AUTH_LOCAL_PASSWORD=mysecret streamlit run dashboard/streamlit_app.py --server.port 8501
 ```
 
 ### Future Roadmap

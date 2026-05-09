@@ -103,6 +103,9 @@ class AuthConfig:
     linkedin_client_secret: Optional[str] = field(
         default_factory=lambda: os.getenv("AUTH_LINKEDIN_CLIENT_SECRET")
     )
+    local_password: Optional[str] = field(
+        default_factory=lambda: os.getenv("AUTH_LOCAL_PASSWORD")
+    )
 
 
 @dataclass
@@ -128,12 +131,8 @@ class DatabaseConfig:
 class EventConfig:
     """Event (hackathon) identity settings."""
 
-    event_id: Optional[str] = field(
-        default_factory=lambda: os.getenv("THON_EVENT_ID")
-    )
-    title: Optional[str] = field(
-        default_factory=lambda: os.getenv("THON_EVENT_TITLE")
-    )
+    event_id: Optional[str] = field(default_factory=lambda: os.getenv("THON_EVENT_ID"))
+    title: Optional[str] = field(default_factory=lambda: os.getenv("THON_EVENT_TITLE"))
 
 
 @dataclass

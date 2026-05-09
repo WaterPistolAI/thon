@@ -501,14 +501,15 @@ def _check_existing_instance(sandbox_svc: SandboxService, user: UserInfo) -> boo
             )
         )
         return any(
-            i.state in (InstanceState.RUNNING, InstanceState.PAUSED)
-            for i in instances
+            i.state in (InstanceState.RUNNING, InstanceState.PAUSED) for i in instances
         )
     except Exception:
         return False
 
 
-def _start_user_instance(user_record: UserRecord, group_record: GroupRecordWithUsers) -> None:
+def _start_user_instance(
+    user_record: UserRecord, group_record: GroupRecordWithUsers
+) -> None:
     """Start a sandbox instance for a single DB user with PVC workspace volume."""
     sandbox_svc = _get_sandbox_service()
     cfg = _get_config()
@@ -649,24 +650,24 @@ def _rename_group_dialog(svc: GroupsService) -> None:
                 st.rerun()
 
 
-def _transfer_user_dialog(
-    svc: GroupsService, group_id_map: dict
-) -> None:
+def _transfer_user_dialog(svc: GroupsService, group_id_map: dict) -> None:
     if not st.session_state.get("show_transfer_user"):
         return
-    source_group_id: str = str(
-        st.session_state.get("transfer_source_group_id", "")
-    )
+    source_group_id: str = str(st.session_state.get("transfer_source_group_id", ""))
     source_group = group_id_map.get(source_group_id)
     if not source_group or not source_group.users:
         st.session_state.show_transfer_user = False
         return
     with _dialog_container("Transfer User"):
         st.subheader("Transfer User to Another Group")
-        user_options = {f"{u.username} ({_trunc_id(u.id, 8)})": u for u in source_group.users}
+        user_options = {
+            f"{u.username} ({_trunc_id(u.id, 8)})": u for u in source_group.users
+        }
         selected_label = st.selectbox("User", options=list(user_options.keys()))
         selected_user = user_options.get(selected_label)
-        other_groups = {g.id: g.name for g in group_id_map.values() if g.id != source_group_id}
+        other_groups = {
+            g.id: g.name for g in group_id_map.values() if g.id != source_group_id
+        }
         if not other_groups:
             st.warning("No other groups to transfer to. Create a new group first.")
         target_group_id = st.selectbox(
@@ -681,7 +682,9 @@ def _transfer_user_dialog(
                     try:
                         svc.transfer_user(selected_user.id, target_group_id)
                         st.session_state.show_transfer_user = False
-                        st.toast(f"Transferred {selected_user.username} to {other_groups[target_group_id]}")
+                        st.toast(
+                            f"Transferred {selected_user.username} to {other_groups[target_group_id]}"
+                        )
                         st.rerun()
                     except DuplicateError as e:
                         st.error(str(e))
@@ -1247,6 +1250,7 @@ def _config_files_section(db_path: str) -> None:
                 with c2:
                     if has_content and st.button("Delete", key=f"delete-{key}"):
                         from app.db import delete_setting
+
                         delete_setting(key, db_path=db_path)
                         st.toast(f"{label} removed")
                         st.rerun()
@@ -1286,8 +1290,33 @@ def _get_git_version() -> str:
         return "0.1.0"
 
 
+def _check_auth(cfg: AppConfig) -> None:
+    if not cfg.auth.local_password:
+        return
+    if st.session_state.get("authenticated"):
+        return
+    st.markdown(
+        '<div style="display:flex;justify-content:center;align-items:center;'
+        'min-height:60vh"><div style="text-align:center">'
+        "<h2>THON Dashboard</h2></div></div>",
+        unsafe_allow_html=True,
+    )
+    with st.form("login"):
+        pwd = st.text_input("Password", type="password")
+        if st.form_submit_button("Sign in"):
+            if pwd == cfg.auth.local_password:
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("Incorrect password")
+    st.stop()
+
+
 def main() -> None:
     inject_custom_styles()
+
+    cfg = _get_config()
+    _check_auth(cfg)
 
     st.sidebar.title("◆ THON")
     st.sidebar.caption(_get_git_version())
@@ -1308,6 +1337,12 @@ def main() -> None:
         page_gateway()
     elif page == "Settings":
         page_settings()
+
+    if cfg.auth.local_password and st.session_state.get("authenticated"):
+        st.sidebar.divider()
+        if st.sidebar.button("Logout"):
+            st.session_state.authenticated = False
+            st.rerun()
 
 
 if __name__ == "__main__":
