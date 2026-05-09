@@ -43,7 +43,7 @@ from app.services.groups_service import DuplicateError, GroupsService
 from app.services.lemonade_service import LemonadeService
 from app.services.sandbox_service import SandboxService
 
-from dashboard.streamlit_styles import inject_dark_theme
+from dashboard.streamlit_styles import inject_custom_styles
 
 
 class _AsyncRunner:
@@ -1287,7 +1287,7 @@ def _get_git_version() -> str:
 
 
 def main() -> None:
-    inject_dark_theme()
+    inject_custom_styles()
 
     st.sidebar.title("◆ THON")
     st.sidebar.caption(_get_git_version())
