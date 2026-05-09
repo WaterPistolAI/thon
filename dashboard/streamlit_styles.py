@@ -70,7 +70,7 @@ section[data-testid="stSidebar"] .stRadio > label[data-checked="true"] {
 
 .stMetric [data-testid="stMetricValue"] {
     color: var(--text-primary) !important;
-    font-size: 28px !important;
+    font-size: 18px !important;
     font-weight: 700 !important;
 }
 
@@ -143,6 +143,16 @@ h1, h2, h3 {
 
 .stAlert {
     border-radius: 8px !important;
+}
+
+.stAlert p {
+    font-size: 13px !important;
+    word-break: break-word !important;
+}
+
+.stAlert code {
+    font-size: 12px !important;
+    word-break: break-all !important;
 }
 
 .stModal {

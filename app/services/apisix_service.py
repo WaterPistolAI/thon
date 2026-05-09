@@ -24,16 +24,24 @@ import secrets
 import subprocess
 import urllib.error
 import urllib.request
+from pathlib import Path
 from typing import Optional
 
+import yaml
+
 from app.config import GatewayConfig
-from app.exceptions import GatewayConnectionError, GatewayNotEnabledError
+from app.exceptions import (
+    GatewayAuthError,
+    GatewayConnectionError,
+    GatewayNotEnabledError,
+)
 from app.models import ConsumerInfo, GatewayMode, GatewayStatus
 
 logger = logging.getLogger(__name__)
 
 APISIX_ROUTE_ID = "ai-gateway-route"
 LEMONADE_INSTANCE_NAME = "lemonade-instance"
+APISIX_CONFIG_PATH = Path("/usr/local/apisix/conf/config.yaml")
 
 
 class ApisixService:
@@ -47,6 +55,38 @@ class ApisixService:
 
     def __init__(self, config: GatewayConfig) -> None:
         self._cfg = config
+        self._detected_key: Optional[str] = None
+
+    def _detect_admin_key(self) -> Optional[str]:
+        if self._detected_key is not None:
+            return self._detected_key
+        try:
+            if APISIX_CONFIG_PATH.exists():
+                with open(APISIX_CONFIG_PATH) as f:
+                    data = yaml.safe_load(f)
+                deployment = (
+                    data.get("deployment", {}) if isinstance(data, dict) else {}
+                )
+                admin = (
+                    deployment.get("admin", {}) if isinstance(deployment, dict) else {}
+                )
+                keys = admin.get("admin_key", []) if isinstance(admin, dict) else []
+                for key_entry in keys:
+                    if isinstance(key_entry, dict) and key_entry.get("role") == "admin":
+                        detected = key_entry.get("key")
+                        if detected:
+                            self._detected_key = detected
+                            return detected
+        except Exception:
+            pass
+        return None
+
+    @property
+    def _effective_admin_key(self) -> str:
+        detected = self._detect_admin_key()
+        if detected:
+            return detected
+        return self._cfg.admin_key
 
     @property
     def _admin_url(self) -> str:
@@ -73,7 +113,7 @@ class ApisixService:
         body = json.dumps(data).encode() if data else None
 
         req = urllib.request.Request(url, data=body, method=method)
-        req.add_header("X-API-KEY", self._cfg.admin_key)
+        req.add_header("X-API-KEY", self._effective_admin_key)
         req.add_header("Content-Type", "application/json")
 
         try:
@@ -82,6 +122,10 @@ class ApisixService:
                 return json.loads(response_data) if response_data else {}
         except urllib.error.HTTPError as e:
             error_body = e.read().decode() if e.fp else ""
+            if e.code == 401:
+                raise GatewayAuthError(
+                    f"APISIX Admin API authentication failed for {method} {path}: {error_body}"
+                ) from e
             raise GatewayConnectionError(
                 f"APISIX Admin API error {e.code} for {method} {path}: {error_body}"
             ) from e
@@ -91,33 +135,30 @@ class ApisixService:
             ) from e
 
     def is_running(self) -> bool:
-        if not self._cfg.enabled:
-            return False
         try:
             self._request("/routes")
+            return True
+        except GatewayAuthError:
             return True
         except GatewayConnectionError:
             return False
 
     def is_installed(self) -> bool:
-        try:
-            result = subprocess.run(
-                ["which", "apisix"],
-                capture_output=True,
-                check=False,
-            )
-            return result.returncode == 0
-        except FileNotFoundError:
-            return False
+        if not hasattr(self, "_installed_cached"):
+            try:
+                result = subprocess.run(
+                    ["which", "apisix"],
+                    capture_output=True,
+                    check=False,
+                )
+                self._installed_cached = result.returncode == 0
+            except FileNotFoundError:
+                self._installed_cached = False
+        return self._installed_cached
 
     def get_status(self) -> GatewayStatus:
         enabled = self._cfg.enabled
-        if not enabled:
-            return GatewayStatus(
-                enabled=False,
-                admin_url=self._admin_url,
-                proxy_url=self.proxy_url,
-            )
+        installed = self.is_installed()
 
         running = False
         consumers_count = 0
@@ -134,12 +175,12 @@ class ApisixService:
                 consumers_count = (
                     result.get("total", 0) if isinstance(result, dict) else 0
                 )
-            except GatewayConnectionError:
+            except (GatewayConnectionError, GatewayAuthError):
                 pass
             try:
                 self._request(f"/routes/{APISIX_ROUTE_ID}")
                 route_configured = True
-            except GatewayConnectionError:
+            except (GatewayConnectionError, GatewayAuthError):
                 pass
 
         mode = (
@@ -148,15 +189,19 @@ class ApisixService:
             else GatewayMode.PER_USER
         )
 
+        key_detected = self._detect_admin_key() is not None
+
         return GatewayStatus(
             running=running,
+            installed=installed,
             admin_url=self._admin_url,
             proxy_url=self.proxy_url,
             consumers_count=consumers_count,
             route_configured=route_configured,
             redis_connected=self._cfg.redis_host is not None,
-            enabled=True,
+            enabled=enabled,
             mode=mode,
+            key_detected=key_detected,
         )
 
     def list_consumers(self) -> list[ConsumerInfo]:

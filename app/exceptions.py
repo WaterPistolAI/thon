@@ -59,5 +59,9 @@ class GatewayConnectionError(VSCRemoteError):
     """Cannot connect to the APISIX Admin API."""
 
 
+class GatewayAuthError(VSCRemoteError):
+    """APISIX Admin API authentication failed (wrong API key)."""
+
+
 class GatewayConfigError(VSCRemoteError):
     """Gateway configuration is invalid or incomplete."""

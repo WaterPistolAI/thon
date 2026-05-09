@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import subprocess
 import sys
 import threading
 from datetime import datetime
@@ -31,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.config import AppConfig
 from app.db import get_setting, set_setting
 from app.exceptions import (
+    GatewayAuthError,
     GatewayConnectionError,
     GatewayNotEnabledError,
     LemonadeConnectionError,
@@ -744,7 +746,7 @@ def _safe_proxy(fn, *args, **kwargs):
         return fn(*args, **kwargs)
     except LemonadeConnectionError:
         return None
-    except (GatewayConnectionError, GatewayNotEnabledError):
+    except (GatewayConnectionError, GatewayNotEnabledError, GatewayAuthError):
         return None
     except Exception:
         return None
@@ -865,19 +867,38 @@ def page_gateway() -> None:
         st.warning("Gateway not reachable — ensure APISIX is installed and running.")
         return
 
-    mode_label = (
-        "per-group (shared)" if status.mode == GatewayMode.PER_GROUP else "per-user"
-    )
-    status_text = "🟢 Running" if status.running else "🔴 Offline"
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Status", status_text)
-    s2.metric("Consumers", status.consumers_count)
-    s3.metric("Route", "✅ Configured" if status.route_configured else "❌ Not set")
-    s4.metric("Mode", mode_label)
+    mode_label = "per-group" if status.mode == GatewayMode.PER_GROUP else "per-user"
+    if status.running:
+        status_text = "Running"
+        status_icon = "🟢"
+    elif status.installed:
+        status_text = "Installed"
+        status_icon = "🟡"
+    else:
+        status_text = "Not Installed"
+        status_icon = "🔴"
+
+    s1, s2, s3, s4, s5 = st.columns(5)
+    s1.metric("Status", f"{status_icon} {status_text}")
+    s2.metric("Enabled", "Yes" if status.enabled else "No")
+    s3.metric("Consumers", status.consumers_count)
+    s4.metric("Route", "Set" if status.route_configured else "Not set")
+    s5.metric("Mode", mode_label)
+
+    if not status.installed:
+        st.info("APISIX is not installed. Run: `INSTALL_GATEWAY=true bash ./setup.sh`")
+        return
 
     if not status.running:
+        st.warning(
+            "APISIX is installed but not running. Start: `sudo systemctl start apisix`"
+        )
+        return
+
+    if not status.enabled:
         st.info(
-            "APISIX gateway is offline. Install with `INSTALL_GATEWAY=true bash ./setup.sh` and start APISIX."
+            "APISIX is running but the gateway feature is not enabled. "
+            "Check **Enable Gateway** above and click **Save** to activate."
         )
         return
 
@@ -1003,11 +1024,45 @@ def page_settings() -> None:
         st.rerun()
 
 
+def _get_git_version() -> str:
+    try:
+        describe = subprocess.run(
+            ["git", "describe", "--tags", "--always"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        rev = subprocess.run(
+            ["git", "rev-parse", "--short=8", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        dirty = subprocess.run(
+            ["git", "diff", "--quiet"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        tag = describe.stdout.strip() if describe.returncode == 0 else None
+        sha = rev.stdout.strip() if rev.returncode == 0 else None
+        if not tag and not sha:
+            return "0.1.0"
+        parts: list[str] = [tag or sha or "0.1.0"]
+        if sha and tag and not tag.startswith(sha):
+            parts.append(sha)
+        if dirty.returncode != 0:
+            parts.append("dirty")
+        return "-".join(parts)
+    except FileNotFoundError:
+        return "0.1.0"
+
+
 def main() -> None:
     inject_dark_theme()
 
     st.sidebar.title("◆ THON")
-    st.sidebar.caption("v0.1.0")
+    st.sidebar.caption(_get_git_version())
 
     page = st.sidebar.radio(
         "Navigation",

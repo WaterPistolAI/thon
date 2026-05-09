@@ -15,6 +15,7 @@
 """FastAPI REST API entry point for THON — dashboard served via Streamlit."""
 
 import logging
+import subprocess
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -90,6 +91,40 @@ async def lifespan(app: FastAPI):
     logger.info("THON dashboard stopped")
 
 
+def _get_git_version() -> str:
+    try:
+        describe = subprocess.run(
+            ["git", "describe", "--tags", "--always"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        rev = subprocess.run(
+            ["git", "rev-parse", "--short=8", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        dirty = subprocess.run(
+            ["git", "diff", "--quiet"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        tag = describe.stdout.strip() if describe.returncode == 0 else None
+        sha = rev.stdout.strip() if rev.returncode == 0 else None
+        if not tag and not sha:
+            return "0.1.0"
+        parts: list[str] = [tag or sha or "0.1.0"]
+        if sha and tag and not tag.startswith(sha):
+            parts.append(sha)
+        if dirty.returncode != 0:
+            parts.append("dirty")
+        return "-".join(parts)
+    except FileNotFoundError:
+        return "0.1.0"
+
+
 def create_app(config: AppConfig | None = None) -> FastAPI:
     global _app_config
     if config:
@@ -98,7 +133,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app = FastAPI(
         title="THON",
         description="Dashboard for managing THON VS Code instances and Lemonade inference",
-        version="0.1.0",
+        version=_get_git_version(),
         lifespan=lifespan,
     )
 

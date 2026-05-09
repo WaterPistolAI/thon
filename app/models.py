@@ -187,6 +187,7 @@ class GatewayStatus:
     """Status snapshot of the APISIX AI Gateway."""
 
     running: bool = False
+    installed: bool = False
     admin_url: str = ""
     proxy_url: str = ""
     consumers_count: int = 0
@@ -194,6 +195,7 @@ class GatewayStatus:
     redis_connected: bool = False
     enabled: bool = False
     mode: GatewayMode = GatewayMode.PER_USER
+    key_detected: bool = False
 
 
 @dataclass
