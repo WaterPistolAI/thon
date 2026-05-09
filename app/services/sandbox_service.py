@@ -27,7 +27,7 @@ from opensandbox.models.execd import RunCommandOpts
 from opensandbox.models.sandboxes import Host, PVC, Volume, SandboxFilter
 
 from app.config import AppConfig, SandboxConfig
-from app.db import get_record, get_records, get_setting, mark_terminated, update_endpoint, upsert_record
+from app.db import find_user_by_group_and_name, get_groups, get_record, get_records, get_setting, mark_terminated, update_endpoint, upsert_record
 from app.exceptions import SandboxOperationError
 from app.models import InstanceInfo, InstanceState, UserInfo
 
@@ -378,7 +378,6 @@ class SandboxService:
         user = UserInfo(group=rec.group_name, username=rec.username)
         workspace_volume = None
         workspace_dir = self._config.workspace_dir
-        from app.db import find_user_by_group_and_name, get_groups
         groups = get_groups(db_path=self._config.database.path)
         group_id = None
         for g in groups:

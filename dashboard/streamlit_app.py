@@ -30,7 +30,7 @@ import streamlit as st
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import AppConfig
-from app.db import get_setting, set_setting
+from app.db import GroupRecordWithUsers, UserRecord, get_setting, set_setting
 from app.exceptions import (
     GatewayAuthError,
     GatewayConnectionError,
@@ -492,11 +492,30 @@ def page_groups() -> None:
     _transfer_user_dialog(svc, group_id_map)
 
 
-def _start_user_instance(user_record, group_record) -> None:
+def _check_existing_instance(sandbox_svc: SandboxService, user: UserInfo) -> bool:
+    """Return True if user already has a running or paused instance."""
+    try:
+        instances, _ = _run_async(
+            sandbox_svc.list_instances(
+                metadata_filter={"group": user.group, "username": user.username}
+            )
+        )
+        return any(
+            i.state in (InstanceState.RUNNING, InstanceState.PAUSED)
+            for i in instances
+        )
+    except Exception:
+        return False
+
+
+def _start_user_instance(user_record: UserRecord, group_record: GroupRecordWithUsers) -> None:
     """Start a sandbox instance for a single DB user with PVC workspace volume."""
     sandbox_svc = _get_sandbox_service()
     cfg = _get_config()
     user = UserInfo(group=group_record.name, username=user_record.username)
+    if _check_existing_instance(sandbox_svc, user):
+        st.warning(f"User {user.label} already has a running instance")
+        return
     workspace_volume = None
     if user_record.workspace_path and user_record.workspace_path.startswith("thon-"):
         workspace_volume = user_record.workspace_path
@@ -514,7 +533,7 @@ def _start_user_instance(user_record, group_record) -> None:
         st.error(f"Failed to start instance for {user.label}: {e}")
 
 
-def _start_group_instances(group_record) -> None:
+def _start_group_instances(group_record: GroupRecordWithUsers) -> None:
     """Start sandbox instances for all users in a group with PVC workspace volumes."""
     sandbox_svc = _get_sandbox_service()
     cfg = _get_config()
@@ -528,11 +547,16 @@ def _start_group_instances(group_record) -> None:
     if not users:
         st.warning("No users in this group.")
         return
+    existing = [u for u in users if _check_existing_instance(sandbox_svc, u)]
+    if existing:
+        labels = ", ".join(u.label for u in existing)
+        st.warning(f"Users already have running instances: {labels}")
+        return
     try:
         results = _run_async(
             sandbox_svc.create_instances_for_group(
                 users=users,
-                workspace_dir=cfg.workspace_dir if not user_volumes else None,
+                workspace_dir=cfg.workspace_dir,
                 user_volumes=user_volumes if user_volumes else None,
             )
         )
