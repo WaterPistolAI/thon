@@ -1317,6 +1317,9 @@ def main() -> None:
     cfg = _get_config()
     _check_auth(cfg)
 
+    cfg = _get_config()
+    _check_auth(cfg)
+
     st.sidebar.title("◆ THON")
     st.sidebar.caption(_get_git_version())
 
