@@ -207,7 +207,7 @@ def _ensure_volumes_for_users(
             _ensure_docker_volume(db_user.storage_path)
             ensured += 1
     if ensured:
-        print(f"  Ensured {ensued} Docker volume(s) exist")
+        print(f"  Ensured {ensured} Docker volume(s) exist")
 
 
 def generate_password(length: int = 24) -> str:
