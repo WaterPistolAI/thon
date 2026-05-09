@@ -1314,7 +1314,6 @@ def _check_auth(cfg: AppConfig) -> None:
 
 def main() -> None:
     inject_custom_styles()
-
     cfg = _get_config()
     _check_auth(cfg)
 
