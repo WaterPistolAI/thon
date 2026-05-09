@@ -1,14 +1,23 @@
+# IDE
+snapshot-version.txt
+.kilo*
+.vscode*
+
+# CACHE
 __pycache__
+.ruff_cache
+
+# ENVIRONMENT
 .env
 .venv
-snapshot-version.txt
-kilo.json
-.kilo*
-vscode-settings.jsonc
-.vscode*
-groups.yaml
-.thon-groups.yaml
+
+# LOGGING
+.log/
+*.log
+
+# LOCAL THON CONFIG
 thon.yaml
-.ruff_cache
-build-log.txt
+groups.yaml
 extensions.txt
+vscode-settings.jsonc
+kilo.json*
