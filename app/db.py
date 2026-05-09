@@ -579,14 +579,14 @@ def load_groups_from_yaml(
                     session.add(db_group)
                     session.commit()
         for username in group_data.get("users", []):
-            existing = _find_user_by_group_and_name(group.id, username, db_path=db_path)
+            existing = find_user_by_group_and_name(group.id, username, db_path=db_path)
             if not existing:
                 create_user(group.id, username, db_path=db_path)
         result.append(group)
     return result
 
 
-def _find_user_by_group_and_name(
+def find_user_by_group_and_name(
     group_id: str, username: str, db_path: Optional[str] = None
 ) -> Optional[UserRecord]:
     """Find a user by group ID and username."""

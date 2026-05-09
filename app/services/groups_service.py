@@ -17,7 +17,6 @@
 import logging
 import os
 import subprocess
-import uuid
 from datetime import datetime
 from typing import Optional
 
@@ -149,31 +148,27 @@ class GroupsService:
         """Add a user to a group with an auto-generated UUID.
 
         Raises ``DuplicateError`` if this username already exists in the group.
-        Derives ``workspace_path`` and ``storage_path`` as Docker named
-        volume names (PVC claimName) used by the OpenSandbox ``pvc`` backend:
+        Derives ``workspace_path`` as a Docker named volume name (PVC claimName)
+        used by the OpenSandbox ``pvc`` backend:
           - workspace_path: ``thon-workspace-{group_name}-{username}``
-          - storage_path:   ``thon-storage-{user_uuid}``
         """
         group = db_get_group(group_id, db_path=self._db_path)
         if group is None:
             raise GroupNotFoundError(f"Group {group_id} not found")
 
-        user_id = str(uuid.uuid4())
         workspace_path = f"thon-workspace-{group.name}-{username}"
-        storage_path = f"thon-storage-{user_id}"
 
         try:
             user = db_create_user(
                 group_id=group_id,
                 username=username,
                 workspace_path=workspace_path,
-                storage_path=storage_path,
+                storage_path=None,
                 db_path=self._db_path,
             )
         except ValueError as e:
             raise DuplicateError(str(e)) from e
         self._ensure_volume(workspace_path)
-        self._ensure_volume(storage_path)
         logger.info("Created user '%s/%s' (id=%s)", group.name, username, user.id)
         return user
 
@@ -217,7 +212,7 @@ class GroupsService:
     # ── Storage path backfill ─────────────────────────────────────────
 
     def backfill_storage_paths(self) -> int:
-        """Populate workspace_path and storage_path for users missing them.
+        """Populate workspace_path for users missing them.
 
         Derives Docker named volume names (PVC claimName) and creates the
         volumes. Returns count updated.
@@ -233,16 +228,15 @@ class GroupsService:
                 ).first()
                 group_name = group.name if group else "default"
                 user.workspace_path = f"thon-workspace-{group_name}-{user.username}"
-                user.storage_path = f"thon-storage-{user.id}"
+                user.storage_path = None
                 user.updated_at = datetime.utcnow()
                 session.add(user)
                 self._ensure_volume(user.workspace_path)
-                self._ensure_volume(user.storage_path)
                 updated += 1
             if updated:
                 session.commit()
         if updated:
-            logger.info("Backfilled storage paths for %d user(s)", updated)
+            logger.info("Backfilled workspace paths for %d user(s)", updated)
         return updated
 
     # ── Import / Export ───────────────────────────────────────────────

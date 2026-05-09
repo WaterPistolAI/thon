@@ -438,34 +438,47 @@ def page_groups() -> None:
                             "UUID": _trunc_id(u.id, 8),
                             "Username": u.username,
                             "Workspace Path": u.workspace_path or "-",
-                            "Storage Path": u.storage_path or "-",
                             "Full ID": u.id,
                         }
                     )
                 df = pd.DataFrame(user_rows)
                 st.dataframe(
-                    df[["UUID", "Username", "Workspace Path", "Storage Path"]],
+                    df[["UUID", "Username", "Workspace Path"]],
                     hide_index=True,
                     width="stretch",
                 )
+
+                st.markdown("**Start Instances**")
+                su_cols = st.columns(min(len(group.users), 4))
+                for idx, u in enumerate(group.users):
+                    with su_cols[idx % len(su_cols)]:
+                        if st.button(
+                            f"▶ {u.username}",
+                            key=f"start-user-{u.id}",
+                            help=f"Start sandbox for {u.username} with PVC workspace",
+                        ):
+                            _start_user_instance(u, group)
             else:
                 st.info("No users in this group.")
 
-            bc1, bc2, bc3, bc4 = st.columns(4)
+            bc1, bc2, bc3, bc4, bc5 = st.columns(5)
             with bc1:
                 if st.button("+ User", key=f"add-user-{group.id}"):
                     st.session_state.add_user_group_id = group.id
                     st.session_state.show_add_user = True
             with bc2:
+                if st.button("▶ Start All", key=f"start-group-{group.id}"):
+                    _start_group_instances(group)
+            with bc3:
                 if st.button("✏️ Rename", key=f"rename-group-{group.id}"):
                     st.session_state.rename_group_id = group.id
                     st.session_state.rename_group_name = group.name
                     st.session_state.show_rename_group = True
-            with bc3:
+            with bc4:
                 if st.button("🔄 Transfer", key=f"transfer-group-{group.id}"):
                     st.session_state.transfer_source_group_id = group.id
                     st.session_state.show_transfer_user = True
-            with bc4:
+            with bc5:
                 if st.button("🗑 Delete", key=f"delete-group-{group.id}"):
                     try:
                         svc.delete_group(group.id)
@@ -477,6 +490,56 @@ def page_groups() -> None:
     _add_user_dialog(svc)
     _rename_group_dialog(svc)
     _transfer_user_dialog(svc, group_id_map)
+
+
+def _start_user_instance(user_record, group_record) -> None:
+    """Start a sandbox instance for a single DB user with PVC workspace volume."""
+    sandbox_svc = _get_sandbox_service()
+    cfg = _get_config()
+    user = UserInfo(group=group_record.name, username=user_record.username)
+    workspace_volume = None
+    if user_record.workspace_path and user_record.workspace_path.startswith("thon-"):
+        workspace_volume = user_record.workspace_path
+    try:
+        _run_async(
+            sandbox_svc.create_instance(
+                user=user,
+                workspace_volume=workspace_volume,
+                workspace_dir=cfg.workspace_dir if not workspace_volume else None,
+            )
+        )
+        st.toast(f"Instance started: {user.label}")
+        st.rerun()
+    except Exception as e:
+        st.error(f"Failed to start instance for {user.label}: {e}")
+
+
+def _start_group_instances(group_record) -> None:
+    """Start sandbox instances for all users in a group with PVC workspace volumes."""
+    sandbox_svc = _get_sandbox_service()
+    cfg = _get_config()
+    users = []
+    user_volumes: dict[str, str] = {}
+    for u in group_record.users:
+        user = UserInfo(group=group_record.name, username=u.username)
+        users.append(user)
+        if u.workspace_path and u.workspace_path.startswith("thon-"):
+            user_volumes[user.label] = u.workspace_path
+    if not users:
+        st.warning("No users in this group.")
+        return
+    try:
+        results = _run_async(
+            sandbox_svc.create_instances_for_group(
+                users=users,
+                workspace_dir=cfg.workspace_dir if not user_volumes else None,
+                user_volumes=user_volumes if user_volumes else None,
+            )
+        )
+        st.toast(f"Started {len(results)} instance(s) for group '{group_record.name}'")
+        st.rerun()
+    except Exception as e:
+        st.error(f"Failed to start instances for group '{group_record.name}': {e}")
 
 
 def _create_group_dialog() -> None:

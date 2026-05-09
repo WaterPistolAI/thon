@@ -24,7 +24,7 @@ from typing import Optional
 from opensandbox import Sandbox, SandboxManager
 from opensandbox.config import ConnectionConfig
 from opensandbox.models.execd import RunCommandOpts
-from opensandbox.models.sandboxes import Host, Volume, SandboxFilter
+from opensandbox.models.sandboxes import Host, PVC, Volume, SandboxFilter
 
 from app.config import AppConfig, SandboxConfig
 from app.db import get_record, get_records, get_setting, mark_terminated, update_endpoint, upsert_record
@@ -236,6 +236,7 @@ class SandboxService:
         port: int = DEFAULT_PORT,
         secure: bool = False,
         workspace_dir: Optional[str] = None,
+        workspace_volume: Optional[str] = None,
         timeout: Optional[timedelta] = None,
     ) -> InstanceInfo:
         """Create a new VS Code sandbox instance and start code-server.
@@ -245,6 +246,8 @@ class SandboxService:
             port: Port for code-server inside the container.
             secure: Enable password authentication.
             workspace_dir: Host path for persistent bind mount.
+            workspace_volume: Docker named volume (PVC claimName) for
+                persistent workspace. Takes precedence over workspace_dir.
             timeout: Sandbox lifetime (None = indefinite).
 
         Returns:
@@ -253,7 +256,19 @@ class SandboxService:
         env = {"PYTHON_VERSION": "3.12"}
         volumes: list[Volume] | None = None
 
-        if workspace_dir:
+        if workspace_volume and workspace_volume.startswith("thon-"):
+            volumes = [
+                Volume(
+                    name="workspace",
+                    pvc=PVC(claimName=workspace_volume),
+                    mountPath="/workspace",
+                ),
+            ]
+            logger.info(
+                "Mounting PVC volume %s -> /workspace for %s",
+                workspace_volume, user.label,
+            )
+        elif workspace_dir:
             host_path = os.path.join(workspace_dir, user.workspace)
             os.makedirs(host_path, exist_ok=True)
             volumes = [
@@ -350,8 +365,9 @@ class SandboxService:
         """Re-create a sandbox from its DB record, reusing the same workspace.
 
         Looks up the terminated/failed sandbox's group, username, and port
-        from the database and creates a fresh instance.  If ``workspace_dir``
-        is configured, the same host bind mount is reattached so files persist.
+        from the database and creates a fresh instance.  If the DB user has
+        a ``workspace_path`` (PVC volume), it is reattached so files persist.
+        Otherwise, if ``workspace_dir`` is configured, a host bind mount is used.
 
         Returns:
             New InstanceInfo with updated endpoint.
@@ -360,12 +376,28 @@ class SandboxService:
         if not rec:
             raise SandboxOperationError(f"No DB record for sandbox {sandbox_id}")
         user = UserInfo(group=rec.group_name, username=rec.username)
+        workspace_volume = None
         workspace_dir = self._config.workspace_dir
+        from app.db import find_user_by_group_and_name, get_groups
+        groups = get_groups(db_path=self._config.database.path)
+        group_id = None
+        for g in groups:
+            if g.name == rec.group_name:
+                group_id = g.id
+                break
+        if group_id:
+            db_user = find_user_by_group_and_name(
+                group_id, rec.username, db_path=self._config.database.path
+            )
+            if db_user and db_user.workspace_path and db_user.workspace_path.startswith("thon-"):
+                workspace_volume = db_user.workspace_path
+                workspace_dir = None
         return await self.create_instance(
             user=user,
             port=rec.port,
             secure=bool(rec.password),
             workspace_dir=workspace_dir,
+            workspace_volume=workspace_volume,
         )
 
     async def create_instances_for_group(
@@ -374,17 +406,30 @@ class SandboxService:
         start_port: int = DEFAULT_PORT,
         secure: bool = False,
         workspace_dir: Optional[str] = None,
+        user_volumes: Optional[dict[str, str]] = None,
         timeout: Optional[timedelta] = None,
     ) -> list[InstanceInfo]:
-        """Create multiple instances concurrently for a list of users."""
+        """Create multiple instances concurrently for a list of users.
+
+        Args:
+            users: Users to create instances for.
+            start_port: Starting port number (incremented per user).
+            secure: Enable password authentication.
+            workspace_dir: Host path for persistent bind mount.
+            user_volumes: Mapping of ``user.label`` (``group/username``)
+                to PVC claimName for persistent workspace volumes.
+            timeout: Sandbox lifetime (None = indefinite).
+        """
         tasks = []
         for i, user in enumerate(users):
+            vol = (user_volumes or {}).get(user.label)
             tasks.append(
                 self.create_instance(
                     user=user,
                     port=start_port + i,
                     secure=secure,
-                    workspace_dir=workspace_dir,
+                    workspace_dir=workspace_dir if not vol else None,
+                    workspace_volume=vol,
                     timeout=timeout,
                 )
             )

@@ -205,13 +205,6 @@ def _ensure_volumes_for_users(
         if db_user.workspace_path.startswith("thon-"):
             _ensure_docker_volume(db_user.workspace_path)
             ensured += 1
-        if (
-            hasattr(db_user, "storage_path")
-            and db_user.storage_path
-            and db_user.storage_path.startswith("thon-")
-        ):
-            _ensure_docker_volume(db_user.storage_path)
-            ensured += 1
     if ensured:
         print(f"  Ensured {ensured} Docker volume(s) exist")
 
