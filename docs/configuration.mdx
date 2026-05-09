@@ -102,6 +102,7 @@ dashboard:
   debug: false
 
 # ── Authentication (OIDC) ─────────────────────────────────────
+# For Streamlit dashboard: set AUTH_LOCAL_PASSWORD env variable
 auth:
   enabled: false
   session_secret: ""
@@ -556,6 +557,45 @@ without `--vscode-settings`, it reads the stored config from the database.
 | `config_groups_yaml` | Groups YAML | Groups and users definition |
 
 Priority: CLI flag (e.g., `--vscode-settings`) > database > none.
+
+---
+
+## Authentication
+
+THON supports two authentication mechanisms that operate independently:
+
+### Streamlit Dashboard: Local Password
+
+A single shared password that gates access to the Streamlit dashboard.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTH_LOCAL_PASSWORD` | (none) | Set a password to require login; unset = no auth |
+
+When set, visitors see a login form before any dashboard content renders.
+Suitable for internal or hackathon use. Not a replacement for OIDC in production.
+
+### FastAPI REST API: OIDC/OAuth2
+
+Full OIDC/OAuth2 authentication via GitHub, GitLab, or LinkedIn.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTH_ENABLED` | `false` | Enable OIDC authentication on the REST API |
+| `AUTH_SESSION_SECRET` | (none) | HMAC secret for signing session tokens (required when enabled) |
+| `AUTH_GITHUB_CLIENT_ID` | (none) | GitHub OAuth App client ID |
+| `AUTH_GITHUB_CLIENT_SECRET` | (none) | GitHub OAuth App client secret |
+| `AUTH_GITLAB_CLIENT_ID` | (none) | GitLab OAuth App client ID |
+| `AUTH_GITLAB_CLIENT_SECRET` | (none) | GitLab OAuth App client secret |
+| `AUTH_LINKEDIN_CLIENT_ID` | (none) | LinkedIn OIDC client ID |
+| `AUTH_LINKEDIN_CLIENT_SECRET` | (none) | LinkedIn OIDC client secret |
+
+When `AUTH_ENABLED=true`, unauthenticated requests to `/api/*` return `401`.
+The OAuth flow uses PKCE (S256) for security. Sessions are HMAC-signed tokens
+stored as `HttpOnly` cookies with 24-hour expiry.
+
+See [Dashboard → Authentication](./dashboard#authentication) for the full
+OAuth flow diagram, session details, and provider setup instructions.
 
 ---
 

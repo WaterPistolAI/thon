@@ -598,6 +598,20 @@ python lemonade_server.py generate-kilo-config --admin-api-key YOUR_KEY --extern
 | `THON_DB_PATH` | SQLite database path (default: `~/.thon/thon.db`) |
 | `THON_WORKSPACE_DIR` | Workspace directory for groups |
 
+### Authentication
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTH_ENABLED` | `false` | Enable OIDC authentication on the REST API |
+| `AUTH_SESSION_SECRET` | (none) | HMAC secret for signing session tokens |
+| `AUTH_LOCAL_PASSWORD` | (none) | Single password for Streamlit dashboard access |
+| `AUTH_GITHUB_CLIENT_ID` | (none) | GitHub OAuth App client ID |
+| `AUTH_GITHUB_CLIENT_SECRET` | (none) | GitHub OAuth App client secret |
+| `AUTH_GITLAB_CLIENT_ID` | (none) | GitLab OAuth App client ID |
+| `AUTH_GITLAB_CLIENT_SECRET` | (none) | GitLab OAuth App client secret |
+| `AUTH_LINKEDIN_CLIENT_ID` | (none) | LinkedIn OIDC client ID |
+| `AUTH_LINKEDIN_CLIENT_SECRET` | (none) | LinkedIn OIDC client secret |
+
 ---
 
 ## apisix_gateway.py - AI Gateway Manager

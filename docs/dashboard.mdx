@@ -161,6 +161,186 @@ Each config file supports:
 
 Priority: CLI flag > database > none.
 
+## Authentication
+
+The dashboard supports two authentication mechanisms that can be used independently
+or together, depending on your deployment needs.
+
+### Local Password (Streamlit Dashboard)
+
+The simplest authentication method — a single shared password that gates access
+to the Streamlit dashboard. When enabled, visitors see a login form before any
+dashboard content is rendered.
+
+#### Enabling
+
+```bash
+# Set the password via environment variable
+AUTH_LOCAL_PASSWORD=mysecret streamlit run dashboard/streamlit_app.py --server.port 8501
+
+# Or in .env / thon.yaml
+export AUTH_LOCAL_PASSWORD=mysecret
+```
+
+Or in `thon.yaml`:
+
+```yaml
+auth:
+  local_password: "mysecret"   # not a standard thon.yaml field; uses env var
+```
+
+#### Behavior
+
+| Aspect | Details |
+|--------|---------|
+| Scope | Streamlit dashboard only (not the FastAPI REST API) |
+| Mechanism | Single password check via Streamlit form |
+| Session | Stored in `st.session_state.authenticated`; lost on browser refresh is handled by re-checking |
+| Security | Suitable for internal/hackathon use; not a replacement for OIDC in production |
+
+When `AUTH_LOCAL_PASSWORD` is unset (default), no authentication is required
+to access the dashboard.
+
+### OIDC/OAuth2 (FastAPI REST API)
+
+The FastAPI backend supports full OIDC/OAuth2 authentication via external
+identity providers. This protects the REST API endpoints (`/api/*`) with
+session-based authentication.
+
+#### Supported Providers
+
+| Provider | Protocol | Scope | User ID Format |
+|----------|----------|-------|---------------|
+| **GitHub** | OAuth2 | `read:user user:email` | `github:<id>` |
+| **GitLab** | OIDC | `read_user` | `gitlab:<id>` |
+| **LinkedIn** | OIDC | `openid profile email` | `linkedin:<sub>` |
+
+#### Enabling
+
+```bash
+# Enable auth with GitHub
+AUTH_ENABLED=true \
+AUTH_SESSION_SECRET=$(openssl rand -hex 32) \
+AUTH_GITHUB_CLIENT_ID=your-client-id \
+AUTH_GITHUB_CLIENT_SECRET=your-client-secret \
+python -m app.main
+```
+
+Or in `thon.yaml`:
+
+```yaml
+auth:
+  enabled: true
+  session_secret: "a-random-secret-at-least-32-chars"
+  github:
+    client_id: "your-client-id"
+    client_secret: "your-client-secret"
+```
+
+#### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTH_ENABLED` | `false` | Enable OIDC authentication on the REST API |
+| `AUTH_SESSION_SECRET` | (none) | HMAC secret for signing session tokens (required when enabled) |
+| `AUTH_LOCAL_PASSWORD` | (none) | Single password for Streamlit dashboard access |
+| `AUTH_GITHUB_CLIENT_ID` | (none) | GitHub OAuth App client ID |
+| `AUTH_GITHUB_CLIENT_SECRET` | (none) | GitHub OAuth App client secret |
+| `AUTH_GITLAB_CLIENT_ID` | (none) | GitLab OAuth App client ID |
+| `AUTH_GITLAB_CLIENT_SECRET` | (none) | GitLab OAuth App client secret |
+| `AUTH_LINKEDIN_CLIENT_ID` | (none) | LinkedIn OIDC client ID |
+| `AUTH_LINKEDIN_CLIENT_SECRET` | (none) | LinkedIn OIDC client secret |
+
+#### OAuth Flow
+
+```
+┌──────────┐     1. GET /api/auth/login/github     ┌──────────┐
+│  Browser  │ ───────────────────────────────────▶ │  FastAPI  │
+│           │ ◀───────────────────────────────────  │  Server   │
+│           │     2. { authorization_url }          │           │
+│           │                                       │           │
+│           │     3. Redirect to GitHub             ┌──────────┐
+│           │ ───────────────────────────────────▶ │  GitHub   │
+│           │ ◀───────────────────────────────────  │           │
+│           │     4. Redirect back with ?code=      └──────────┘
+│           │                                       │
+│           │     5. GET /api/auth/callback/github  ┌──────────┐
+│           │ ───────────────────────────────────▶ │  FastAPI  │
+│           │ ◀───────────────────────────────────  │  Server   │
+│           │     6. Set-Cookie: session=<token>    │           │
+└──────────┘                                       └──────────┘
+```
+
+1. **Login** — `GET /api/auth/login/{provider}` returns an authorization URL
+2. **Redirect** — Browser redirects user to the provider (GitHub, GitLab, LinkedIn)
+3. **Authorize** — User grants access on the provider's site
+4. **Callback** — Provider redirects back to `/api/auth/callback/{provider}?code=...&state=...`
+5. **Exchange** — Server exchanges the authorization code for an access token
+6. **Session** — Server creates an HMAC-signed session token, sets it as an
+   `HttpOnly` cookie with 24-hour expiry and `SameSite=Lax`
+
+#### PKCE Support
+
+The OAuth flow uses PKCE (Proof Key for Code Exchange) with the S256 method
+for enhanced security. A `code_verifier` and `code_challenge` are generated
+for each authorization request.
+
+#### Session Management
+
+Sessions are stored in-memory using `SessionStore` with HMAC-signed tokens:
+
+| Property | Value |
+|----------|-------|
+| Token format | `v1:<session_id>:<hmac_signature>` |
+| Signature | HMAC-SHA256 truncated to 16 hex chars |
+| TTL | 24 hours (86400 seconds) |
+| Storage | In-memory dictionary (per-process) |
+| Cookie | `session`, `HttpOnly`, `SameSite=Lax` |
+
+::: warning
+In-memory sessions are lost on server restart. For production deployments,
+replace `SessionStore` with Redis or database-backed session storage.
+:::
+
+#### Setting Up Provider OAuth Apps
+
+##### GitHub
+
+1. Go to **Settings → Developer settings → OAuth Apps → New OAuth App**
+2. Set **Homepage URL** to `https://your-domain`
+3. Set **Authorization callback URL** to `https://your-domain/api/auth/callback/github`
+4. Copy the **Client ID** and generate a **Client Secret**
+
+##### GitLab
+
+1. Go to **Settings → Applications → New application**
+2. Set **Redirect URI** to `https://your-domain/api/auth/callback/gitlab`
+3. Enable **openid**, **profile**, **email** scopes
+4. Copy the **Application ID** and **Secret**
+
+##### LinkedIn
+
+1. Go to **My Apps → Create App**
+2. Set **Redirect URL** to `https://your-domain/api/auth/callback/linkedin`
+3. Request **Sign In with LinkedIn using OpenID Connect** product
+4. Copy the **Client ID** and **Client Secret**
+
+### Combining Both Methods
+
+For maximum security, you can enable both authentication methods:
+
+- **`AUTH_LOCAL_PASSWORD`** protects the Streamlit dashboard
+- **`AUTH_ENABLED` + provider credentials** protects the FastAPI REST API
+
+```bash
+AUTH_LOCAL_PASSWORD=mysecret \
+AUTH_ENABLED=true \
+AUTH_SESSION_SECRET=$(openssl rand -hex 32) \
+AUTH_GITHUB_CLIENT_ID=xxx \
+AUTH_GITHUB_CLIENT_SECRET=xxx \
+streamlit run dashboard/streamlit_app.py --server.port 8501
+```
+
 ## Files
 
 | File | Purpose |
@@ -291,11 +471,11 @@ the same SQLite database.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/auth/providers` | List auth providers |
-| `GET` | `/api/auth/login/{provider}` | Start OAuth flow |
-| `GET` | `/api/auth/callback/{provider}` | OAuth callback |
-| `POST` | `/api/auth/logout` | End session |
-| `GET` | `/api/auth/me` | Current user info |
+| `GET` | `/api/auth/providers` | List enabled OIDC/OAuth providers and auth status |
+| `GET` | `/api/auth/login/{provider}` | Start OAuth flow; returns `authorization_url` and `state` |
+| `GET` | `/api/auth/callback/{provider}` | Handle OAuth callback; sets `session` cookie |
+| `POST` | `/api/auth/logout` | Invalidate session and clear cookie |
+| `GET` | `/api/auth/me` | Get current authenticated user info |
 
 ## Dark Theme
 

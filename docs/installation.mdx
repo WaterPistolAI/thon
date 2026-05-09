@@ -164,6 +164,26 @@ streamlit run dashboard/streamlit_app.py --server.port 8501
 
 Dashboard available at `http://localhost:8501`.
 
+#### Securing the Dashboard
+
+For internal deployments, set a simple password:
+
+```bash
+AUTH_LOCAL_PASSWORD=mysecret streamlit run dashboard/streamlit_app.py --server.port 8501
+```
+
+For production, enable OIDC authentication on the REST API:
+
+```bash
+AUTH_ENABLED=true \
+AUTH_SESSION_SECRET=$(openssl rand -hex 32) \
+AUTH_GITHUB_CLIENT_ID=xxx \
+AUTH_GITHUB_CLIENT_SECRET=xxx \
+python -m app.main
+```
+
+See [Dashboard → Authentication](./dashboard#authentication) for full details.
+
 The FastAPI REST API also provides Swagger UI at `http://localhost:8100/docs`
 for programmatic access:
 
