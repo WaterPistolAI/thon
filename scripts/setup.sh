@@ -62,7 +62,7 @@ if [ "$INSTALL_GATEWAY" = "true" ] || [ "$INSTALL_GATEWAY" = "1" ]; then
     echo "[Setup] Starting etcd and Redis..."
     sudo systemctl enable etcd
     sudo systemctl start etcd
-    sudo systemctl enable redis
+    sudo systemctl enable redis-server
     sudo systemctl start redis
 
     echo "[Setup] AI Gateway packages installed."
