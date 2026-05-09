@@ -5,6 +5,143 @@ description: Complete command-line reference for THON and Lemonade Server
 
 # CLI Reference
 
+## thon - Unified CLI (Recommended)
+
+### Synopsis
+
+```bash
+thon COMMAND [OPTIONS]
+```
+
+The `thon` CLI provides a unified entry point for interactive setup, configuration,
+and instance management. It reads from a single `thon.yaml` config file.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `thon init` | Interactive setup wizard (creates `thon.yaml`) |
+| `thon setup` | Install prerequisites + configure from `thon.yaml` |
+| `thon run` | Start VS Code instances from `thon.yaml` |
+| `thon config show` | Display current config |
+| `thon config env` | Export config as `.env` file |
+| `thon config validate` | Validate `thon.yaml` |
+| `thon cleanup` | Tear down all resources |
+
+### Global Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--config PATH` | ./thon.yaml | Path to `thon.yaml` config file |
+
+### init
+
+```bash
+thon init [OPTIONS]
+```
+
+Interactive guided setup wizard that walks through every THON feature with
+sensible defaults, validates choices, and writes a `thon.yaml` config file.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--non-interactive` | false | Generate config with defaults (no prompts) |
+| `--config PATH` | ./thon.yaml | Output path for config file |
+
+### setup
+
+```bash
+thon setup [OPTIONS]
+```
+
+Installs system prerequisites and configures all components from `thon.yaml`:
+
+1. System prerequisites (`setup.sh`)
+2. SSL directory
+3. Lemonade Server (if `lemonade.enabled`)
+4. AI Gateway (if `gateway.enabled`)
+5. `.env` file generation
+6. Summary
+
+### run
+
+```bash
+thon run [OPTIONS]
+```
+
+Starts VS Code instances from `thon.yaml`. Delegates to `scripts/main.py`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--group GROUP` | (all) | Run only this group |
+| `--config PATH` | ./thon.yaml | Path to config file |
+
+### config show
+
+```bash
+thon config show [OPTIONS]
+```
+
+Displays the full resolved config as YAML.
+
+### config env
+
+```bash
+thon config env [OPTIONS]
+```
+
+Exports configuration as a `.env` file.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--output PATH` | .env | Output `.env` file path |
+
+### config validate
+
+```bash
+thon config validate [OPTIONS]
+```
+
+Validates `thon.yaml` for common errors (missing groups, auth without providers, etc.).
+
+### cleanup
+
+```bash
+thon cleanup
+```
+
+Tear down all resources: nginx configs, Lemonade server, and AI Gateway.
+
+### Examples
+
+```bash
+# Interactive setup wizard
+thon init
+
+# Non-interactive (CI-friendly)
+thon init --non-interactive
+
+# Install prerequisites and configure
+thon setup
+
+# Start instances
+thon run
+
+# Start only one group
+thon run --group alpha
+
+# Validate config
+thon config validate
+
+# Export .env file
+thon config env --output .env
+
+# Clean up all resources
+thon cleanup
+```
+
+---
+
 ## main.py - VS Code Instance Orchestrator
 
 ### Synopsis
@@ -20,7 +157,8 @@ python ./main.py [OPTIONS]
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `--groups FILE` | string | (none) | Path to groups.yaml file |
-| `--group GROUP` | string | (all) | Run only this group from groups.yaml |
+| `--group GROUP` | string | (all) | Run only this group (works with `--groups` or `--from-db`) |
+| `--from-db` | flag | false | Read groups/users from the database instead of a YAML file |
 | `--port PORT` | int | 8443 | Starting port for code-server instances |
 | `--timeout MIN` | int | 0 | Timeout in minutes (0 = no timeout) |
 
@@ -94,6 +232,12 @@ python main.py --groups groups.yaml --external-ip 1.2.3.4
 
 # Single group
 python main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
+
+# Start instances from database instead of YAML
+python main.py --from-db --external-ip 1.2.3.4
+
+# Start a specific group from database
+python main.py --from-db --group beta --external-ip 1.2.3.4
 ```
 
 #### With Security
@@ -182,6 +326,10 @@ bash ./setup-lemonade.sh [OPTIONS]
 | `--no-prefer-system` | (system) | Use bundled llama.cpp |
 | `--llamacpp-bin PATH` | /usr/local/bin/llama-server | System binary path |
 | `--kilo-config PATH` | ./kilo.json | Output path for kilo.json |
+| `--embedding` | true | Enable embedding model for semantic indexing |
+| `--no-embedding` | false | Disable embedding model |
+| `--embedding-model MODEL` | SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16 | Embedding model HuggingFace checkpoint |
+| `--embedding-model-name NAME` | harrier-oss-v1-0.6b | Short name for embedding model |
 | `-h, --help` | | Show help message |
 
 ### Environment Variables
@@ -201,6 +349,9 @@ bash ./setup-lemonade.sh [OPTIONS]
 | `LEMONADE_PREFER_SYSTEM` | Prefer system binary (true/false) |
 | `LEMONADE_LLMACPP_BIN` | System binary path |
 | `LEMONADE_MMPROJ` | mmproj filename |
+| `LEMONADE_EMBEDDING` | Enable embedding model (true/false) |
+| `LEMONADE_EMBEDDING_MODEL` | Embedding model HuggingFace checkpoint |
+| `LEMONADE_EMBEDDING_MODEL_NAME` | Short name for embedding model |
 
 ### Examples
 
@@ -214,6 +365,22 @@ bash setup-lemonade.sh --generate-keys --external-ip 1.2.3.4
 
 ```bash
 bash setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4
+```
+
+#### Without Embedding Model
+
+```bash
+bash setup-lemonade.sh --generate-keys --external-ip 1.2.3.4 --no-embedding
+```
+
+#### Custom Embedding Model
+
+```bash
+bash setup-lemonade.sh \
+    --embedding-model some-org/embedding-model-GGUF:Q8_0 \
+    --embedding-model-name my-embedding \
+    --generate-keys \
+    --external-ip 1.2.3.4
 ```
 
 #### Custom Model
@@ -327,6 +494,10 @@ Full setup: install + configure + start + pull model + keep alive.
 | `--llamacpp-bin PATH` | /usr/local/bin/llama-server | System binary path |
 | `--mmproj FILE` | mmproj-BF16.gguf | Vision mmproj filename |
 | `--skip-install` | false | Skip installation check |
+| `--embedding` | true | Enable embedding model for semantic indexing |
+| `--no-embedding` | false | Disable embedding model |
+| `--embedding-model MODEL` | SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16 | Embedding model checkpoint |
+| `--embedding-model-name NAME` | harrier-oss-v1-0.6b | Short name for embedding model |
 
 ### write-model-configs
 
@@ -341,6 +512,10 @@ python lemonade_server.py write-model-configs [OPTIONS]
 | `--num-users N` | 1 | Parallel user count |
 | `--llamacpp-backend BACKEND` | auto | Backend |
 | `--mmproj FILE` | mmproj-BF16.gguf | Vision mmproj filename |
+| `--embedding` | true | Also write embedding model configs |
+| `--no-embedding` | false | Skip embedding model configs |
+| `--embedding-model MODEL` | SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16 | Embedding model checkpoint |
+| `--embedding-model-name NAME` | harrier-oss-v1-0.6b | Short name for embedding model |
 
 ### generate-kilo-config
 
@@ -356,21 +531,26 @@ python lemonade_server.py generate-kilo-config [OPTIONS]
 | `--output PATH` | kilo.json | Output path |
 | `--api-key KEY` | (none) | API key |
 | `--admin-api-key KEY` | (none) | Admin API key |
+| `--embedding-model-name NAME` | harrier-oss-v1-0.6b | Embedding model name for indexing config |
+| `--no-embedding` | false | Omit indexing section from kilo.json |
 
 ### Examples
 
 ```bash
-# Full setup
+# Full setup (with embedding model)
 python lemonade_server.py run --groups groups.yaml --generate-keys --external-ip 1.2.3.4
+
+# Full setup without embedding model
+python lemonade_server.py run --groups groups.yaml --generate-keys --external-ip 1.2.3.4 --no-embedding
 
 # Just configure
 python lemonade_server.py configure --generate-keys --external-ip 1.2.3.4
 
-# Write model configs only
+# Write model configs only (includes embedding by default)
 python lemonade_server.py write-model-configs --num-users 6
 
-# Generate kilo.json
-python lemonade_server.py generate-kilo-config --admin-api-key YOUR_KEY --external-ip 1.2.3.4
+# Generate kilo.json without embedding/indexing section
+python lemonade_server.py generate-kilo-config --admin-api-key YOUR_KEY --external-ip 1.2.3.4 --no-embedding
 ```
 
 ---
@@ -392,6 +572,9 @@ python lemonade_server.py generate-kilo-config --admin-api-key YOUR_KEY --extern
 |----------|-------------|
 | `LEMONADE_API_KEY` | API key for regular endpoints |
 | `LEMONADE_ADMIN_API_KEY` | API key for admin endpoints |
+| `LEMONADE_EMBEDDING` | Enable embedding model (true/false) |
+| `LEMONADE_EMBEDDING_MODEL` | Embedding model HuggingFace checkpoint |
+| `LEMONADE_EMBEDDING_MODEL_NAME` | Short name for embedding model |
 
 ### AI Gateway
 
@@ -408,6 +591,13 @@ python lemonade_server.py generate-kilo-config --admin-api-key YOUR_KEY --extern
 | `GATEWAY_RATE_LIMIT_WINDOW` | Time window in seconds |
 | `GATEWAY_MODE` | Consumer mode: per-user or per-group |
 
+### Database
+
+| Variable | Description |
+|----------|-------------|
+| `THON_DB_PATH` | SQLite database path (default: `~/.thon/thon.db`) |
+| `THON_WORKSPACE_DIR` | Workspace directory for groups |
+
 ---
 
 ## apisix_gateway.py - AI Gateway Manager
@@ -422,7 +612,7 @@ python scripts/apisix_gateway.py COMMAND [OPTIONS]
 
 | Command | Description |
 |---------|-------------|
-| `setup` | Full gateway setup: create route + consumers from groups.yaml |
+| `setup` | Full gateway setup: create routes + consumers from groups.yaml |
 | `create-consumer` | Create a single consumer with API key |
 | `delete-consumer` | Delete a consumer by username |
 | `generate-kilo` | Generate kilo.json for a consumer |
@@ -434,6 +624,10 @@ python scripts/apisix_gateway.py COMMAND [OPTIONS]
 ```bash
 python scripts/apisix_gateway.py setup [OPTIONS]
 ```
+
+Creates two APISIX routes:
+- `/v1/chat/completions` — chat completions via `ai-proxy-multi`
+- `/v1/embeddings` — embedding requests via upstream proxy (when `--no-embedding` is not set)
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -453,6 +647,8 @@ python scripts/apisix_gateway.py setup [OPTIONS]
 | `--time-window N` | 60 | Rate limit time window in seconds |
 | `--generate-kilo` | false | Generate kilo.json for each consumer |
 | `--external-ip IP` | (auto) | External IP for kilo.json base URL |
+| `--embedding-model MODEL` | user.harrier-oss-v1-0.6b | Embedding model name for Lemonade |
+| `--no-embedding` | false | Disable embedding route creation |
 
 ### create-consumer
 
@@ -480,13 +676,19 @@ python scripts/apisix_gateway.py generate-kilo --username alice --api-key KEY [O
 | `--proxy-port` | 9080 | APISIX proxy port |
 | `--external-ip` | 127.0.0.1 | External IP for gateway URL |
 | `--model` | user.gemma-4-31b-it | Model name for kilo.json |
+| `--embedding-model` | user.harrier-oss-v1-0.6b | Embedding model name for indexing config |
+| `--no-embedding` | false | Omit indexing section from kilo.json |
 
 ### Examples
 
 ```bash
-# Full setup from groups.yaml
+# Full setup from groups.yaml (includes embedding route)
 python scripts/apisix_gateway.py setup --groups groups.yaml \
     --lemonade-url http://127.0.0.1:13305
+
+# Setup without embedding route
+python scripts/apisix_gateway.py setup --groups groups.yaml \
+    --lemonade-url http://127.0.0.1:13305 --no-embedding
 
 # Per-group setup with Redis rate limiting
 python scripts/apisix_gateway.py setup --groups groups.yaml \
@@ -495,9 +697,13 @@ python scripts/apisix_gateway.py setup --groups groups.yaml \
 # Create single consumer
 python scripts/apisix_gateway.py create-consumer --username alice --rate-limit 500
 
-# Generate kilo.json
+# Generate kilo.json (with embedding/indexing config)
 python scripts/apisix_gateway.py generate-kilo --username alice --api-key KEY \
     --external-ip 1.2.3.4
+
+# Generate kilo.json without embedding
+python scripts/apisix_gateway.py generate-kilo --username alice --api-key KEY \
+    --external-ip 1.2.3.4 --no-embedding
 
 # Cleanup all gateway resources
 python scripts/apisix_gateway.py cleanup

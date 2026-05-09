@@ -11,14 +11,17 @@ via Lemonade Server.
 
 ## Features
 
+- **Unified CLI**: `thon init`, `thon setup`, `thon run` — one config file (`thon.yaml`) for everything
 - **Multi-Instance**: Multiple concurrent VS Code sandboxes from a single command
-- **Groups-Based**: Define users and groups in YAML for automatic instance creation
+- **Groups-Based**: Define users and groups in YAML or manage via dashboard
 - **Web Dashboard**: Streamlit dashboard for instance, group, Lemonade, and gateway management
 - **SSL/TLS**: Automatic nginx reverse proxy with mkcert or openssl certificates
-- **Persistent Workspaces**: Optional host bind mounts for workspace persistence
+- **Persistent Workspaces**: PVC Docker volumes or host bind mounts for workspace persistence
 - **Local LLM**: Optional Lemonade Server integration for local inference
+- **Semantic Indexing**: Embedding model for Kilo Code's semantic code search
 - **AI Gateway**: Optional APISIX gateway with per-user or per-group rate limiting and API keys
-- **Kilo Code Ready**: Auto-generated config for Kilo Code extension
+- **Config Files**: Store and manage groups YAML, kilo.json, and VS Code settings in the database
+- **Kilo Code Ready**: Auto-generated config with experimental flags and indexing for Kilo Code
 
 ## Quick Start
 
@@ -37,22 +40,29 @@ Installs: python3, nginx, docker.io, mkcert, openssl
 docker build -t waterpistol/thon:latest ./
 ```
 
-### 3. Define Groups
+### 3. Initialize Configuration
 
-Create `groups.yaml`:
+```bash
+# Interactive setup wizard (recommended)
+thon init
 
-```yaml
-groups:
-  alpha:
-    users:
-      - alice
-      - bob
-  beta:
-    users:
-      - dave
+# Or non-interactive (CI-friendly)
+thon init --non-interactive
 ```
 
-### 4. Run
+This creates a `thon.yaml` config file with all settings.
+
+### 4. Setup and Run
+
+```bash
+# Install prerequisites and configure all components
+thon setup
+
+# Start VS Code instances
+thon run
+```
+
+Alternatively, use `main.py` directly:
 
 ```bash
 python ./main.py --groups groups.yaml --external-ip 1.2.3.4
@@ -81,13 +91,14 @@ Each user gets their own VS Code sandbox at `https://<ip>/<endpoint_path>/`.
 │                                                              │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │           Lemonade Server (Optional)                 │    │
-│  │              OpenAI-compatible API                   │    │
+│  │    Chat model + Embedding model (semantic search)    │    │
 │  │                   :13305                             │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                              │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │         APISIX AI Gateway (Optional)                 │    │
 │  │    Rate limiting + per-user/group API keys           │    │
+│  │    Chat route + Embedding route                      │    │
 │  │                   :9080                              │    │
 │  └─────────────────────────────────────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
@@ -97,12 +108,13 @@ Each user gets their own VS Code sandbox at `https://<ip>/<endpoint_path>/`.
 
 | Component | Role |
 |-----------|------|
+| **thon CLI** | Unified entry point: `thon init`, `thon setup`, `thon run`, `thon config` |
 | **main.py** | Orchestrates sandbox creation, nginx configs, workspace setup |
 | **Streamlit Dashboard** | Web UI for instance, group, Lemonade, and gateway management (:8501) |
 | **FastAPI REST API** | Programmatic API for instances, groups, Lemonade, gateway, auth (:8100) |
 | **nginx** | SSL termination + WebSocket proxy (per-port server blocks) |
 | **code-server** | VS Code in the browser, runs HTTP inside each sandbox |
-| **Lemonade Server** | Optional local LLM inference (OpenAI-compatible API) |
+| **Lemonade Server** | Optional local LLM inference (chat + embedding models) |
 | **APISIX Gateway** | Optional rate limiting with per-user or per-group API keys |
 
 ### Network Modes
@@ -114,6 +126,17 @@ Network mode is **auto-detected** from the server-returned endpoint format:
 | **Host** | `127.0.0.1:8443` | No `/` after port |
 | **Bridge** | `127.0.0.1:52322/proxy/8443` | `/proxy/` in endpoint |
 
+### Workspace Persistence
+
+| Mode | Storage | Lifecycle |
+|------|---------|-----------|
+| **PVC Volume** | Docker named volume (`thon-workspace-*`) | Persists across instance recreations |
+| **Bind Mount** | Host directory (`--workspace-dir`) | Persists on host filesystem |
+| **Ephemeral** | Inside container | Lost when container is removed |
+
+PVC volumes are created automatically when users are imported via the dashboard
+or `thon.yaml`. When a sandbox is recreated, the same PVC volume is reattached.
+
 ## Next Steps
 
 - [Installation Guide](./installation) - Detailed setup instructions
@@ -122,4 +145,3 @@ Network mode is **auto-detected** from the server-returned endpoint format:
 - [AI Gateway](./gateway) - APISIX rate limiting and API key management
 - [Configuration](./configuration) - Full configuration reference
 - [CLI Reference](./cli-reference) - Command-line options
-- [Troubleshooting](./troubleshooting) - Common issues and solutions

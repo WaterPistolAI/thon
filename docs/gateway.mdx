@@ -18,13 +18,15 @@ enforces token quotas using the `ai-rate-limiting` plugin.
 │  ┌───────────────────────────────────────────────────────────┐   │
 │  │                  APISIX Gateway (:9080)                     │   │
 │  │                                                            │   │
-│  │  key-auth ──> ai-rate-limiting ──> ai-proxy-multi ──┐     │   │
-│  │       │            │                    │             │     │   │
-│  │  Validate     Count tokens         Route to         │     │   │
-│  │  API key      Enforce limits       Lemonade         │     │   │
-│  └──────────────────────────────────────────────────────┼─────┘   │
-│                                                         │         │
-│  ┌──────────────────────────────────────────────────────▼─────┐   │
+│  │  /v1/chat/completions:                                     │   │
+│  │    key-auth → ai-rate-limiting → ai-proxy-multi → Lemonade │   │
+│  │                                                            │   │
+│  │  /v1/embeddings:                                           │   │
+│  │    key-auth → proxy-rewrite → upstream proxy → Lemonade    │   │
+│  └───────────────────────────────────────────────────────────┘   │
+│                                 ▲                                 │
+│                                 │ HTTP                            │
+│  ┌──────────────────────────────┴────────────────────────────┐   │
 │  │              Lemonade Server (:13305)                       │   │
 │  │              OpenAI-compatible API                          │   │
 │  └────────────────────────────────────────────────────────────┘   │
@@ -35,6 +37,22 @@ enforces token quotas using the `ai-rate-limiting` plugin.
 │  └──────────────────────┘  └──────────────────────┘              │
 └──────────────────────────────────────────────────────────────────┘
 ```
+
+## Gateway Routes
+
+The gateway creates two APISIX routes:
+
+### Chat Completions Route (`/v1/chat/completions`)
+
+Uses the `ai-proxy-multi` plugin for intelligent LLM load balancing with
+`key-auth` for authentication and `ai-rate-limiting` for token quotas.
+
+### Embedding Route (`/v1/embeddings`)
+
+Uses simple upstream proxying (via `proxy-rewrite`) to forward embedding
+requests to Lemonade. This route is created automatically unless `--no-embedding`
+is specified. The embedding route enables Kilo Code's semantic code search
+(indexing) to go through the gateway with the same consumer API key.
 
 ## Consumer Modes
 
@@ -83,7 +101,7 @@ and starts the services.
 ### CLI Setup
 
 ```bash
-# Per-user mode
+# Per-user mode (includes embedding route)
 python scripts/apisix_gateway.py setup \
     --groups groups.yaml \
     --lemonade-url http://127.0.0.1:13305
@@ -99,6 +117,18 @@ python scripts/apisix_gateway.py setup \
     --groups groups.yaml \
     --lemonade-url http://127.0.0.1:13305 \
     --redis-host 127.0.0.1
+
+# Without embedding route
+python scripts/apisix_gateway.py setup \
+    --groups groups.yaml \
+    --lemonade-url http://127.0.0.1:13305 \
+    --no-embedding
+
+# Custom embedding model
+python scripts/apisix_gateway.py setup \
+    --groups groups.yaml \
+    --lemonade-url http://127.0.0.1:13305 \
+    --embedding-model user.my-embedding-model
 ```
 
 ### Running with main.py
@@ -161,12 +191,37 @@ that points to the gateway instead of directly to Lemonade:
       "provider": "lemonade-gateway",
       "modelId": "user.gemma-4-31b-it"
     }
+  },
+  "experimental": {
+    "batch_tool": false,
+    "codebase_search": true,
+    "openTelemetry": false,
+    "continue_loop_on_deny": true,
+    "semantic_indexing": true,
+    "agent_manager_tool": true
+  },
+  "indexing": {
+    "enabled": true,
+    "provider": "openai-compatible",
+    "vectorStore": "lancedb",
+    "openai-compatible": {
+      "baseUrl": "http://1.2.3.4:9080/v1",
+      "apiKey": "<consumer-api-key>",
+      "model": "user.harrier-oss-v1-0.6b"
+    }
   }
 }
 ```
 
+The `indexing` section configures Kilo Code's semantic code search to use the
+gateway's embedding route (`/v1/embeddings`) with the same consumer API key.
+This means embedding requests are also rate-limited by the consumer's token quota.
+
 In per-group mode, all users in the same group receive the same `kilo.json`
 with the shared group API key.
+
+When `--no-embedding` is used during setup, the `indexing` section is omitted
+from the generated `kilo.json`.
 
 ## API Endpoints
 

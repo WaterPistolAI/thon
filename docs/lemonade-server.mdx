@@ -19,6 +19,7 @@ and supports GPU acceleration via ROCm, CUDA, or Vulkan.
 │  │              Lemonade Server (:13305)                  │  │
 │  │                                                       │  │
 │  │   /v1/chat/completions  → OpenAI-compatible API      │  │
+│  │   /v1/embeddings        → Embedding API              │  │
 │  │   /api/v1/load          → Model management           │  │
 │  │   /api/v1/models        → List available models      │  │
 │  │                                                       │  │
@@ -54,8 +55,19 @@ This command:
 1. Installs Lemonade Server from PPA
 2. Configures GPU backend (auto-detected)
 3. Generates API keys
-4. Downloads the default model
-5. Creates `kilo.json` for Kilo Code
+4. Downloads the default chat model (gemma-4-31b-it)
+5. Downloads the default embedding model (harrier-oss-v1-0.6b)
+6. Creates `kilo.json` for Kilo Code (with indexing config)
+
+### Without Embedding Model
+
+```bash
+bash ./setup-lemonade.sh \
+    --groups groups.yaml \
+    --generate-keys \
+    --external-ip YOUR_IP \
+    --no-embedding
+```
 
 ### Manual Setup
 
@@ -86,8 +98,11 @@ sudo systemctl daemon-reload
 # 4. Start server
 sudo systemctl restart lemonade-server
 
-# 5. Pull model
+# 5. Pull chat model
 lemonade pull unsloth/gemma-4-31B-it-GGUF:Q8_K_XL
+
+# 6. Pull embedding model (optional, for semantic indexing)
+lemonade pull SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16
 ```
 
 </details>
@@ -127,6 +142,7 @@ sudo systemctl stop lemonade-server
   "port": 13305,
   "host": "0.0.0.0",
   "log_level": "info",
+  "max_loaded_models": 2,
   "ctx_size": 262144,
   "llamacpp": {
     "backend": "auto",
@@ -137,6 +153,9 @@ sudo systemctl stop lemonade-server
   }
 }
 ```
+
+When embedding is enabled, `max_loaded_models` is automatically set to `2`
+to allow both the chat model and embedding model to be loaded simultaneously.
 
 ### Backend Options
 
@@ -153,6 +172,8 @@ auto-detection.
 
 ### Model Configuration (user_models.json)
 
+With both chat and embedding models:
+
 ```json
 {
   "gemma-4-31b-it": {
@@ -162,6 +183,13 @@ auto-detection.
     "suggested": true,
     "labels": ["custom", "vision"],
     "mmproj": "mmproj-BF16.gguf"
+  },
+  "harrier-oss-v1-0.6b": {
+    "model_name": "harrier-oss-v1-0.6b",
+    "checkpoint": "SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16",
+    "recipe": "llamacpp",
+    "suggested": true,
+    "labels": ["custom", "embedding"]
   }
 }
 ```
@@ -174,20 +202,70 @@ auto-detection.
     "ctx_size": 1572864,
     "llamacpp_backend": "auto",
     "llamacpp_args": "-b 8192 -ub 8192 -to 3600 -ctk q8_0 -ctv q8_0 --temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.0 --repeat-penalty 1.0 --no-webui --threads-http -1 --threads -1 -np 6"
+  },
+  "user.harrier-oss-v1-0.6b": {
+    "ctx_size": 196608,
+    "llamacpp_backend": "auto",
+    "llamacpp_args": "-b 8192 -ub 8192 -to 3600 -ctk q8_0 -ctv q8_0 --no-webui --threads-http -1 --threads -1 -np 6"
   }
 }
 ```
 
+## Embedding Model
+
+The embedding model enables Kilo Code's semantic code search feature. It runs
+alongside the chat model in the same Lemonade server instance.
+
+### Default Embedding Model
+
+| Property | Value |
+|----------|-------|
+| Checkpoint | `SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16` |
+| Short name | `harrier-oss-v1-0.6b` (API: `user.harrier-oss-v1-0.6b`) |
+| Recipe | `llamacpp` |
+| Labels | `["custom", "embedding"]` |
+
+### Enabling / Disabling
+
+Embedding is **enabled by default**. To disable:
+
+```bash
+# Shell script
+bash setup-lemonade.sh --no-embedding --generate-keys --external-ip 1.2.3.4
+
+# Python CLI
+python lemonade_server.py run --no-embedding --generate-keys --external-ip 1.2.3.4
+```
+
+When disabled:
+- No embedding model entry in `user_models.json` or `recipe_options.json`
+- Embedding model is not pulled or loaded
+- `max_loaded_models` stays at `1`
+- `kilo.json` omits the `indexing` section
+
+### Custom Embedding Model
+
+```bash
+bash setup-lemonade.sh \
+    --embedding-model some-org/embedding-model-GGUF:Q8_0 \
+    --embedding-model-name my-embedding \
+    --generate-keys \
+    --external-ip 1.2.3.4
+```
+
 ## Per-User Scaling
 
-When using `--groups groups.yaml`, context and parallelism scale automatically:
+When using `--groups groups.yaml`, context and parallelism scale automatically
+for both chat and embedding models:
 
-| Parameter | Calculation | Example (6 users) |
-|-----------|-------------|-------------------|
-| `ctx_size` | `262144 × num_users` | 1,572,864 |
-| `-np` | `num_users` | 6 |
+| Parameter | Chat Model | Embedding Model |
+|-----------|-----------|-----------------|
+| `ctx_size` | `262144` per user | `32768` per user |
+| `-np` | `num_users` | `num_users` |
+| Per-slot `ctx_size` | `262144` | `32768` |
 
-Each user gets a full 262,144 token context window.
+Each user gets a full 262,144 token context window for chat and 32,768 for
+embedding.
 
 ## Reserved Arguments
 
@@ -251,7 +329,7 @@ bash ./setup-lemonade.sh \
     --external-ip YOUR_IP
 ```
 
-Creates `kilo.json`:
+Creates `kilo.json` with chat model, experimental flags, and semantic indexing:
 
 ```json
 {
@@ -272,8 +350,35 @@ Creates `kilo.json`:
       }
     }
   },
-  "model": "lemonade/user.gemma-4-31b-it"
+  "model": "lemonade/user.gemma-4-31b-it",
+  "experimental": {
+    "batch_tool": false,
+    "codebase_search": true,
+    "openTelemetry": false,
+    "continue_loop_on_deny": true,
+    "semantic_indexing": true,
+    "agent_manager_tool": true
+  },
+  "indexing": {
+    "enabled": true,
+    "provider": "openai-compatible",
+    "vectorStore": "lancedb",
+    "openai-compatible": {
+      "baseUrl": "http://YOUR_IP:13305/v1",
+      "apiKey": "your-api-key",
+      "model": "user.harrier-oss-v1-0.6b"
+    }
+  }
 }
+```
+
+### Generate Config Without Embedding
+
+```bash
+python lemonade_server.py generate-kilo-config \
+    --admin-api-key YOUR_KEY \
+    --external-ip 1.2.3.4 \
+    --no-embedding
 ```
 
 ### Inject into Sandboxes
@@ -308,6 +413,10 @@ Injects config to `/home/vscode/.config/kilo/config.json` in each sandbox.
 | `--no-prefer-system` | (system) | Use bundled llama.cpp |
 | `--llamacpp-bin PATH` | /usr/local/bin/llama-server | System binary path |
 | `--kilo-config PATH` | ./kilo.json | Output path for kilo.json |
+| `--embedding` | true | Enable embedding model |
+| `--no-embedding` | false | Disable embedding model |
+| `--embedding-model MODEL` | SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16 | Embedding model checkpoint |
+| `--embedding-model-name NAME` | harrier-oss-v1-0.6b | Short name for embedding model |
 
 ### lemonade CLI Commands
 
@@ -340,6 +449,7 @@ Remove reserved args from `llamacpp_args`. Lemonade manages:
 - Context size (`--ctx-size`)
 - Jinja formatting (`--jinja`)
 - Model path (`--model`)
+- Embedding flag (`--embedding`)
 
 ### Backend Not Detected
 
@@ -363,3 +473,11 @@ lemonade config set ctx_size=131072
 # Smaller model
 lemonade pull unsloth/gemma-4-31B-it-GGUF:Q4_K_M
 ```
+
+### Embedding Model Not Loading
+
+If the embedding model fails to load:
+1. Check `max_loaded_models` is at least `2` in `config.json`
+2. Verify GPU memory can support both models
+3. Check logs: `sudo journalctl -u lemonade-server -f`
+4. Try disabling embedding: `--no-embedding` flag

@@ -66,58 +66,90 @@ The image includes:
 - **Python 3.12**: Development environment
 - **Non-root user**: Security best practice
 
-### 4. Configure SSL Certificates
+### 4. Configure THON
 
-#### Option A: mkcert (Recommended for Development)
-
-```bash
-# Install local CA
-mkcert -install
-
-# Generate certificate for your IP
-mkcert -cert-file /etc/nginx/ssl/server.crt \
-       -key-file /etc/nginx/ssl/server.key \
-       165.245.138.159 localhost
-```
-
-#### Option B: Let's Encrypt (Production)
+#### Option A: Interactive Setup (Recommended)
 
 ```bash
-sudo certbot certonly --standalone -d your-domain.com
-sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem /etc/nginx/ssl/server.crt
-sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem /etc/nginx/ssl/server.key
+# Interactive wizard — creates thon.yaml
+thon init
+
+# Review and edit the generated config
+cat thon.yaml
 ```
 
-### 5. Create Groups Configuration
+The wizard walks you through:
+- External IP (auto-detected)
+- Groups and users
+- Sandbox settings (domain, image, port)
+- VS Code security (password auth)
+- Nginx and SSL
+- Workspace persistence
+- Lemonade Server (local LLM)
+- Kilo Code integration
+- AI Gateway (rate limiting)
+- Dashboard settings
+- OIDC authentication
 
-Create `groups.yaml` in your project directory:
+#### Option B: Non-Interactive Setup (CI/CD)
+
+```bash
+thon init --non-interactive
+```
+
+Generates a `thon.yaml` with sensible defaults:
+- One group `alpha` with users `alice` and `bob`
+- All optional features disabled
+- Can be edited manually afterward
+
+#### Option C: Manual YAML
+
+Create `thon.yaml` manually (see [Configuration](./configuration) for full reference):
 
 ```yaml
+external_ip: "1.2.3.4"
 groups:
   alpha:
-    users:
-      - alice
-      - bob
+    - alice
+    - bob
   beta:
-    users:
-      - charlie
-      - dave
-  gamma:
-    users:
-      - eve
+    - charlie
+    - dave
+lemonade:
+  enabled: false
+gateway:
+  enabled: false
 ```
 
-Each user gets:
-- Unique VS Code sandbox instance
-- Isolated workspace at `/workspace/{group}/{username}`
-- HTTPS URL at `https://{ip}/{endpoint_path}/`
+### 5. Install Prerequisites and Configure
+
+```bash
+# Install all prerequisites and configure components from thon.yaml
+thon setup
+```
+
+This runs a 6-step process:
+1. System prerequisites (`setup.sh`)
+2. SSL directory
+3. Lemonade Server (if `lemonade.enabled`)
+4. AI Gateway (if `gateway.enabled`)
+5. `.env` file generation
+6. Summary
 
 ### 6. Run VS Code Instances
 
 ```bash
-python ./main.py \
-    --groups groups.yaml \
-    --external-ip YOUR_EXTERNAL_IP
+# Start instances from thon.yaml
+thon run
+
+# Start only one group
+thon run --group alpha
+```
+
+Or use `main.py` directly for more control:
+
+```bash
+python ./main.py --groups groups.yaml --external-ip YOUR_EXTERNAL_IP
 ```
 
 ### 7. Run the Dashboard (Optional)
@@ -141,9 +173,76 @@ python -m app.main
 
 See [Dashboard](./dashboard) for full documentation.
 
+## Alternative: Using main.py Directly
+
+If you prefer the traditional CLI approach without `thon.yaml`:
+
+### Create Groups Configuration
+
+Create `groups.yaml` in your project directory:
+
+```yaml
+groups:
+  alpha:
+    users:
+      - alice
+      - bob
+  beta:
+    users:
+      - charlie
+      - dave
+  gamma:
+    users:
+      - eve
+```
+
+### Run from YAML
+
+```bash
+python ./main.py --groups groups.yaml --external-ip YOUR_EXTERNAL_IP
+```
+
+### Run from Database
+
+After importing groups via the dashboard, you can start instances from
+the database:
+
+```bash
+# Start all groups from database
+python ./main.py --from-db --external-ip YOUR_EXTERNAL_IP
+
+# Start a specific group from database
+python ./main.py --from-db --group beta --external-ip YOUR_EXTERNAL_IP
+```
+
+When using `--from-db`, PVC workspace volumes from the database are
+reattached automatically, preserving user data across instance recreations.
+
+### Configure SSL Certificates
+
+#### Option A: mkcert (Recommended for Development)
+
+```bash
+# Install local CA
+mkcert -install
+
+# Generate certificate for your IP
+mkcert -cert-file /etc/nginx/ssl/server.crt \
+       -key-file /etc/nginx/ssl/server.key \
+       165.245.138.159 localhost
+```
+
+#### Option B: Let's Encrypt (Production)
+
+```bash
+sudo certbot certonly --standalone -d your-domain.com
+sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem /etc/nginx/ssl/server.crt
+sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem /etc/nginx/ssl/server.key
+```
+
 ## Optional: Lemonade Server Setup
 
-For local LLM inference with Kilo Code, Continue, or Cline extensions:
+For local LLM inference with Kilo Code, Continue, or Cline extensions.
 
 ### Quick Setup
 
@@ -158,8 +257,19 @@ This will:
 1. Install Lemonade Server from PPA
 2. Configure for your GPU backend
 3. Generate API keys
-4. Download the default model (gemma-4-31b-it)
-5. Create `kilo.json` for Kilo Code
+4. Download the default chat model (gemma-4-31b-it)
+5. Download the default embedding model (harrier-oss-v1-0.6b)
+6. Create `kilo.json` for Kilo Code (with semantic indexing config)
+
+### Without Embedding Model
+
+```bash
+bash ./setup-lemonade.sh \
+    --groups groups.yaml \
+    --generate-keys \
+    --external-ip YOUR_EXTERNAL_IP \
+    --no-embedding
+```
 
 ### Custom llama.cpp Build (AMD MI300X)
 
@@ -188,13 +298,17 @@ For rate limiting LLM API access with per-user or per-group API keys:
 # Install APISIX (or use INSTALL_GATEWAY=true during initial setup)
 INSTALL_GATEWAY=true bash ./setup.sh
 
-# Setup gateway with per-user rate limiting
+# Setup gateway with per-user rate limiting (includes embedding route)
 python scripts/apisix_gateway.py setup --groups groups.yaml \
     --lemonade-url http://127.0.0.1:13305
 
-# Or per-group (shared API key per group)
+# Per-group (shared API key per group)
 python scripts/apisix_gateway.py setup --groups groups.yaml \
     --lemonade-url http://127.0.0.1:13305 --per-group
+
+# Without embedding route
+python scripts/apisix_gateway.py setup --groups groups.yaml \
+    --lemonade-url http://127.0.0.1:13305 --no-embedding
 ```
 
 ### Running with Gateway
@@ -226,7 +340,7 @@ python ./main.py \
 ```
 
 This injects `kilo.json` into each sandbox at `/home/vscode/.config/kilo/config.json`,
-enabling Kilo Code to connect to your local LLM.
+enabling Kilo Code to connect to your local LLM with both chat and semantic indexing.
 
 ## Verification
 
@@ -241,6 +355,9 @@ ls /etc/nginx/sites-enabled/
 
 # Lemonade server is running (if configured)
 sudo systemctl status lemonade-server
+
+# Config is valid
+thon config validate
 ```
 
 ### Access VS Code
@@ -256,6 +373,21 @@ sudo systemctl status lemonade-server
    # Firefox: Settings > Privacy > Certificates > View Certificates > Authorities > Import
    ```
 
+## Config File Management
+
+The dashboard's Settings page and the `/api/config-files` REST API allow you
+to store configuration files in the database:
+
+| Config Key | Description |
+|------------|-------------|
+| `config_groups_yaml` | Groups and users definition |
+| `config_kilo_json` | Kilo Code provider config |
+| `config_vscode_settings` | VS Code settings for each sandbox |
+
+When `main.py` runs without CLI flags (e.g., `python main.py` without `--groups`
+or `--lemonade`), it reads these from the database. CLI flags always take
+precedence over database-stored configs.
+
 ## Uninstallation
 
 ### Remove VS Code Instances
@@ -263,6 +395,9 @@ sudo systemctl status lemonade-server
 ```bash
 # Clean up nginx configs
 python ./main.py --cleanup
+
+# Or use thon CLI
+thon cleanup
 
 # Stop all sandboxes (via Docker)
 docker ps -q | xargs -r docker stop
@@ -288,4 +423,7 @@ sudo rm -rf /etc/nginx/ssl
 
 # Remove Docker image
 docker rmi waterpistol/thon:latest
+
+# Remove database
+rm -rf ~/.thon/thon.db
 ```

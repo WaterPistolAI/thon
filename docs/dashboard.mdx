@@ -33,12 +33,12 @@ available for programmatic/scripted access.
 │  ┌────────────────────────────────────────────────────┐   │
 │  │          Streamlit Dashboard (:8501)                │   │
 │  │                                                    │   │
-│  │  Instances │ Groups │ Lemonade │ Gateway │ Settings          │   │
-│  │       │         │         │         │         │             │   │
-│  │       ▼         ▼         ▼         ▼         ▼             │   │
-│  │  SandboxService  GroupsService  LemonadeService          │   │
-│  │  LemonadeService  app.db         app.db                  │   │
-│  │  app.db               ApisixService                      │   │
+│  │  Instances │ Groups │ Lemonade │ Gateway │ Settings│   │
+│  │       │         │         │         │         │    │   │
+│  │       ▼         ▼         ▼         ▼         ▼    │   │
+│  │  SandboxService  GroupsService  LemonadeService    │   │
+│  │  LemonadeService  app.db         app.db            │   │
+│  │  app.db               ApisixService                │   │
 │  └────────────────────────────────────────────────────┘   │
 │                                                           │
 │  ┌────────────────────────────────────────────────────┐   │
@@ -72,6 +72,7 @@ Full CRUD for VS Code sandbox instances:
 | Actions | Pause, resume, kill, restart (per instance) |
 | Bulk actions | Multi-select via `st.dataframe` for pause/resume/kill |
 | Detail expanders | Full instance info including URL, password, image |
+| Recreate | Re-create a terminated sandbox with the same PVC workspace volume |
 
 ### Groups
 
@@ -83,7 +84,22 @@ Manage groups and their users:
 | Search | Filter by group name or username |
 | Create/Rename/Delete | Full group lifecycle |
 | Add/Remove/Rename users | Per-group user management |
-| User detail table | UUID, username, workspace path, storage path |
+| Transfer user | Move a user between groups |
+| **Start user instance** | Start a sandbox for an individual user with PVC workspace |
+| **Start all** | Start sandboxes for all users in a group with PVC workspaces |
+| User detail table | UUID, username, workspace path |
+
+#### Starting Instances from Groups
+
+The Groups page provides per-user and per-group instance start buttons:
+
+- **▶ username** — Starts a sandbox for a single user. Uses the user's PVC
+  workspace volume (`thon-workspace-*`) if one exists in the database.
+- **▶ Start All** — Starts sandboxes for all users in the group concurrently.
+  Each user gets their own PVC workspace volume.
+
+Both features prevent duplicate instances — if a user already has a running
+or paused instance, a warning is shown and no new instance is created.
 
 ### Lemonade Server
 
@@ -124,6 +140,26 @@ which catches `GatewayConnectionError` and `GatewayNotEnabledError`.
 | Setting | Description |
 |---------|-------------|
 | External IP | Persisted to SQLite; used for public URL generation |
+| **Configuration Files** | Upload, edit, and delete config files stored in the database |
+
+#### Configuration Files Section
+
+The Settings page includes a **Configuration Files** section for managing
+config file contents stored in the SQLite database. When `main.py` runs
+without CLI flags, it reads these from the database.
+
+| Config Key | Label | Description |
+|------------|-------|-------------|
+| `config_groups_yaml` | Groups YAML | Groups and users definition for `main.py --from-db` |
+| `config_kilo_json` | Kilo Code Config | Kilo Code provider config injected into each sandbox |
+| `config_vscode_settings` | VS Code Settings | Code-server settings injected into each sandbox |
+
+Each config file supports:
+- **Upload File** — Upload a `.yaml`, `.json`, or `.jsonc` file
+- **Edit** — Inline text editor for modifying content directly
+- **Delete** — Remove the stored config
+
+Priority: CLI flag > database > none.
 
 ## Files
 
@@ -138,7 +174,8 @@ which catches `GatewayConnectionError` and `GatewayNotEnabledError`.
 ## Configuration
 
 The dashboard reads configuration from the same environment variables as the
-backend services. No separate configuration file is needed.
+backend services. No separate configuration file is needed — or use
+`thon config env` to generate the `.env` file from `thon.yaml`.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -175,6 +212,90 @@ python -m app.main
 
 Both processes share the same `AppConfig` loaded from environment variables and
 the same SQLite database.
+
+## REST API Endpoints
+
+### Instances
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/instances` | List instances (filter by state, paginate) |
+| `POST` | `/api/instances` | Create new instance |
+| `GET` | `/api/instances/{id}` | Get instance details |
+| `POST` | `/api/instances/{id}/pause` | Pause instance |
+| `POST` | `/api/instances/{id}/resume` | Resume instance |
+| `DELETE` | `/api/instances/{id}` | Terminate instance |
+| `POST` | `/api/instances/{id}/renew` | Extend TTL |
+| `POST` | `/api/instances/bulk/pause` | Bulk pause |
+| `POST` | `/api/instances/bulk/resume` | Bulk resume |
+| `POST` | `/api/instances/bulk/kill` | Bulk terminate |
+
+### Groups
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/groups` | List all groups with users |
+| `POST` | `/api/groups` | Create a new group |
+| `GET` | `/api/groups/export` | Export groups as YAML dict |
+| `GET` | `/api/groups/events` | List all events |
+| `GET` | `/api/groups/events/{event_id}` | Get event by ID |
+| `GET` | `/api/groups/{group_id}` | Get single group |
+| `PUT` | `/api/groups/{group_id}` | Rename a group |
+| `DELETE` | `/api/groups/{group_id}` | Delete a group and its users |
+| `POST` | `/api/groups/{group_id}/users` | Add a user to a group |
+| `PUT` | `/api/groups/{group_id}/users/{user_id}` | Update a user |
+| `DELETE` | `/api/groups/{group_id}/users/{user_id}` | Delete a user |
+| `POST` | `/api/groups/{group_id}/users/{user_id}/transfer` | Transfer user to another group |
+
+### Config Files
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/config-files` | List all config file slots with state |
+| `GET` | `/api/config-files/{key}` | Get config file content |
+| `PUT` | `/api/config-files/{key}` | Update config file content |
+| `POST` | `/api/config-files/{key}/upload` | Upload a config file |
+| `DELETE` | `/api/config-files/{key}` | Delete a config file |
+
+### Lemonade
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/lemonade/status` | Lemonade server status |
+| `GET` | `/api/lemonade/models` | Available models |
+| `GET` | `/api/lemonade/api-info` | API endpoint info |
+| `GET` | `/api/lemonade/health` | Proxy: server health |
+| `GET` | `/api/lemonade/stats` | Proxy: performance statistics |
+| `GET` | `/api/lemonade/system-info` | Proxy: hardware details |
+| `GET` | `/api/lemonade/live` | Proxy: liveness probe |
+| `GET` | `/api/lemonade/slots` | Proxy: llama.cpp slots state |
+| `POST` | `/api/lemonade/pull` | Proxy: pull a model |
+| `POST` | `/api/lemonade/delete` | Proxy: delete a model |
+| `POST` | `/api/lemonade/load` | Proxy: load a model |
+| `POST` | `/api/lemonade/unload` | Proxy: unload a model |
+
+### Gateway
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/gateway/status` | Gateway status |
+| `GET` | `/api/gateway/consumers` | List consumers |
+| `POST` | `/api/gateway/consumers` | Create consumer |
+| `DELETE` | `/api/gateway/consumers/{username}` | Delete consumer |
+| `POST` | `/api/gateway/setup` | Full setup |
+| `POST` | `/api/gateway/cleanup` | Remove all consumers and routes |
+| `POST` | `/api/gateway/route` | Create/update AI proxy route |
+| `DELETE` | `/api/gateway/route` | Delete AI proxy route |
+
+### Auth
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/auth/providers` | List auth providers |
+| `GET` | `/api/auth/login/{provider}` | Start OAuth flow |
+| `GET` | `/api/auth/callback/{provider}` | OAuth callback |
+| `POST` | `/api/auth/logout` | End session |
+| `GET` | `/api/auth/me` | Current user info |
 
 ## Dark Theme
 
@@ -227,3 +348,16 @@ indices are mapped back to instance IDs via a hidden "Full ID" column.
 
 `_safe_proxy()` wraps Lemonade API calls and returns `None` on connection errors,
 allowing the page to render partial data when the server is offline.
+
+### PVC Workspace Volumes
+
+When starting instances from the Groups page, the dashboard reads each user's
+`workspace_path` from the database. If it starts with `thon-`, it is treated as
+a Docker named volume (PVC) and mounted at `/workspace` in the sandbox. This
+ensures workspace data persists across instance recreations.
+
+### Duplicate Instance Prevention
+
+Before creating a new instance, the dashboard checks if the user already has a
+running or paused sandbox. If so, a warning is displayed and creation is skipped.
+This prevents accidental duplicate instances.
