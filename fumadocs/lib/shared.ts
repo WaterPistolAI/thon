@@ -1,4 +1,4 @@
-export const appName = 'THON Documentation';
+export const appName = 'The Hackathon Organizer Node';
 export const docsRoute = '/docs';
 export const docsImageRoute = '/og/docs';
 export const docsContentRoute = '/llms.mdx/docs';

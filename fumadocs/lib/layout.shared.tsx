@@ -1,5 +1,6 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 import { appName, gitConfig } from './shared';
+import { NewspaperIcon,BookIcon,BookOpenTextIcon } from 'lucide-react';
 
 export function baseOptions(): BaseLayoutProps {
   return {
@@ -7,6 +8,23 @@ export function baseOptions(): BaseLayoutProps {
       // JSX supported
       title: appName,
     },
+    links: [
+      {
+        icon: <BookOpenTextIcon />,
+        text: 'Documentation',
+        url: '/docs',
+        // secondary items will be displayed differently on navbar
+        secondary: false,
+      },
+      {
+        icon: <NewspaperIcon />,
+        text: 'Blog',
+        url: 'https://waterpistol.co/blog',
+        // secondary items will be displayed differently on navbar
+        secondary: false,
+      },
+    ],
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };
+  
 }
