@@ -1,3 +1,4 @@
+import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Card, Cards } from 'fumadocs-ui/components/card';
 import {
@@ -8,6 +9,10 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { appName, gitConfig } from '@/lib/shared';
+
+export const metadata: Metadata = {
+  title: `${appName} - Hackathon Development Platform`,
+};
 
 export default function HomePage() {
   return (
