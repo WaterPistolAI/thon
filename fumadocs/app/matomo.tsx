@@ -20,6 +20,13 @@ export function MatomoAnalytics() {
       pathname,
       searchParams,
       disableCookies: true,
+      onInitialization: () => {
+        const _paq = (window._paq = window._paq || []);
+        _paq.push(["setDocumentTitle", document.domain + "/" + document.title]);
+        _paq.push(["setDomains", ["*.thon.waterpistol.co", "*.thon.waterpistol.co"]]);
+        _paq.push(["enableCrossDomainLinking"]);
+        _paq.push(["setDoNotTrack", true]);
+      },
     });
   }, [pathname, searchParams]);
 
