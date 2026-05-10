@@ -4,6 +4,12 @@ import { trackAppRouter } from "@socialgouv/matomo-next";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 
+declare global {
+  interface Window {
+    _paq: unknown[][];
+  }
+}
+
 const MATOMO_URL = process.env.NEXT_PUBLIC_MATOMO_URL;
 const MATOMO_SITE_ID = process.env.NEXT_PUBLIC_MATOMO_SITE_ID;
 
