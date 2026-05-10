@@ -23,9 +23,9 @@ export function baseOptions(): BaseLayoutProps {
         // secondary items will be displayed differently on navbar
         secondary: false,
       },
-            {
+      {
         icon: <MessagesSquareIcon />,
-        text: 'Blog',
+        text: 'Discord',
         url: 'https://discord.waterpistol.co',
         // secondary items will be displayed differently on navbar
         secondary: false,
