@@ -1,6 +1,6 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 import { appName, gitConfig } from './shared';
-import { NewspaperIcon,BookIcon,BookOpenTextIcon } from 'lucide-react';
+import { NewspaperIcon,MessagesSquareIcon,BookOpenTextIcon } from 'lucide-react';
 
 export function baseOptions(): BaseLayoutProps {
   return {
@@ -20,6 +20,13 @@ export function baseOptions(): BaseLayoutProps {
         icon: <NewspaperIcon />,
         text: 'Blog',
         url: 'https://waterpistol.co/blog',
+        // secondary items will be displayed differently on navbar
+        secondary: false,
+      },
+            {
+        icon: <MessagesSquareIcon />,
+        text: 'Blog',
+        url: 'https://discord.waterpistol.co',
         // secondary items will be displayed differently on navbar
         secondary: false,
       },
