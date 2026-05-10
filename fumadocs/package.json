@@ -10,6 +10,7 @@
     "postinstall": "fumadocs-mdx"
   },
   "dependencies": {
+    "@socialgouv/matomo-next": "^1.11.0",
     "fumadocs-core": "16.8.8",
     "fumadocs-mdx": "15.0.0",
     "fumadocs-ui": "16.8.8",
