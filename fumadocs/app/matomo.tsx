@@ -22,13 +22,12 @@ function buildInitScript(): string {
   const trackerSrc = JSON.stringify((MATOMO_URL ?? "") + "matomo.js");
   return `
 var _paq = window._paq = window._paq || [];
-_paq.push(["setDocumentTitle", document.domain + "/" + document.title]);
-${domainsPart}
-_paq.push(["setDoNotTrack", true]);
-_paq.push(["trackPageView"]);
-_paq.push(["enableLinkTracking"]);
 _paq.push(["setTrackerUrl", ${trackerUrl}]);
 _paq.push(["setSiteId", ${JSON.stringify(MATOMO_SITE_ID ?? "")}]);
+_paq.push(["setDocumentTitle", document.domain + "/" + document.title]);
+${domainsPart}
+_paq.push(["trackPageView"]);
+_paq.push(["enableLinkTracking"]);
 var d=document, g=d.createElement("script"), s=d.getElementsByTagName("script")[0];
 g.async=true; g.src=${trackerSrc}; s.parentNode.insertBefore(g,s);
 `;
