@@ -1040,7 +1040,7 @@ def page_gateway() -> None:
     s5.metric("Mode", mode_label)
 
     if not status.installed:
-        st.info("APISIX is not installed. Run: `INSTALL_GATEWAY=true bash ./setup.sh`")
+        st.info("APISIX is not installed. Run: `INSTALL_GATEWAY=true bash ./scripts/setup.sh`")
         return
 
     if not status.running:

@@ -195,11 +195,11 @@ groups:
 ```
 /etc/nginx/
 ├── sites-available/
-│   ├── sandbox-vscode-remote-8443
-│   ├── sandbox-vscode-remote-8444
+│   ├── sandbox-thon-8443
+│   ├── sandbox-thon-8444
 │   └── ...
 ├── sites-enabled/
-│   ├── sandbox-vscode-remote-8443 -> ../sites-available/sandbox-vscode-remote-8443
+│   ├── sandbox-thon-8443 -> ../sites-available/sandbox-thon-8443
 │   └── ...
 └── ssl/
     ├── server-<ip-hash>.crt
@@ -645,7 +645,7 @@ is assigned a Docker named volume (PVC) for persistent workspace storage.
 
 ```bash
 # When using --from-db, PVC volumes from the database are used automatically
-python main.py --from-db --external-ip 1.2.3.4
+python ./scripts/main.py --from-db --external-ip 1.2.3.4
 ```
 
 ---

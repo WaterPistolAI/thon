@@ -89,7 +89,7 @@ Best for: Team-based billing, shared capacity pools, simpler key management.
 
 ```bash
 # During initial setup
-INSTALL_GATEWAY=true bash ./setup.sh
+INSTALL_GATEWAY=true bash ./scripts/setup.sh
 
 # Or standalone
 bash ./scripts/setup-apisix.sh
@@ -135,18 +135,18 @@ python scripts/apisix_gateway.py setup \
 
 ```bash
 # Per-user gateway
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
 
 # Per-group gateway
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 \
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 \
     --gateway --gateway-per-group
 
 # With Redis
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 \
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 \
     --gateway --gateway-redis-host 127.0.0.1
 
 # Custom rate limits
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 \
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 \
     --gateway --gateway-rate-limit 1000 --gateway-time-window 120
 ```
 

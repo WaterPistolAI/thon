@@ -34,7 +34,7 @@ cd thon
 ### 2. Run Setup Script
 
 ```bash
-bash ./setup.sh
+bash ./scripts/setup.sh
 ```
 
 This installs:
@@ -47,7 +47,7 @@ This installs:
 #### With AI Gateway (Optional)
 
 ```bash
-INSTALL_GATEWAY=true bash ./setup.sh
+INSTALL_GATEWAY=true bash ./scripts/setup.sh
 ```
 
 Additionally installs:
@@ -149,7 +149,7 @@ thon run --group alpha
 Or use `main.py` directly for more control:
 
 ```bash
-python ./main.py --groups groups.yaml --external-ip YOUR_EXTERNAL_IP
+python ./scripts/main.py --groups groups.yaml --external-ip YOUR_EXTERNAL_IP
 ```
 
 ### 7. Run the Dashboard (Optional)
@@ -219,7 +219,7 @@ groups:
 ### Run from YAML
 
 ```bash
-python ./main.py --groups groups.yaml --external-ip YOUR_EXTERNAL_IP
+python ./scripts/main.py --groups groups.yaml --external-ip YOUR_EXTERNAL_IP
 ```
 
 ### Run from Database
@@ -229,10 +229,10 @@ the database:
 
 ```bash
 # Start all groups from database
-python ./main.py --from-db --external-ip YOUR_EXTERNAL_IP
+python ./scripts/main.py --from-db --external-ip YOUR_EXTERNAL_IP
 
 # Start a specific group from database
-python ./main.py --from-db --group beta --external-ip YOUR_EXTERNAL_IP
+python ./scripts/main.py --from-db --group beta --external-ip YOUR_EXTERNAL_IP
 ```
 
 When using `--from-db`, PVC workspace volumes from the database are
@@ -267,7 +267,7 @@ For local LLM inference with Kilo Code, Continue, or Cline extensions.
 ### Quick Setup
 
 ```bash
-bash ./setup-lemonade.sh \
+bash ./scripts/setup-lemonade.sh \
     --groups groups.yaml \
     --generate-keys \
     --external-ip YOUR_EXTERNAL_IP
@@ -284,7 +284,7 @@ This will:
 ### Without Embedding Model
 
 ```bash
-bash ./setup-lemonade.sh \
+bash ./scripts/setup-lemonade.sh \
     --groups groups.yaml \
     --generate-keys \
     --external-ip YOUR_EXTERNAL_IP \
@@ -300,7 +300,7 @@ For optimal performance on AMD MI300X GPUs:
 bash ./build-amd-mi300x-llama-server.sh
 
 # Then run setup with system binary preference
-bash ./setup-lemonade.sh \
+bash ./scripts/setup-lemonade.sh \
     --groups groups.yaml \
     --generate-keys \
     --external-ip YOUR_EXTERNAL_IP
@@ -316,7 +316,7 @@ For rate limiting LLM API access with per-user or per-group API keys:
 
 ```bash
 # Install APISIX (or use INSTALL_GATEWAY=true during initial setup)
-INSTALL_GATEWAY=true bash ./setup.sh
+INSTALL_GATEWAY=true bash ./scripts/setup.sh
 
 # Setup gateway with per-user rate limiting (includes embedding route)
 python scripts/apisix_gateway.py setup --groups groups.yaml \
@@ -335,14 +335,14 @@ python scripts/apisix_gateway.py setup --groups groups.yaml \
 
 ```bash
 # Per-user: each user gets their own API key and rate limit
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
 
 # Per-group: all users in a group share an API key with combined rate limit
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 \
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 \
     --gateway --gateway-per-group
 
 # With Redis-backed rate limiting (recommended for multi-gateway)
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 \
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 \
     --gateway --gateway-redis-host 127.0.0.1
 ```
 
@@ -353,7 +353,7 @@ See [AI Gateway](./gateway) for detailed configuration options.
 After setting up Lemonade Server:
 
 ```bash
-python ./main.py \
+python ./scripts/main.py \
     --groups groups.yaml \
     --external-ip YOUR_EXTERNAL_IP \
     --lemonade kilo.json
@@ -404,7 +404,7 @@ to store configuration files in the database:
 | `config_kilo_json` | Kilo Code provider config |
 | `config_vscode_settings` | VS Code settings for each sandbox |
 
-When `main.py` runs without CLI flags (e.g., `python main.py` without `--groups`
+When `main.py` runs without CLI flags (e.g., `python ./scripts/main.py` without `--groups`
 or `--lemonade`), it reads these from the database. CLI flags always take
 precedence over database-stored configs.
 
@@ -414,7 +414,7 @@ precedence over database-stored configs.
 
 ```bash
 # Clean up nginx configs
-python ./main.py --cleanup
+python ./scripts/main.py --cleanup
 
 # Or use thon CLI
 thon cleanup

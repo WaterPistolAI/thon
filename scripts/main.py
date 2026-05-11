@@ -24,28 +24,28 @@ The displayed URL includes the full endpoint path so browsers hit execd correctl
 
 Usage:
     # Setup (one-time)
-    bash ./setup.sh
+    bash ./scripts/setup.sh
 
     # Run all groups (nginx+SSL on by default)
-    python ./main.py --groups groups.yaml --external-ip 165.245.138.159
+    python ./scripts/main.py --groups groups.yaml --external-ip 165.245.138.159
 
     # Run a single group
-    python ./main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
+    python ./scripts/main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
 
     # Auto-detect external IP
-    python ./main.py --groups groups.yaml
+    python ./scripts/main.py --groups groups.yaml
 
     # With per-user passwords
-    python ./main.py --groups groups.yaml --secure --external-ip 1.2.3.4
+    python ./scripts/main.py --groups groups.yaml --secure --external-ip 1.2.3.4
 
     # Direct HTTP without nginx
-    python ./main.py --no-nginx
+    python ./scripts/main.py --no-nginx
 
     # With persistent workspace bind mounts
-    python ./main.py --groups groups.yaml --workspace-dir /vs-code-remote
+    python ./scripts/main.py --groups groups.yaml --workspace-dir /thon-workspace
 
     # Cleanup all nginx configs
-    python ./main.py --cleanup
+    python ./scripts/main.py --cleanup
 """
 
 import argparse
@@ -826,28 +826,28 @@ async def main() -> None:
         epilog="""
 Examples:
   # Run all groups with nginx SSL (default)
-  python main.py --groups groups.yaml --external-ip 165.245.138.159
+  python ./scripts/main.py --groups groups.yaml --external-ip 165.245.138.159
 
   # Auto-detect external IP
-  python main.py --groups groups.yaml
+  python ./scripts/main.py --groups groups.yaml
 
   # Run a single group
-  python main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
+  python ./scripts/main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
 
   # Start instances for remaining groups from the database
-  python main.py --from-db --group beta --external-ip 1.2.3.4
+  python ./scripts/main.py --from-db --group beta --external-ip 1.2.3.4
 
   # Start instances for ALL groups from the database
-  python main.py --from-db --external-ip 1.2.3.4
+  python ./scripts/main.py --from-db --external-ip 1.2.3.4
 
   # With per-user passwords
-  python main.py --groups groups.yaml --secure --external-ip 1.2.3.4
+  python ./scripts/main.py --groups groups.yaml --secure --external-ip 1.2.3.4
 
   # Direct HTTP without nginx
-  python main.py --no-nginx
+  python ./scripts/main.py --no-nginx
 
   # Cleanup all nginx configs
-  python main.py --cleanup
+  python ./scripts/main.py --cleanup
         """,
     )
 
@@ -934,7 +934,7 @@ Examples:
         "--workspace-dir",
         type=str,
         default=None,
-        help="Host directory for persistent workspace bind mounts (e.g. /vs-code-remote). "
+        help="Host directory for persistent workspace bind mounts (e.g. /thon-workspace). "
         "Each user gets {workspace_dir}/{group}/{username} mounted to /workspace/{group}/{username}",
     )
     parser.add_argument(

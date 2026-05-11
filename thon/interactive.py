@@ -235,7 +235,7 @@ def run_interactive(
         if _yes_no("Use persistent workspace bind mounts?", default=False):
             workspace.dir = _prompt(
                 "Host directory for workspaces",
-                default="/vs-code-remote",
+                default="/thon-workspace",
             )
 
     # ── Lemonade ─────────────────────────────────────────────

@@ -147,7 +147,7 @@ thon cleanup
 ### Synopsis
 
 ```bash
-python ./main.py [OPTIONS]
+python ./scripts/main.py [OPTIONS]
 ```
 
 ### Options
@@ -225,53 +225,53 @@ python ./main.py [OPTIONS]
 
 ```bash
 # Single instance (no groups)
-python main.py
+python ./scripts/main.py
 
 # All groups with nginx SSL
-python main.py --groups groups.yaml --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4
 
 # Single group
-python main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
 
 # Start instances from database instead of YAML
-python main.py --from-db --external-ip 1.2.3.4
+python ./scripts/main.py --from-db --external-ip 1.2.3.4
 
 # Start a specific group from database
-python main.py --from-db --group beta --external-ip 1.2.3.4
+python ./scripts/main.py --from-db --group beta --external-ip 1.2.3.4
 ```
 
 #### With Security
 
 ```bash
 # Per-user passwords
-python main.py --groups groups.yaml --secure --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --secure --external-ip 1.2.3.4
 ```
 
 #### With Persistence
 
 ```bash
 # Persistent workspace bind mounts
-python main.py --groups groups.yaml --workspace-dir /vs-code-remote --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --workspace-dir /thon-workspace --external-ip 1.2.3.4
 ```
 
 #### With Lemonade
 
 ```bash
 # Local LLM inference
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
 ```
 
 #### With AI Gateway
 
 ```bash
 # Per-user rate limiting (each user gets own API key)
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
 
 # Per-group rate limiting (shared API key per group)
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
 
 # With Redis-backed rate limiting
-python main.py --groups groups.yaml --external-ip 1.2.3.4 \
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 \
     --gateway --gateway-redis-host 127.0.0.1
 ```
 
@@ -279,7 +279,7 @@ python main.py --groups groups.yaml --external-ip 1.2.3.4 \
 
 ```bash
 # Custom VS Code settings
-python main.py --groups groups.yaml --external-ip 1.2.3.4 \
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 \
     --vscode-settings vscode-settings.jsonc
 ```
 
@@ -287,14 +287,14 @@ python main.py --groups groups.yaml --external-ip 1.2.3.4 \
 
 ```bash
 # Direct HTTP access
-python main.py --groups groups.yaml --no-nginx
+python ./scripts/main.py --groups groups.yaml --no-nginx
 ```
 
 #### Cleanup
 
 ```bash
 # Remove nginx configs
-python main.py --cleanup
+python ./scripts/main.py --cleanup
 ```
 
 ---
@@ -304,7 +304,7 @@ python main.py --cleanup
 ### Synopsis
 
 ```bash
-bash ./setup-lemonade.sh [OPTIONS]
+bash ./scripts/setup-lemonade.sh [OPTIONS]
 ```
 
 ### Options

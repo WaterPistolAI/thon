@@ -45,7 +45,7 @@ and supports GPU acceleration via ROCm, CUDA, or Vulkan.
 ### One-Command Setup
 
 ```bash
-bash ./setup-lemonade.sh \
+bash ./scripts/setup-lemonade.sh \
     --groups groups.yaml \
     --generate-keys \
     --external-ip YOUR_IP
@@ -62,7 +62,7 @@ This command:
 ### Without Embedding Model
 
 ```bash
-bash ./setup-lemonade.sh \
+bash ./scripts/setup-lemonade.sh \
     --groups groups.yaml \
     --generate-keys \
     --external-ip YOUR_IP \
@@ -323,7 +323,7 @@ Modify `build-amd-mi300x-llama-server.sh` for your architecture:
 ### Generate Config
 
 ```bash
-bash ./setup-lemonade.sh \
+bash ./scripts/setup-lemonade.sh \
     --groups groups.yaml \
     --generate-keys \
     --external-ip YOUR_IP
@@ -384,7 +384,7 @@ python lemonade_server.py generate-kilo-config \
 ### Inject into Sandboxes
 
 ```bash
-python ./main.py \
+python ./scripts/main.py \
     --groups groups.yaml \
     --external-ip YOUR_IP \
     --lemonade kilo.json

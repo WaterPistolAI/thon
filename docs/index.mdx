@@ -30,7 +30,7 @@ via Lemonade Server.
 
 ```bash
 # One-time host setup
-bash ./setup.sh
+bash ./scripts/setup.sh
 ```
 
 Installs: python3, nginx, docker.io, mkcert, openssl
@@ -66,7 +66,7 @@ thon run
 Alternatively, use `main.py` directly:
 
 ```bash
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4
 ```
 
 Each user gets their own VS Code sandbox at `https://<ip>/<endpoint_path>/`.

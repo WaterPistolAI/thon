@@ -11,13 +11,13 @@
 #
 # Usage:
 #   # Run all groups
-#   python ./main.py --groups groups.yaml
+#   python ./scripts/main.py --groups groups.yaml
 #
 #   # Run a single group
-#   python ./main.py --groups groups.yaml --group alpha
+#   python ./scripts/main.py --groups groups.yaml --group alpha
 #
 #   # Run with secure auth (generates per-user passwords)
-#   python ./main.py --groups groups.yaml --secure
+#   python ./scripts/main.py --groups groups.yaml --secure
 
 event_id: hackathon-2025-spring
 title: "Spring Hackathon 2025"

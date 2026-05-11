@@ -31,7 +31,7 @@ https://youtu.be/YptAQQf_4dg
 ### 1. One-time Setup
 
 ```bash
-bash ./setup.sh
+bash ./scripts/setup.sh
 ```
 
 Installs python3, nginx, docker.io, mkcert, and openssl.
@@ -67,7 +67,7 @@ thon run
 Alternatively, use `main.py` directly:
 
 ```bash
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4
 ```
 
 Each user gets their own VS Code sandbox at `https://<ip>/<endpoint_path>/`.
@@ -182,7 +182,7 @@ thon cleanup                       # Tear down
 ## main.py CLI Reference
 
 ```
-python main.py [OPTIONS]
+python ./scripts/main.py [OPTIONS]
 ```
 
 ### Core Options
@@ -256,43 +256,43 @@ python main.py [OPTIONS]
 
 ```bash
 # All groups with nginx SSL (default)
-python main.py --groups groups.yaml --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4
 
 # Single group
-python main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
 
 # From database (uses PVC workspace volumes)
-python main.py --from-db --external-ip 1.2.3.4
+python ./scripts/main.py --from-db --external-ip 1.2.3.4
 
 # Per-user passwords
-python main.py --groups groups.yaml --secure --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --secure --external-ip 1.2.3.4
 
 # Persistent workspaces
-python main.py --groups groups.yaml --workspace-dir /vs-code-remote --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --workspace-dir /thon-workspace --external-ip 1.2.3.4
 
 # Direct HTTP (no nginx)
-python main.py --groups groups.yaml --no-nginx
+python ./scripts/main.py --groups groups.yaml --no-nginx
 
 # Single instance (no groups)
-python main.py
+python ./scripts/main.py
 
 # With Lemonade LLM inference
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
 
 # With AI Gateway (per-user rate limiting)
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
 
 # With AI Gateway (per-group shared API keys)
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
 
 # With AI Gateway + Redis rate limiting
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
 
 # With custom VS Code settings
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --vscode-settings vscode-settings.jsonc
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --vscode-settings vscode-settings.jsonc
 
 # Cleanup nginx configs
-python main.py --cleanup
+python ./scripts/main.py --cleanup
 ```
 
 ## Dashboard
@@ -351,7 +351,7 @@ and embedding models for semantic code search.
 
 ```bash
 # Full setup (install + configure + API keys + pull model + kilo.json)
-bash ./setup-lemonade.sh \
+bash ./scripts/setup-lemonade.sh \
     --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 ```
 
@@ -365,7 +365,7 @@ python ./lemonade_server.py run \
 ### Without Embedding Model
 
 ```bash
-bash ./setup-lemonade.sh --groups groups.yaml --generate-keys \
+bash ./scripts/setup-lemonade.sh --groups groups.yaml --generate-keys \
     --external-ip 1.2.3.4 --no-embedding
 ```
 
@@ -460,7 +460,7 @@ config uses `prefer_system: true` with `rocm_bin: /usr/local/bin/llama-server` b
 bash setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 
 # Terminal 2: Start VS Code sandboxes with Lemonade inference
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
 ```
 
 ## AI Gateway (APISIX Rate Limiting)
@@ -480,7 +480,7 @@ for LLM endpoints. Creates two routes: `/v1/chat/completions` (ai-proxy-multi) a
 
 ```bash
 # Install APISIX (or use INSTALL_GATEWAY=true during initial setup)
-INSTALL_GATEWAY=true bash ./setup.sh
+INSTALL_GATEWAY=true bash ./scripts/setup.sh
 
 # Per-user mode
 python scripts/apisix_gateway.py setup --groups groups.yaml \
@@ -499,13 +499,13 @@ python scripts/apisix_gateway.py setup --groups groups.yaml \
 
 ```bash
 # Per-user: each user gets their own API key and rate limit
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
 
 # Per-group: shared API key per group
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
 
 # With Redis-backed rate limiting
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
 ```
 
 ### Rate Limiting Modes

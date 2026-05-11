@@ -14,7 +14,7 @@ and optional local LLM inference via Lemonade Server.
 
 ```bash
 # One-time prerequisite installation (python3, nginx, docker, mkcert, openssl)
-bash ./setup.sh
+bash ./scripts/setup.sh
 
 # Lint
 pip run ruff check .
@@ -26,34 +26,34 @@ pip run ruff format .
 pip run pyright
 
 # Run: all groups from groups.yaml with nginx + SSL (default)
-python ./main.py --groups groups.yaml --external-ip 165.245.138.159
+python ./scripts/main.py --groups groups.yaml --external-ip 165.245.138.159
 
 # Run: single group
-python ./main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
 
 # Run: with secure per-user passwords
-python ./main.py --groups groups.yaml --secure --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --secure --external-ip 1.2.3.4
 
 # Run: with persistent workspace bind mounts
-python ./main.py --groups groups.yaml --workspace-dir /vs-code-remote
+python ./scripts/main.py --groups groups.yaml --workspace-dir /thon-workspace
 
 # Run: single instance without groups (like examples/vscode/main.py)
-python ./main.py
+python ./scripts/main.py
 
 # Run: direct HTTP without nginx
-python ./main.py --no-nginx
+python ./scripts/main.py --no-nginx
 
 # Cleanup all nginx configs
-python ./main.py --cleanup
+python ./scripts/main.py --cleanup
 
 # Build Docker image
 docker build -t waterpistol/thon:latest ./
 
 # Lemonade Server: full setup via shell (recommended — service manages its own lifecycle)
-bash ./setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4
+bash ./scripts/setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 
 # Lemonade Server: full setup without embedding model
-bash ./setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4 --no-embedding
+bash ./scripts/setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4 --no-embedding
 
 # Lemonade Server: full setup via Python wrapper (alternative)
 python ./lemonade_server.py run --groups groups.yaml --generate-keys --external-ip 1.2.3.4
@@ -72,10 +72,10 @@ lemonade pull unsloth/gemma-4-31B-it-GGUF:Q8_K_XL
 lemonade config set llamacpp.backend=auto host=0.0.0.0
 
 # Run VS Code instances with Lemonade inference (injects kilo.json into each sandbox)
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
 
 # AI Gateway: one-time install (APISIX, etcd, Redis)
-INSTALL_GATEWAY=true bash ./setup.sh
+INSTALL_GATEWAY=true bash ./scripts/setup.sh
 # or: bash ./scripts/setup-apisix.sh
 
 # AI Gateway: setup with per-consumer API keys and rate limiting
@@ -94,10 +94,10 @@ python ./scripts/apisix_gateway.py status
 python ./scripts/apisix_gateway.py cleanup
 
 # Run VS Code instances with AI Gateway (per-user rate limiting)
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
 
 # Run VS Code instances with AI Gateway (per-group shared API keys)
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
 ```
 
 ## Code Style
@@ -164,10 +164,10 @@ Use `print()` with prefixed labels: `[{group}/{username}]`, `[Nginx]`, `[SSL]`
 ### Key Classes
 - **`NginxConfigGenerator`**: generates **per-port individual** nginx config files in
   `/etc/nginx/sites-available/`, symlinked to `/etc/nginx/sites-enabled/`, named
-  `sandbox-vscode-remote-{port}`. Each config has its own server block.
+  `sandbox-thon-{port}`. Each config has its own server block.
   - `generate_port_config(port, cert_path, key_path, ca_cert_path)` — one file per port
   - `enable_config(config_path)` — symlink to sites-enabled
-  - `cleanup_all()` — remove all `sandbox-vscode-remote-*` configs and reload
+  - `cleanup_all()` — remove all `sandbox-thon-*` configs and reload
 - **`SSLCertificateGenerator`**: generates SSL certs via **mkcert** (preferred, CA-trusted)
   with **openssl** fallback. Single shared cert for all instances. Filename includes hash
   of IP so changing `--external-ip` triggers regeneration.
@@ -205,8 +205,8 @@ is correct. The browser sends the full endpoint path (e.g., `/51111/proxy/8448/`
 
 ### Persistent Workspaces
 
-With `--workspace-dir /vs-code-remote`, each user gets a host bind mount:
-- Host path: `/vs-code-remote/{group}/{username}`
+With `--workspace-dir /thon-workspace`, each user gets a host bind mount:
+- Host path: `/thon-workspace/{group}/{username}`
 - Container mount: `/workspace/{group}/{username}`
 - Implemented via SDK `Volume(name="workspace", host=Host(path=host_path), mount_path=workspace_path)`
 - Host directories are created with `os.makedirs()` before sandbox creation
@@ -378,7 +378,7 @@ When both are set, either key is accepted for regular endpoints; admin key is re
 python lemonade_server.py run --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 
 # Terminal 2: Start VS Code sandboxes with Lemonade inference
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
 ```
 
 ### AI Gateway (APISIX Rate Limiting & Per-Consumer Keys)
@@ -401,7 +401,7 @@ Redis-backed rate limiting ensures consistency across multiple gateway instances
 **Installation:**
 ```bash
 # Option 1: During initial setup
-INSTALL_GATEWAY=true bash ./setup.sh
+INSTALL_GATEWAY=true bash ./scripts/setup.sh
 
 # Option 2: Standalone install script
 bash ./scripts/setup-apisix.sh
@@ -437,16 +437,16 @@ python scripts/apisix_gateway.py generate-kilo --username alice --api-key alice-
 **Integration with `main.py`:**
 ```bash
 # Run with gateway enabled — per-user (auto-creates consumers from groups.yaml)
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
 
 # Per-group: one consumer per group with shared API key
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
 
 # With Redis-backed rate limiting
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
 
 # Custom rate limits
-python main.py --groups groups.yaml --external-ip 1.2.3.4 \
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 \
   --gateway --gateway-rate-limit 1000 --gateway-time-window 120
 ```
 
