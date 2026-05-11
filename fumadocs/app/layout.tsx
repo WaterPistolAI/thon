@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { RootProvider } from 'fumadocs-ui/provider/next';
-import { MatomoAnalytics, MatomoSpaTracker } from './matomo';
+import { MatomoAnalytics, MatomoSpaTracker, MatomoConsent } from './matomo';
 import './global.css';
 import { Inter } from 'next/font/google';
 
@@ -16,6 +16,7 @@ export default function Layout({ children }: LayoutProps<'/'>) {
         <RootProvider>{children}</RootProvider>
         <Suspense fallback={null}>
           <MatomoSpaTracker />
+          <MatomoConsent />
         </Suspense>
       </body>
     </html>
