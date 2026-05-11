@@ -45,10 +45,10 @@ docker build -t waterpistol/thon:latest ./
 
 ```bash
 # Interactive setup wizard (recommended)
-thon init
+python -m thon init
 
 # Or non-interactive (CI-friendly)
-thon init --non-interactive
+python -m thon init --non-interactive
 ```
 
 This creates a `thon.yaml` config file with all settings.
@@ -57,10 +57,10 @@ This creates a `thon.yaml` config file with all settings.
 
 ```bash
 # Install prerequisites and configure all components
-thon setup
+python -m thon setup
 
 # Start VS Code instances
-thon run
+python -m thon run
 ```
 
 Alternatively, use `main.py` directly:

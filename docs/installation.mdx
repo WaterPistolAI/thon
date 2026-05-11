@@ -72,7 +72,7 @@ The image includes:
 
 ```bash
 # Interactive wizard — creates thon.yaml
-thon init
+python -m thon init
 
 # Review and edit the generated config
 cat thon.yaml
@@ -94,7 +94,7 @@ The wizard walks you through:
 #### Option B: Non-Interactive Setup (CI/CD)
 
 ```bash
-thon init --non-interactive
+python -m thon init --non-interactive
 ```
 
 Generates a `thon.yaml` with sensible defaults:
@@ -125,7 +125,7 @@ gateway:
 
 ```bash
 # Install all prerequisites and configure components from thon.yaml
-thon setup
+python -m thon setup
 ```
 
 This runs a 6-step process:
@@ -140,10 +140,10 @@ This runs a 6-step process:
 
 ```bash
 # Start instances from thon.yaml
-thon run
+python -m thon run
 
 # Start only one group
-thon run --group alpha
+python -m thon run --group alpha
 ```
 
 Or use `main.py` directly for more control:
@@ -377,7 +377,7 @@ ls /etc/nginx/sites-enabled/
 sudo systemctl status lemonade-server
 
 # Config is valid
-thon config validate
+python -m thon config validate
 ```
 
 ### Access VS Code
@@ -417,7 +417,7 @@ precedence over database-stored configs.
 python ./scripts/main.py --cleanup
 
 # Or use thon CLI
-thon cleanup
+python -m thon cleanup
 
 # Stop all sandboxes (via Docker)
 docker ps -q | xargs -r docker stop

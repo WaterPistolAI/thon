@@ -46,10 +46,10 @@ docker build -t waterpistol/thon:latest ./
 
 ```bash
 # Interactive setup wizard (recommended)
-thon init
+python -m thon init
 
 # Or non-interactive (CI-friendly)
-thon init --non-interactive
+python -m thon init --non-interactive
 ```
 
 This creates a `thon.yaml` config file with all settings.
@@ -58,10 +58,10 @@ This creates a `thon.yaml` config file with all settings.
 
 ```bash
 # Install prerequisites and configure all components
-thon setup
+python -m thon setup
 
 # Start VS Code instances
-thon run
+python -m thon run
 ```
 
 Alternatively, use `main.py` directly:
@@ -149,7 +149,7 @@ or `thon.yaml`. When a sandbox is recreated, the same PVC volume is reattached.
 ## thon CLI Reference
 
 ```bash
-thon COMMAND [OPTIONS]
+python -m thon COMMAND [OPTIONS]
 ```
 
 | Command | Description |
@@ -169,14 +169,14 @@ thon COMMAND [OPTIONS]
 ### Examples
 
 ```bash
-thon init                          # Interactive setup wizard
-thon init --non-interactive        # CI-friendly defaults
-thon setup                         # Install + configure
-thon run                           # Start instances
-thon run --group alpha             # Start one group
-thon config validate               # Check config
-thon config env --output .env      # Export .env
-thon cleanup                       # Tear down
+python -m thon init                          # Interactive setup wizard
+python -m thon init --non-interactive        # CI-friendly defaults
+python -m thon setup                         # Install + configure
+python -m thon run                           # Start instances
+python -m thon run --group alpha             # Start one group
+python -m thon config validate               # Check config
+python -m thon config env --output .env      # Export .env
+python -m thon cleanup                       # Tear down
 ```
 
 ## main.py CLI Reference
@@ -207,7 +207,7 @@ python ./scripts/main.py [OPTIONS]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--image IMAGE` | Docker image | `waterpistol/thon:latest` |
-| `--python-version VER` | Python version in sandbox | `3.11` |
+| `--python-version VER` | Python version in sandbox | `3.12` |
 
 ### Security
 
@@ -730,7 +730,7 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 
 | File | Purpose |
 |------|---------|
-| `thon/` | Unified `thon` CLI package (`thon init`, `thon setup`, `thon run`, `thon config`) |
+| `thon/` | Unified `thon` CLI package (`python -m thon init`, `python -m thon setup`, `python -m thon run`, `python -m thon config`) |
 
 ### Dashboard Application
 

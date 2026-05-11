@@ -340,8 +340,8 @@ def run_interactive(
     print()
     print("  Next steps:")
     print(f"    1. Review: cat {target}")
-    print("    2. Setup:  thon setup")
-    print("    3. Run:    thon run")
+    print("    2. Setup:  python -m thon setup")
+    print("    3. Run:    python -m thon run")
     print()
 
     return config

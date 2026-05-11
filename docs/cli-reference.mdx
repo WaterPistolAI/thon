@@ -37,7 +37,7 @@ and instance management. It reads from a single `thon.yaml` config file.
 ### init
 
 ```bash
-thon init [OPTIONS]
+python -m thon init [OPTIONS]
 ```
 
 Interactive guided setup wizard that walks through every THON feature with
@@ -51,7 +51,7 @@ sensible defaults, validates choices, and writes a `thon.yaml` config file.
 ### setup
 
 ```bash
-thon setup [OPTIONS]
+python -m thon setup [OPTIONS]
 ```
 
 Installs system prerequisites and configures all components from `thon.yaml`:
@@ -66,7 +66,7 @@ Installs system prerequisites and configures all components from `thon.yaml`:
 ### run
 
 ```bash
-thon run [OPTIONS]
+python -m thon run [OPTIONS]
 ```
 
 Starts VS Code instances from `thon.yaml`. Delegates to `scripts/main.py`.
@@ -79,7 +79,7 @@ Starts VS Code instances from `thon.yaml`. Delegates to `scripts/main.py`.
 ### config show
 
 ```bash
-thon config show [OPTIONS]
+python -m thon config show [OPTIONS]
 ```
 
 Displays the full resolved config as YAML.
@@ -107,7 +107,7 @@ Validates `thon.yaml` for common errors (missing groups, auth without providers,
 ### cleanup
 
 ```bash
-thon cleanup
+python -m thon cleanup
 ```
 
 Tear down all resources: nginx configs, Lemonade server, and AI Gateway.
@@ -116,28 +116,28 @@ Tear down all resources: nginx configs, Lemonade server, and AI Gateway.
 
 ```bash
 # Interactive setup wizard
-thon init
+python -m thon init
 
 # Non-interactive (CI-friendly)
-thon init --non-interactive
+python -m thon init --non-interactive
 
 # Install prerequisites and configure
-thon setup
+python -m thon setup
 
 # Start instances
-thon run
+python -m thon run
 
 # Start only one group
-thon run --group alpha
+python -m thon run --group alpha
 
 # Validate config
-thon config validate
+python -m thon config validate
 
 # Export .env file
-thon config env --output .env
+python -m thon config env --output .env
 
 # Clean up all resources
-thon cleanup
+python -m thon cleanup
 ```
 
 ---

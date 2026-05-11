@@ -239,7 +239,7 @@ class ThonConfig(BaseModel):
         p.parent.mkdir(parents=True, exist_ok=True)
         lines = [
             "# THON Environment Configuration",
-            "# Generated from thon.yaml by `thon config env`",
+            "# Generated from thon.yaml by `python -m thon config env`",
             "",
         ]
         for key, value in sorted(self.to_env_dict().items()):
