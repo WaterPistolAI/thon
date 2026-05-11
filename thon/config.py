@@ -92,7 +92,7 @@ class GatewaySettings(BaseModel):
 
     enabled: bool = False
     mode: str = "per-user"
-    admin_key: str = "edd1c9f034335f136f87ad84b625c8f1"
+    admin_key: str = ""
     redis_host: str = ""
     redis_port: int = 6379
     rate_limit: int = 500

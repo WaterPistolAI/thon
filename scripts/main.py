@@ -562,9 +562,7 @@ async def run_from_config(
     if thon_cfg.gateway.enabled:
         from apisix_gateway import ApisixGatewayManager
 
-        admin_key = thon_cfg.gateway.admin_key or os.getenv(
-            "GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1"
-        )
+        admin_key = thon_cfg.gateway.admin_key or os.getenv("GATEWAY_ADMIN_KEY") or None
         gateway_mgr = ApisixGatewayManager(
             admin_url="http://127.0.0.1:9180",
             admin_key=admin_key,
@@ -786,8 +784,8 @@ async def run_from_config(
                 from apisix_gateway import ApisixGatewayManager
 
                 admin_key = thon_cfg.gateway.admin_key or os.getenv(
-                    "GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1"
-                )
+                    "GATEWAY_ADMIN_KEY"
+                ) or None
                 gateway_mgr = ApisixGatewayManager(
                     admin_url="http://127.0.0.1:9180",
                     admin_key=admin_key,
@@ -1168,7 +1166,7 @@ Examples:
     if args.gateway:
         from apisix_gateway import ApisixGatewayManager
 
-        admin_key = os.getenv("GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1")
+        admin_key = os.getenv("GATEWAY_ADMIN_KEY") or None
         gateway_mgr = ApisixGatewayManager(
             admin_url="http://127.0.0.1:9180",
             admin_key=admin_key,
@@ -1390,9 +1388,7 @@ Examples:
             try:
                 from apisix_gateway import ApisixGatewayManager
 
-                admin_key = os.getenv(
-                    "GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1"
-                )
+                admin_key = os.getenv("GATEWAY_ADMIN_KEY") or None
                 gateway_mgr = ApisixGatewayManager(
                     admin_url="http://127.0.0.1:9180",
                     admin_key=admin_key,

@@ -86,7 +86,12 @@ class ApisixService:
         detected = self._detect_admin_key()
         if detected:
             return detected
-        return self._cfg.admin_key
+        if self._cfg.admin_key:
+            return self._cfg.admin_key
+        raise GatewayAuthError(
+            "APISIX admin key not found. Either set GATEWAY_ADMIN_KEY env var "
+            "or install APISIX (config expected at /usr/local/apisix/conf/config.yaml)"
+        )
 
     @property
     def _admin_url(self) -> str:

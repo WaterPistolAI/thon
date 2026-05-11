@@ -148,9 +148,7 @@ class GatewayConfig:
         default_factory=lambda: os.getenv("GATEWAY_ADMIN_URL", "http://127.0.0.1:9180")
     )
     admin_key: str = field(
-        default_factory=lambda: os.getenv(
-            "GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1"
-        )
+        default_factory=lambda: os.getenv("GATEWAY_ADMIN_KEY", "")
     )
     proxy_port: int = field(
         default_factory=lambda: int(os.getenv("GATEWAY_PROXY_PORT", "9080"))

@@ -21,10 +21,15 @@ Wraps APISIX Admin API to configure:
 - ``key-auth`` plugin for individual consumer API keys
 - Redis-backed rate limiting for multi-instance consistency
 
+The admin API key is auto-detected from the APISIX config file
+(``/usr/local/apisix/conf/config.yaml``). An explicit key can be passed
+via the ``admin_key`` parameter or the ``GATEWAY_ADMIN_KEY`` env var,
+but the default is always read from the installed config.
+
 Usage:
     from apisix_gateway import ApisixGatewayManager
 
-    mgr = ApisixGatewayManager(admin_url="http://127.0.0.1:9180", admin_key="edd1c9f034335f136f87ad84b625c8f1")
+    mgr = ApisixGatewayManager()  # auto-detects key from APISIX config
     mgr.create_consumer(username="alice", api_key="alice-key-123", rate_limit=500, time_window=60)
     mgr.create_ai_route(lemonade_url="http://127.0.0.1:13305", lemonade_api_key="sk-xxx")
     mgr.setup_gateway(lemonade_url="http://127.0.0.1:13305", users=[...])
@@ -33,6 +38,7 @@ Usage:
 import argparse
 import json
 import logging
+import os
 import secrets
 import sys
 import urllib.error
@@ -41,11 +47,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import yaml
+
 logger = logging.getLogger(__name__)
 
-APISIX_ADMIN_API_KEY_DEFAULT = "edd1c9f034335f136f87ad84b625c8f1"
 APISIX_ADMIN_PORT_DEFAULT = 9180
 APISIX_PROXY_PORT_DEFAULT = 9080
+APISIX_CONFIG_PATH = Path("/usr/local/apisix/conf/config.yaml")
 APISIX_ROUTE_ID = "ai-gateway-route"
 APISIX_EMBEDDING_ROUTE_ID = "ai-gateway-embedding-route"
 LEMONADE_INSTANCE_NAME = "lemonade-instance"
@@ -83,7 +91,7 @@ class ApisixGatewayManager:
     def __init__(
         self,
         admin_url: str = "http://127.0.0.1:9180",
-        admin_key: str = APISIX_ADMIN_API_KEY_DEFAULT,
+        admin_key: Optional[str] = None,
         proxy_port: int = APISIX_PROXY_PORT_DEFAULT,
         redis_host: Optional[str] = None,
         redis_port: int = 6379,
@@ -91,12 +99,38 @@ class ApisixGatewayManager:
         lemonade_api_key: Optional[str] = None,
     ) -> None:
         self._admin_url = admin_url.rstrip("/")
-        self._admin_key = admin_key
+        detected = self._detect_admin_key()
+        resolved_key = admin_key or os.getenv("GATEWAY_ADMIN_KEY") or detected
+        if not resolved_key:
+            raise RuntimeError(
+                "APISIX admin key not found. Either pass admin_key, "
+                "set GATEWAY_ADMIN_KEY env var, or install APISIX "
+                f"(config expected at {APISIX_CONFIG_PATH})"
+            )
+        self._admin_key = resolved_key
         self._proxy_port = proxy_port
         self._redis_host = redis_host
         self._redis_port = redis_port
         self._redis_password = redis_password
         self._lemonade_api_key = lemonade_api_key
+
+    @staticmethod
+    def _detect_admin_key() -> Optional[str]:
+        try:
+            if APISIX_CONFIG_PATH.exists():
+                with open(APISIX_CONFIG_PATH) as f:
+                    data = yaml.safe_load(f)
+                deployment = data.get("deployment", {}) if isinstance(data, dict) else {}
+                admin = deployment.get("admin", {}) if isinstance(deployment, dict) else {}
+                keys = admin.get("admin_key", []) if isinstance(admin, dict) else []
+                for key_entry in keys:
+                    if isinstance(key_entry, dict) and key_entry.get("role") == "admin":
+                        detected = key_entry.get("key")
+                        if detected:
+                            return detected
+        except Exception:
+            pass
+        return None
 
     @property
     def proxy_url(self) -> str:
@@ -178,6 +212,7 @@ class ApisixGatewayManager:
         lemonade_instance_name: str = LEMONADE_INSTANCE_NAME,
     ) -> ConsumerConfig:
         api_key = api_key or secrets.token_urlsafe(24)
+        safe_username = username.replace("/", "-").replace(" ", "_")
 
         rate_limit_config: dict = {
             "policy": "redis" if self._redis_host else "local",
@@ -199,7 +234,7 @@ class ApisixGatewayManager:
                 rate_limit_config["redis_password"] = self._redis_password
 
         consumer_data = {
-            "username": username,
+            "username": safe_username,
             "plugins": {
                 "key-auth": {"key": api_key},
                 "ai-rate-limiting": rate_limit_config,
@@ -208,19 +243,20 @@ class ApisixGatewayManager:
 
         self._request("/consumers", method="PUT", data=consumer_data)
         print(
-            f"[Gateway] Created consumer: {username} (rate limit: {rate_limit} tokens/{time_window}s)"
+            f"[Gateway] Created consumer: {safe_username} (rate limit: {rate_limit} tokens/{time_window}s)"
         )
 
         return ConsumerConfig(
-            username=username,
+            username=safe_username,
             api_key=api_key,
             rate_limit=rate_limit,
             time_window=time_window,
         )
 
     def delete_consumer(self, username: str) -> None:
-        self._request(f"/consumers/{username}", method="DELETE")
-        print(f"[Gateway] Deleted consumer: {username}")
+        safe_username = username.replace("/", "-").replace(" ", "_")
+        self._request(f"/consumers/{safe_username}", method="DELETE")
+        print(f"[Gateway] Deleted consumer: {safe_username}")
 
     def list_consumers(self) -> list[dict]:
         try:
@@ -490,8 +526,8 @@ Examples:
     setup_parser.add_argument(
         "--admin-key",
         type=str,
-        default=APISIX_ADMIN_API_KEY_DEFAULT,
-        help="APISIX Admin API key",
+        default=None,
+        help="APISIX Admin API key (auto-detected from config if not set)",
     )
     setup_parser.add_argument(
         "--admin-port",
@@ -565,7 +601,7 @@ Examples:
         "--time-window", type=int, default=RATE_LIMIT_WINDOW_DEFAULT
     )
     consumer_parser.add_argument(
-        "--admin-key", type=str, default=APISIX_ADMIN_API_KEY_DEFAULT
+        "--admin-key", type=str, default=None
     )
     consumer_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
@@ -577,7 +613,7 @@ Examples:
     delete_parser = subparsers.add_parser("delete-consumer", help="Delete a consumer")
     delete_parser.add_argument("--username", type=str, required=True)
     delete_parser.add_argument(
-        "--admin-key", type=str, default=APISIX_ADMIN_API_KEY_DEFAULT
+        "--admin-key", type=str, default=None
     )
     delete_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
@@ -608,7 +644,7 @@ Examples:
 
     status_parser = subparsers.add_parser("status", help="Check gateway status")
     status_parser.add_argument(
-        "--admin-key", type=str, default=APISIX_ADMIN_API_KEY_DEFAULT
+        "--admin-key", type=str, default=None
     )
     status_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
@@ -618,7 +654,7 @@ Examples:
         "cleanup", help="Remove all gateway resources"
     )
     cleanup_parser.add_argument(
-        "--admin-key", type=str, default=APISIX_ADMIN_API_KEY_DEFAULT
+        "--admin-key", type=str, default=None
     )
     cleanup_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
@@ -632,7 +668,7 @@ Examples:
 
     def _make_mgr(parsed_args) -> ApisixGatewayManager:
         admin_port = getattr(parsed_args, "admin_port", APISIX_ADMIN_PORT_DEFAULT)
-        admin_key = getattr(parsed_args, "admin_key", APISIX_ADMIN_API_KEY_DEFAULT)
+        admin_key = getattr(parsed_args, "admin_key", None)
         return ApisixGatewayManager(
             admin_url=f"http://127.0.0.1:{admin_port}",
             admin_key=admin_key,

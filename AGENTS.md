@@ -490,7 +490,7 @@ Each consumer gets:
 |----------|---------|-------------|
 | `GATEWAY_ENABLED` | `false` | Enable AI Gateway features in dashboard |
 | `GATEWAY_ADMIN_URL` | `http://127.0.0.1:9180` | APISIX Admin API URL |
-| `GATEWAY_ADMIN_KEY` | `edd1c9f034335f136f87ad84b625c8f1` | APISIX Admin API key |
+| `GATEWAY_ADMIN_KEY` | (auto-detected) | APISIX Admin API key (auto-detected from `/usr/local/apisix/conf/config.yaml` if not set) |
 | `GATEWAY_PROXY_PORT` | `9080` | APISIX proxy port |
 | `GATEWAY_REDIS_HOST` | (none) | Redis host for rate limiting |
 | `GATEWAY_REDIS_PORT` | `6379` | Redis port |

@@ -46,14 +46,14 @@ sudo systemctl enable etcd
 sudo systemctl start etcd
 
 echo "[APISIX] Starting Redis..."
-sudo systemctl enable redis
+sudo systemctl enable redis-server
 sudo systemctl start redis
 
 echo "[APISIX] Configuring APISIX admin key..."
 APISIX_CONFIG="/usr/local/apisix/conf/config.yaml"
 
 if [ -f "$APISIX_CONFIG" ]; then
-    ADMIN_KEY="${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}"
+    ADMIN_KEY="${APISIX_ADMIN_KEY:-$(openssl rand -hex 16)}"
 
     if ! grep -q "admin_key" "$APISIX_CONFIG" 2>/dev/null; then
         sudo bash -c "cat >> '$APISIX_CONFIG'" <<EOF
@@ -83,7 +83,7 @@ sudo systemctl start apisix
 echo "[APISIX] Waiting for APISIX to be ready..."
 for i in $(seq 1 30); do
     if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:9180/apisix/admin/routes" \
-        -H "X-API-KEY: ${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}" 2>/dev/null | grep -q "200"; then
+        -H "X-API-KEY: ${ADMIN_KEY}" 2>/dev/null | grep -q "200"; then
         echo "[APISIX] APISIX is ready"
         break
     fi
