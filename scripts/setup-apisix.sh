@@ -77,7 +77,8 @@ else
 fi
 
 echo "[APISIX] Starting APISIX..."
-sudo apisix start
+sudo systemctl enable apisix 
+sudo systemctl start apisix 
 
 echo "[APISIX] Waiting for APISIX to be ready..."
 for i in $(seq 1 30); do
