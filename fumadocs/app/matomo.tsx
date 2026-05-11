@@ -72,6 +72,7 @@ export function MatomoSpaTracker() {
 }
 
 export function MatomoConsent() {
+  const [mounted, setMounted] = useState(false);
   const [consentGiven, setConsentGiven] = useState<boolean | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [optedOut, setOptedOut] = useState(false);
@@ -90,6 +91,7 @@ export function MatomoConsent() {
     } else {
       setConsentGiven(null);
     }
+    setMounted(true);
   }, [enabled]);
 
   const grantConsent = useCallback(() => {
@@ -123,23 +125,25 @@ export function MatomoConsent() {
     }
   }, [optedOut]);
 
-  if (!enabled) return null;
+  if (!enabled || !mounted) return null;
 
   if (consentGiven === null && !dismissed) {
     return (
-      <div className="fixed bottom-0 inset-x-0 z-50 border-t border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900">
+      <div className="fixed bottom-0 inset-x-0 z-50 border-t border-neutral-200 bg-white/95 backdrop-blur-sm dark:border-neutral-800 dark:bg-neutral-900/95">
         <div className="mx-auto max-w-4xl px-4 py-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-neutral-600 dark:text-neutral-400">
             We use anonymized analytics to improve this site. No personal data is collected without your consent.
           </p>
           <div className="flex gap-2 shrink-0">
             <button
+              type="button"
               onClick={denyConsent}
               className="rounded-md border border-neutral-300 px-3 py-1.5 text-sm font-medium text-neutral-700 hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
             >
               Decline
             </button>
             <button
+              type="button"
               onClick={grantConsent}
               className="rounded-md bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-neutral-700 dark:bg-neutral-100 dark:text-neutral-900 dark:hover:bg-neutral-200"
             >
@@ -155,6 +159,7 @@ export function MatomoConsent() {
     return (
       <div className="fixed bottom-4 right-4 z-50">
         <button
+          type="button"
           onClick={toggleOptOut}
           className="rounded-full border border-neutral-200 bg-white p-2.5 text-neutral-500 shadow-sm transition hover:text-neutral-900 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
           title={optedOut ? "Opt in to analytics tracking" : "Opt out of analytics tracking"}

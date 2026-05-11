@@ -16,8 +16,8 @@ export default function Layout({ children }: LayoutProps<'/'>) {
         <RootProvider>{children}</RootProvider>
         <Suspense fallback={null}>
           <MatomoSpaTracker />
-          <MatomoConsent />
         </Suspense>
+        <MatomoConsent />
       </body>
     </html>
   );
