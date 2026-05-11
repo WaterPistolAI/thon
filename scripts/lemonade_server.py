@@ -66,7 +66,7 @@ import yaml
 
 LEMONADE_CONFIG_DIR = Path("/var/lib/lemonade/.cache/lemonade")
 LEMONADE_CONFIG_PATH = LEMONADE_CONFIG_DIR / "config.json"
-SYSTEMD_SERVICE_NAME = "lemonade-server"
+SYSTEMD_SERVICE_NAME = "lemond"
 SYSTEMD_OVERRIDE_DIR = Path(f"/etc/systemd/system/{SYSTEMD_SERVICE_NAME}.service.d")
 DEFAULT_MODEL = "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL"
 DEFAULT_MODEL_NAME = "gemma-4-31b-it"
@@ -249,7 +249,7 @@ class LemonadeServerManager:
         return os.getenv("LEMONADE_ADMIN_API_KEY", "")
 
     def is_installed(self) -> bool:
-        for cmd in ("lemonade-server", "lemonade"):
+        for cmd in ("lemond", "lemonade"):
             result = _run_cmd(["which", cmd], check=False)
             if result.returncode == 0:
                 return True
@@ -370,7 +370,24 @@ class LemonadeServerManager:
         print("[Lemonade] Server stopped")
 
     def restart(self) -> None:
-        _run_cmd(["systemctl", "restart", SYSTEMD_SERVICE_NAME], sudo=True)
+        result = _run_cmd(
+            ["systemctl", "restart", SYSTEMD_SERVICE_NAME], sudo=True, check=False
+        )
+        if result.returncode != 0:
+            print(
+                f"[Lemonade] systemctl restart failed (rc={result.returncode}), "
+                "attempting start..."
+            )
+            start_result = _run_cmd(
+                ["systemctl", "start", SYSTEMD_SERVICE_NAME], sudo=True, check=False
+            )
+            if start_result.returncode != 0:
+                print(
+                    f"[Lemonade] Error: systemctl start also failed "
+                    f"(rc={start_result.returncode}). "
+                    f"Is the {SYSTEMD_SERVICE_NAME} service installed?"
+                )
+                return
         print("[Lemonade] Server restarted")
 
     def status(self) -> bool:
@@ -442,15 +459,26 @@ class LemonadeServerManager:
 
         for cache_root in cache_roots:
             hub_dir = cache_root / "hub"
-            if not hub_dir.exists():
+            try:
+                if not hub_dir.exists():
+                    continue
+            except PermissionError:
                 continue
             model_cache = hub_dir / model_dir_name
-            if model_cache.exists():
-                snapshots = model_cache / "snapshots"
-                if snapshots.exists():
-                    for snap in snapshots.iterdir():
-                        if snap.is_dir() and any(snap.glob("*.gguf")):
-                            return True
+            try:
+                if not model_cache.exists():
+                    continue
+            except PermissionError:
+                continue
+            snapshots = model_cache / "snapshots"
+            try:
+                if not snapshots.exists():
+                    continue
+                for snap in snapshots.iterdir():
+                    if snap.is_dir() and any(snap.glob("*.gguf")):
+                        return True
+            except PermissionError:
+                continue
         return False
 
     def load_model(self, model: str, timeout: int = 120) -> bool:
@@ -920,15 +948,8 @@ async def cmd_run(
             skeleton_path=Path(kilo_skeleton) if kilo_skeleton else None,
         )
 
-    print("Keeping server alive. Press Ctrl+C to exit.")
-
-    try:
-        await asyncio.Event().wait()
-    except KeyboardInterrupt:
-        print("\n[Lemonade] Stopping...")
-    finally:
-        manager.stop()
-        print("[Lemonade] Stopped")
+    print("[Lemonade] Setup complete. Server is running as a systemd service.")
+    print("[Lemonade] Use 'sudo systemctl status lemond' to check status.")
 
 
 def main() -> None:

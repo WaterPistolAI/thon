@@ -317,6 +317,9 @@ class ApisixGatewayManager:
         uri: str = "/v1/chat/completions",
     ) -> dict:
         effective_key = lemonade_api_key or self._lemonade_api_key
+        auth_header: dict = {}
+        if effective_key:
+            auth_header["Authorization"] = f"Bearer {effective_key}"
         route_data: dict = {
             "uri": uri,
             "methods": ["POST"],
@@ -332,12 +335,8 @@ class ApisixGatewayManager:
                                 "endpoint": lemonade_url,
                             },
                             "auth": {
-                                "header": {
-                                    "Authorization": f"Bearer {effective_key}",
-                                }
-                            }
-                            if effective_key
-                            else {},
+                                "header": auth_header,
+                            },
                             "options": {
                                 "model": lemonade_model,
                             },
@@ -386,19 +385,19 @@ class ApisixGatewayManager:
         upstream_port = parsed.port or 13305
 
         effective_key = lemonade_api_key or self._lemonade_api_key
-        headers: dict = {}
+
+        plugins: dict = {"key-auth": {}}
         if effective_key:
-            headers["Authorization"] = f"Bearer {effective_key}"
+            plugins["proxy-rewrite"] = {
+                "headers": {
+                    "set": {"Authorization": f"Bearer {effective_key}"},
+                },
+            }
 
         route_data: dict = {
             "uri": "/v1/embeddings",
             "methods": ["POST"],
-            "plugins": {
-                "key-auth": {},
-                "proxy-rewrite": {
-                    "headers": headers if headers else {},
-                },
-            },
+            "plugins": plugins,
             "upstream": {
                 "type": "roundrobin",
                 "nodes": {
