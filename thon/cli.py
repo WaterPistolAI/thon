@@ -106,6 +106,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 config.lemonade.model,
                 "--model-name",
                 config.lemonade.model_name,
+                "--embedding-model",
+                config.lemonade.embedding_model,
+                "--embedding-model-name",
+                config.lemonade.embedding_model_name,
                 "--num-users",
                 str(num_users),
                 "--port",
@@ -127,6 +131,12 @@ def cmd_setup(args: argparse.Namespace) -> None:
 
             kilo_output = config.kilo.config_file or "kilo.jsonc"
             cmd.extend(["--kilo-config", kilo_output])
+
+            skeleton = config.kilo.skeleton_file
+            if skeleton:
+                skeleton_path = PROJECT_ROOT / skeleton
+                if skeleton_path.is_file():
+                    cmd.extend(["--kilo-skeleton", str(skeleton_path)])
 
             print(f"  Running: {' '.join(cmd)}")
             subprocess.run(cmd, check=False)
@@ -151,11 +161,15 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 "setup",
                 "--lemonade-url",
                 lemonade_url,
-                "--rate-limit",
-                str(config.gateway.rate_limit),
-                "--time-window",
-                str(config.gateway.time_window),
+                "--concurrency-limit",
+                str(config.gateway.concurrency_limit),
+                "--token-limit",
+                str(config.gateway.token_limit),
+                "--token-window",
+                str(config.gateway.token_window),
             ]
+            if config.gateway.admin_key:
+                cmd.extend(["--admin-key", config.gateway.admin_key])
             if config.gateway.redis_host:
                 cmd.extend(["--redis-host", config.gateway.redis_host])
             if config.external_ip:

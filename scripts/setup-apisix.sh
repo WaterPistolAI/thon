@@ -53,9 +53,16 @@ echo "[APISIX] Configuring APISIX admin key..."
 APISIX_CONFIG="/usr/local/apisix/conf/config.yaml"
 
 if [ -f "$APISIX_CONFIG" ]; then
-    ADMIN_KEY="${APISIX_ADMIN_KEY:-$(openssl rand -hex 16)}"
+    if grep -q "admin_key" "$APISIX_CONFIG" 2>/dev/null; then
+        EXISTING_KEY=$(grep -A3 'admin_key' "$APISIX_CONFIG" | grep 'key:' | head -1 | awk '{print $2}')
+        if [ -n "$EXISTING_KEY" ]; then
+            ADMIN_KEY="$EXISTING_KEY"
+            echo "[APISIX] Using existing admin key from config"
+        fi
+    fi
 
-    if ! grep -q "admin_key" "$APISIX_CONFIG" 2>/dev/null; then
+    if [ -z "${ADMIN_KEY:-}" ]; then
+        ADMIN_KEY="${APISIX_ADMIN_KEY:-$(openssl rand -hex 16)}"
         sudo bash -c "cat >> '$APISIX_CONFIG'" <<EOF
 
 deployment:
@@ -68,9 +75,7 @@ deployment:
       ip: 0.0.0.0
       port: 9180
 EOF
-        echo "[APISIX] Admin key configured"
-    else
-        echo "[APISIX] Admin key already configured"
+        echo "[APISIX] Admin key configured: ${ADMIN_KEY}"
     fi
 else
     echo "[APISIX] Warning: config.yaml not found at $APISIX_CONFIG"

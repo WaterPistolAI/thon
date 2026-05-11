@@ -52,6 +52,7 @@ class UserInfo:
 
     group: str
     username: str
+    email: str = ""
 
     @property
     def workspace(self) -> str:
@@ -60,6 +61,10 @@ class UserInfo:
     @property
     def label(self) -> str:
         return f"{self.group}/{self.username}"
+
+    @property
+    def display_email(self) -> str:
+        return self.email or f"{self.username}@thon.local"
 
 
 class InstanceInfo(BaseModel):

@@ -182,8 +182,10 @@ def run_interactive(
                 break
 
     if not groups:
-        groups = {"default": ["workspace"]}
-        _info("No groups defined — using default: workspace")
+        _info(
+            "No groups defined. Instances will not start unless you add groups "
+            "via the dashboard, or run with --demo for a default workspace."
+        )
 
     # ── Sandbox ──────────────────────────────────────────────
     _section("Sandbox")
@@ -192,9 +194,6 @@ def run_interactive(
         sandbox.domain = _prompt("Sandbox server domain", default=sandbox.domain)
         sandbox.api_key = _prompt("Sandbox API key (leave empty if none)", default="")
         sandbox.image = _prompt("Docker image", default=sandbox.image)
-        sandbox.python_version = _prompt(
-            "Python version", default=sandbox.python_version
-        )
         sandbox.starting_port = int(
             _prompt("Starting port", default=str(sandbox.starting_port))
         )
@@ -214,11 +213,6 @@ def run_interactive(
                 "Path to VS Code settings JSON",
                 default="config/vscode-settings.jsonc",
             )
-        if _yes_no("Inject custom extensions list?", default=False):
-            vscode.extensions_file = _prompt(
-                "Path to extensions.txt",
-                default="config/extensions.txt",
-            )
 
     # ── Nginx / SSL ──────────────────────────────────────────
     _section("Nginx & SSL")
@@ -228,21 +222,11 @@ def run_interactive(
         if nginx.enabled:
             nginx.ssl_dir = _prompt("SSL cert directory", default=nginx.ssl_dir)
 
-    # ── Workspace ────────────────────────────────────────────
-    _section("Workspace")
-    workspace = WorkspaceSettings()
-    if not non_interactive:
-        if _yes_no("Use persistent workspace bind mounts?", default=False):
-            workspace.dir = _prompt(
-                "Host directory for workspaces",
-                default="/thon-workspace",
-            )
-
     # ── Lemonade ─────────────────────────────────────────────
     _section("Lemonade Server (Local LLM Inference)")
     lemonade = LemonadeSettings()
     if not non_interactive:
-        lemonade.enabled = _yes_no("Enable Lemonade inference server?", default=False)
+        lemonade.enabled = _yes_no("Enable Lemonade inference server?", default=True)
         if lemonade.enabled:
             lemonade.host = _prompt("Bind address", default=lemonade.host)
             lemonade.port = int(_prompt("Port", default=str(lemonade.port)))
@@ -251,6 +235,12 @@ def run_interactive(
             )
             lemonade.model_name = _prompt(
                 "Short model name", default=lemonade.model_name
+            )
+            lemonade.embedding_model = _prompt(
+                "Embedding model checkpoint", default=lemonade.embedding_model
+            )
+            lemonade.embedding_model_name = _prompt(
+                "Embedding model short name", default=lemonade.embedding_model_name
             )
             lemonade.llamacpp_backend = _prompt(
                 "llama.cpp backend",
@@ -268,6 +258,11 @@ def run_interactive(
         if lemonade.enabled:
             _info("Kilo Code config will be auto-generated from Lemonade settings")
             kilo.config_file = "kilo.jsonc"
+            if _yes_no("Use a kilo.jsonc skeleton for custom overrides?", default=True):
+                kilo.skeleton_file = _prompt(
+                    "Path to skeleton file",
+                    default=kilo.skeleton_file,
+                )
         elif _yes_no("Use a custom Kilo Code config?", default=False):
             kilo.config_file = _prompt("Path to kilo.jsonc", default="kilo.jsonc")
 
@@ -284,12 +279,22 @@ def run_interactive(
                 default=gateway.mode,
                 choices=["per-user", "per-group"],
             )
-            gateway.rate_limit = int(
-                _prompt("Token limit per consumer", default=str(gateway.rate_limit))
-            )
-            gateway.time_window = int(
+            gateway.concurrency_limit = int(
                 _prompt(
-                    "Rate limit time window (seconds)", default=str(gateway.time_window)
+                    "Max concurrent requests per consumer",
+                    default=str(gateway.concurrency_limit),
+                )
+            )
+            gateway.token_limit = int(
+                _prompt(
+                    "Token limit per consumer (0 = no limit)",
+                    default=str(gateway.token_limit),
+                )
+            )
+            gateway.token_window = int(
+                _prompt(
+                    "Token limit time window (seconds)",
+                    default=str(gateway.token_window),
                 )
             )
             if _yes_no("Use Redis for distributed rate limiting?", default=False):
@@ -326,7 +331,7 @@ def run_interactive(
         sandbox=sandbox,
         vscode=vscode,
         nginx=nginx,
-        workspace=workspace,
+        workspace=WorkspaceSettings(),
         lemonade=lemonade,
         kilo=kilo,
         gateway=gateway,

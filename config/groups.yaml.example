@@ -26,8 +26,10 @@ groups:
   alpha:
     title: "Team Alpha"
     users:
-      - alice
-      - bob
+      - name: alice
+        email: alice@example.com
+      - name: bob
+        email: bob@example.com
       - carol
 
   beta:

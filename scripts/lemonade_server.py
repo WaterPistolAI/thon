@@ -111,6 +111,21 @@ def generate_password(length: int = 24) -> str:
     return secrets.token_urlsafe(length)
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into *base*, returning a new dict.
+
+    Values in *override* take precedence. Dicts are merged recursively;
+    all other types are replaced.
+    """
+    result = dict(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 def _needs_sudo() -> bool:
     try:
         return os.geteuid() != 0
@@ -650,11 +665,17 @@ class LemonadeServerManager:
         external_ip: Optional[str] = None,
         output_path: Optional[Path] = None,
         embedding_model_name: Optional[str] = DEFAULT_EMBEDDING_MODEL_NAME,
+        skeleton_path: Optional[Path] = None,
     ) -> Path:
         """Generate a kilo.jsonc config for Kilo Code pointing at this Lemonade server.
 
         The base URL is resolved to the best reachable address from inside
         sandbox containers: external_ip > Docker bridge gateway > localhost.
+
+        If a skeleton file exists, it is loaded first and the auto-generated
+        values are deep-merged on top, so user overrides in the skeleton
+        take precedence over defaults but not over auto-detected values
+        like apiKey and baseURL.
 
         Args:
             model: HuggingFace checkpoint for display name.
@@ -662,6 +683,7 @@ class LemonadeServerManager:
             external_ip: External IP for sandbox access.
             output_path: Path to write kilo.jsonc. Defaults to ./kilo.jsonc.
             embedding_model_name: Short name of the embedding model for indexing.
+            skeleton_path: Path to a kilo.jsonc.skeleton file with user overrides.
 
         Returns:
             Path to the generated kilo.jsonc file.
@@ -680,7 +702,7 @@ class LemonadeServerManager:
         auth_key = self.admin_api_key or self.api_key or "none"
 
         prefixed_model_name = f"user.{model_name}"
-        config: dict = {
+        generated: dict = {
             "provider": {
                 "lemonade": {
                     "models": {
@@ -699,14 +721,6 @@ class LemonadeServerManager:
                 },
             },
             "model": f"lemonade/{prefixed_model_name}",
-            "experimental": {
-                "batch_tool": False,
-                "codebase_search": True,
-                "openTelemetry": False,
-                "continue_loop_on_deny": True,
-                "semantic_indexing": True,
-                "agent_manager_tool": True,
-            },
             "indexing": {
                 "enabled": True,
                 "provider": "openai-compatible",
@@ -720,7 +734,20 @@ class LemonadeServerManager:
 
         if embedding_model_name:
             prefixed_emb = f"user.{embedding_model_name}"
-            config["indexing"]["openai-compatible"]["model"] = prefixed_emb
+            generated["indexing"]["openai-compatible"]["model"] = prefixed_emb
+
+        skeleton: dict = {}
+        if skeleton_path and Path(skeleton_path).is_file():
+            try:
+                with open(skeleton_path) as f:
+                    skeleton = json.load(f)
+                print(f"[Lemonade] Loaded skeleton from {skeleton_path}")
+            except Exception as e:
+                print(
+                    f"[Lemonade] Warning: failed to load skeleton {skeleton_path}: {e}"
+                )
+
+        config = _deep_merge(skeleton, generated)
 
         target = output_path or Path("kilo.jsonc")
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -801,6 +828,7 @@ async def cmd_run(
     api_key: Optional[str] = None,
     admin_api_key: Optional[str] = None,
     kilo_config: Optional[str] = None,
+    kilo_skeleton: Optional[str] = None,
     prefer_system: bool = True,
     llamacpp_bin: str = DEFAULT_LLMACPP_BIN,
     embedding: bool = True,
@@ -889,6 +917,7 @@ async def cmd_run(
             external_ip=external_ip,
             output_path=output,
             embedding_model_name=embedding_model_name if embedding else None,
+            skeleton_path=Path(kilo_skeleton) if kilo_skeleton else None,
         )
 
     print("Keeping server alive. Press Ctrl+C to exit.")
@@ -1010,6 +1039,12 @@ Examples:
         type=str,
         default=None,
         help="Generate kilo.jsonc for Kilo Code at this path (requires --generate-keys or --api-key)",
+    )
+    config_parser.add_argument(
+        "--kilo-skeleton",
+        type=str,
+        default=None,
+        help="Path to kilo.jsonc.skeleton with user overrides (deep-merged into generated config)",
     )
     config_parser.add_argument(
         "--model",
@@ -1157,6 +1192,12 @@ Examples:
         type=str,
         default=None,
         help="Generate kilo.jsonc for Kilo Code at this path (default: ./kilo.jsonc when --generate-keys is set)",
+    )
+    run_parser.add_argument(
+        "--kilo-skeleton",
+        type=str,
+        default=None,
+        help="Path to kilo.jsonc.skeleton with user overrides (deep-merged into generated config)",
     )
     run_parser.add_argument(
         "--embedding",
@@ -1311,6 +1352,12 @@ Examples:
         default=False,
         help="Omit indexing section from kilo.jsonc",
     )
+    generate_kilo_parser.add_argument(
+        "--kilo-skeleton",
+        type=str,
+        default=None,
+        help="Path to kilo.jsonc.skeleton with user overrides (deep-merged into generated config)",
+    )
 
     subparsers.add_parser("cleanup", help="Stop server and clean up")
 
@@ -1378,6 +1425,7 @@ Examples:
                 api_key=args.api_key,
                 admin_api_key=args.admin_api_key,
                 kilo_config=args.kilo_config,
+                kilo_skeleton=args.kilo_skeleton,
                 prefer_system=args.prefer_system,
                 llamacpp_bin=args.llamacpp_bin,
                 mmproj=args.mmproj,
@@ -1416,6 +1464,7 @@ Examples:
             external_ip=args.external_ip,
             output_path=Path(args.output),
             embedding_model_name=emb_name,
+            skeleton_path=Path(args.kilo_skeleton) if args.kilo_skeleton else None,
         )
     elif args.command == "cleanup":
         manager.cleanup()

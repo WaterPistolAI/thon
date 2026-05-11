@@ -73,6 +73,10 @@ class LemonadeSettings(BaseModel):
     model: str = "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL"
     model_name: str = "gemma-4-31b-it"
     mmproj: str = "mmproj-BF16.gguf"
+    embedding_model: str = (
+        "SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16"
+    )
+    embedding_model_name: str = "harrier-oss-v1-0.6b"
     llamacpp_backend: str = "auto"
     prefer_system: bool = True
     llamacpp_bin: str = "/usr/local/bin/llama-server"
@@ -85,6 +89,7 @@ class KiloSettings(BaseModel):
     """Kilo Code extension settings injected into sandboxes."""
 
     config_file: str = ""
+    skeleton_file: str = "config/kilo.jsonc.skeleton"
 
 
 class GatewaySettings(BaseModel):

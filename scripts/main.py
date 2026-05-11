@@ -102,6 +102,7 @@ if TYPE_CHECKING:
 class UserInfo:
     group: str
     username: str
+    email: str = ""
 
     @property
     def workspace(self) -> str:
@@ -111,6 +112,10 @@ class UserInfo:
     def label(self) -> str:
         return f"{self.group}/{self.username}"
 
+    @property
+    def display_email(self) -> str:
+        return self.email or f"{self.username}@thon.local"
+
 
 @dataclass
 class SandboxInstance:
@@ -119,6 +124,24 @@ class SandboxInstance:
     sandbox: Sandbox
     endpoint: str
     password: Optional[str] = None
+
+
+def _parse_user_entry(entry: str | dict, group: str) -> UserInfo:
+    """Parse a user entry from groups.yaml.
+
+    Supports both string (``"alice"``) and dict
+    (``{name: alice, email: alice@example.com}``) formats.
+    """
+    if isinstance(entry, str):
+        return UserInfo(group=group, username=entry)
+    name = entry.get("name") or entry.get("username") or ""
+    if not name:
+        raise ValueError(f"User entry missing 'name': {entry}")
+    return UserInfo(
+        group=group,
+        username=name,
+        email=entry.get("email", ""),
+    )
 
 
 def load_groups(groups_file: str, group_filter: Optional[str] = None) -> list[UserInfo]:
@@ -131,8 +154,8 @@ def load_groups(groups_file: str, group_filter: Optional[str] = None) -> list[Us
     for group_name, group_data in groups.items():
         if group_filter and group_name != group_filter:
             continue
-        for username in group_data.get("users", []):
-            users.append(UserInfo(group=group_name, username=username))
+        for user_entry in group_data.get("users", []):
+            users.append(_parse_user_entry(user_entry, group_name))
 
     return users
 
@@ -141,7 +164,11 @@ def _load_users_from_db(
     db_path: Optional[str] = None, group_filter: Optional[str] = None
 ) -> list[UserInfo]:
     """Read users from the database, optionally filtered by group name."""
-    from app.db import GroupRecord as DBGroupRecord, UserRecord as DBUserRecord, get_session as db_get_session
+    from app.db import (
+        GroupRecord as DBGroupRecord,
+        UserRecord as DBUserRecord,
+        get_session as db_get_session,
+    )
     from sqlmodel import select as sql_select
 
     users: list[UserInfo] = []
@@ -154,7 +181,13 @@ def _load_users_from_db(
                 gname = group_name_map.get(db_u.group_id, "default")
                 if group_filter and gname != group_filter:
                     continue
-                users.append(UserInfo(group=gname, username=db_u.username))
+                users.append(
+                    UserInfo(
+                        group=gname,
+                        username=db_u.username,
+                        email=db_u.email or "",
+                    )
+                )
     except Exception as e:
         print(f"Error reading from database: {e}")
     return users
@@ -175,6 +208,7 @@ def _resolve_file_content(
             return content
         print(f"Warning: {label} not found at {file_path}")
     from app.db import get_setting
+
     db_content = get_setting(db_key, db_path=db_path)
     if db_content and db_content.strip():
         return db_content
@@ -194,9 +228,7 @@ def _ensure_docker_volume(volume_name: str) -> None:
         print(f"Warning: Failed to create Docker volume '{volume_name}': {e}")
 
 
-def _ensure_volumes_for_users(
-    db_user_map: dict[tuple[str, str], object]
-) -> None:
+def _ensure_volumes_for_users(db_user_map: dict[tuple[str, str], object]) -> None:
     """Ensure all PVC volumes referenced by DB user records exist."""
     ensured = 0
     for db_user in db_user_map.values():
@@ -264,6 +296,12 @@ async def _inject_kilo_config(
             f"[{user.label}] Warning: kilo.jsonc contains PLACEHOLDER — "
             f"run setup-lemonade.sh --generate-keys to generate real API keys"
         )
+
+    config_content = config_content.replace("$USERNAME", user.username)
+    config_content = config_content.replace("$EMAIL", user.display_email)
+    config_content = config_content.replace(
+        "$WORKSPACE", f"/workspace/{user.workspace}"
+    )
 
     kilo_dir = "/home/vscode/.config/kilo"
     await sandbox.commands.run(f"mkdir -p {kilo_dir}")
@@ -403,12 +441,7 @@ async def create_instance(
             api_key=gateway_api_key,
             enable_embedding=True,
         )
-        kilo_dir = "/home/vscode/.config/kilo"
-        await sandbox.commands.run(f"mkdir -p {kilo_dir}")
-        encoded = base64.b64encode(kilo_content.encode()).decode()
-        write_cmd = f"echo {encoded} | base64 -d > {kilo_dir}/config.json"
-        await sandbox.commands.run(write_cmd)
-        print(f"[{user.label}] Injected gateway kilo config -> {kilo_dir}/config.json")
+        await _inject_kilo_config(user, sandbox, kilo_content)
 
     if secure and password:
         config_dir = "/home/vscode/.config/code-server"
@@ -478,10 +511,16 @@ async def run_from_config(
     lemonade_path = thon_cfg.kilo.config_file or None
     vscode_settings_path = thon_cfg.vscode.settings_file or None
     lemonade_config_content = _resolve_file_content(
-        lemonade_path, "config_kilo_json", "kilo.jsonc", db_path=os.getenv("THON_DB_PATH")
+        lemonade_path,
+        "config_kilo_json",
+        "kilo.jsonc",
+        db_path=os.getenv("THON_DB_PATH"),
     )
     vscode_settings_content = _resolve_file_content(
-        vscode_settings_path, "config_vscode_settings", "VS Code settings", db_path=os.getenv("THON_DB_PATH")
+        vscode_settings_path,
+        "config_vscode_settings",
+        "VS Code settings",
+        db_path=os.getenv("THON_DB_PATH"),
     )
 
     user_tuples = thon_cfg.get_users(group_filter)
@@ -529,7 +568,9 @@ async def run_from_config(
         if thon_cfg.gateway.concurrency_limit > 0:
             limits_parts.append(f"concurrency={thon_cfg.gateway.concurrency_limit}")
         if thon_cfg.gateway.token_limit > 0:
-            limits_parts.append(f"tokens={thon_cfg.gateway.token_limit}/{thon_cfg.gateway.token_window}s")
+            limits_parts.append(
+                f"tokens={thon_cfg.gateway.token_limit}/{thon_cfg.gateway.token_window}s"
+            )
         limits_str = ", ".join(limits_parts) if limits_parts else "no limits"
         print(f"  AI Gateway: enabled ({limits_str})")
         if thon_cfg.gateway.redis_host:
@@ -598,8 +639,16 @@ async def run_from_config(
                 group_names.setdefault(user.group, []).append(user)
             for gn, group_users in group_names.items():
                 user_count = len(group_users)
-                group_token_limit = thon_cfg.gateway.token_limit * user_count if thon_cfg.gateway.token_limit > 0 else 0
-                group_concurrency = thon_cfg.gateway.concurrency_limit * user_count if thon_cfg.gateway.concurrency_limit > 0 else 0
+                group_token_limit = (
+                    thon_cfg.gateway.token_limit * user_count
+                    if thon_cfg.gateway.token_limit > 0
+                    else 0
+                )
+                group_concurrency = (
+                    thon_cfg.gateway.concurrency_limit * user_count
+                    if thon_cfg.gateway.concurrency_limit > 0
+                    else 0
+                )
                 consumer = gateway_mgr.create_consumer(
                     username=f"group-{gn}",
                     concurrency_limit=group_concurrency,
@@ -622,7 +671,9 @@ async def run_from_config(
                 if group_concurrency > 0:
                     limits_parts.append(f"concurrency={group_concurrency}")
                 if group_token_limit > 0:
-                    limits_parts.append(f"tokens={group_token_limit}/{thon_cfg.gateway.token_window}s")
+                    limits_parts.append(
+                        f"tokens={group_token_limit}/{thon_cfg.gateway.token_window}s"
+                    )
                 print(
                     f"[Gateway] Created group consumer: group-{gn} ({user_count} users, {', '.join(limits_parts)})"
                 )
@@ -773,10 +824,18 @@ async def run_from_config(
                             )
                         gc_limits_parts = []
                         if gc.get("concurrency_limit", 0) > 0:
-                            gc_limits_parts.append(f"concurrency={gc['concurrency_limit']}")
+                            gc_limits_parts.append(
+                                f"concurrency={gc['concurrency_limit']}"
+                            )
                         if gc.get("token_limit", 0) > 0:
-                            gc_limits_parts.append(f"tokens={gc['token_limit']}/{gc.get('token_window', 60)}s")
-                        gc_limits_str = ", ".join(gc_limits_parts) if gc_limits_parts else "no limits"
+                            gc_limits_parts.append(
+                                f"tokens={gc['token_limit']}/{gc.get('token_window', 60)}s"
+                            )
+                        gc_limits_str = (
+                            ", ".join(gc_limits_parts)
+                            if gc_limits_parts
+                            else "no limits"
+                        )
                         print(f"      Gateway Limits: {gc_limits_str}")
                         break
 
@@ -807,9 +866,9 @@ async def run_from_config(
             try:
                 from apisix_gateway import ApisixGatewayManager
 
-                admin_key = thon_cfg.gateway.admin_key or os.getenv(
-                    "GATEWAY_ADMIN_KEY"
-                ) or None
+                admin_key = (
+                    thon_cfg.gateway.admin_key or os.getenv("GATEWAY_ADMIN_KEY") or None
+                )
                 gateway_mgr = ApisixGatewayManager(
                     admin_url="http://127.0.0.1:9180",
                     admin_key=admin_key,
@@ -1048,9 +1107,7 @@ Examples:
 
     groups_path = resolve_path(args.groups) if args.groups else None
 
-    db_path_env = (
-        os.getenv("THON_DB_PATH")
-    )
+    db_path_env = os.getenv("THON_DB_PATH")
 
     users: list[UserInfo]
     if args.groups:
@@ -1091,9 +1148,12 @@ Examples:
         db_users = _load_users_from_db(db_path=db_path_env, group_filter=args.group)
         if db_users:
             users = db_users
-            print(f"  Loaded {len(users)} user(s) from database (no flags — using DB config)")
+            print(
+                f"  Loaded {len(users)} user(s) from database (no flags — using DB config)"
+            )
         else:
             from app.db import get_setting
+
             db_yaml = get_setting("config_groups_yaml", db_path=db_path_env)
             if db_yaml and db_yaml.strip():
                 yaml_data = yaml.safe_load(db_yaml)
@@ -1104,8 +1164,8 @@ Examples:
                     group_data = group_data or {}
                     if args.group and group_name != args.group:
                         continue
-                    for username in group_data.get("users", []):
-                        users.append(UserInfo(group=group_name, username=username))
+                    for user_entry in group_data.get("users", []):
+                        users.append(_parse_user_entry(user_entry, group_name))
                 if users:
                     groups_svc = GroupsService(
                         db_path=db_path_env,
@@ -1134,7 +1194,10 @@ Examples:
         args.lemonade, "config_kilo_json", "kilo.jsonc", db_path=db_path_env
     )
     vscode_settings_content = _resolve_file_content(
-        args.vscode_settings, "config_vscode_settings", "VS Code settings", db_path=db_path_env
+        args.vscode_settings,
+        "config_vscode_settings",
+        "VS Code settings",
+        db_path=db_path_env,
     )
 
     total = len(users)
@@ -1163,7 +1226,9 @@ Examples:
         if args.gateway_concurrency_limit > 0:
             limits_parts.append(f"concurrency={args.gateway_concurrency_limit}")
         if args.gateway_token_limit > 0:
-            limits_parts.append(f"tokens={args.gateway_token_limit}/{args.gateway_token_window}s")
+            limits_parts.append(
+                f"tokens={args.gateway_token_limit}/{args.gateway_token_window}s"
+            )
         limits_str = ", ".join(limits_parts) if limits_parts else "no limits"
         print(f"  AI Gateway: enabled ({limits_str})")
         if args.gateway_redis_host:
@@ -1240,8 +1305,16 @@ Examples:
                 group_names.setdefault(user.group, []).append(user)
             for group_name, group_users in group_names.items():
                 user_count = len(group_users)
-                group_token_limit = args.gateway_token_limit * user_count if args.gateway_token_limit > 0 else 0
-                group_concurrency = args.gateway_concurrency_limit * user_count if args.gateway_concurrency_limit > 0 else 0
+                group_token_limit = (
+                    args.gateway_token_limit * user_count
+                    if args.gateway_token_limit > 0
+                    else 0
+                )
+                group_concurrency = (
+                    args.gateway_concurrency_limit * user_count
+                    if args.gateway_concurrency_limit > 0
+                    else 0
+                )
                 consumer = gateway_mgr.create_consumer(
                     username=f"group-{group_name}",
                     concurrency_limit=group_concurrency,
@@ -1264,7 +1337,9 @@ Examples:
                 if group_concurrency > 0:
                     limits_parts.append(f"concurrency={group_concurrency}")
                 if group_token_limit > 0:
-                    limits_parts.append(f"tokens={group_token_limit}/{args.gateway_token_window}s")
+                    limits_parts.append(
+                        f"tokens={group_token_limit}/{args.gateway_token_window}s"
+                    )
                 print(
                     f"[Gateway] Created group consumer: group-{group_name} ({user_count} users, {', '.join(limits_parts)})"
                 )
@@ -1414,10 +1489,18 @@ Examples:
                             )
                         gc_limits_parts = []
                         if gc.get("concurrency_limit", 0) > 0:
-                            gc_limits_parts.append(f"concurrency={gc['concurrency_limit']}")
+                            gc_limits_parts.append(
+                                f"concurrency={gc['concurrency_limit']}"
+                            )
                         if gc.get("token_limit", 0) > 0:
-                            gc_limits_parts.append(f"tokens={gc['token_limit']}/{gc.get('token_window', 60)}s")
-                        gc_limits_str = ", ".join(gc_limits_parts) if gc_limits_parts else "no limits"
+                            gc_limits_parts.append(
+                                f"tokens={gc['token_limit']}/{gc.get('token_window', 60)}s"
+                            )
+                        gc_limits_str = (
+                            ", ".join(gc_limits_parts)
+                            if gc_limits_parts
+                            else "no limits"
+                        )
                         print(f"      Gateway Limits: {gc_limits_str}")
                         break
 

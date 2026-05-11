@@ -1,0 +1,39 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "experimental": {
+    "batch_tool": false,
+    "codebase_search": true,
+    "openTelemetry": false,
+    "continue_loop_on_deny": true,
+    "semantic_indexing": true,
+    "agent_manager_tool": false
+  },
+  "indexing": {
+    "enabled": true,
+    "provider": "openai-compatible",
+    "vectorStore": "lancedb",
+    "openai-compatible": {
+      "model": "user.harrier-oss-v1-0.6b"
+    }
+  },
+  "mcp": {
+    "git-mcp-server": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@cyanheads/git-mcp-server@latest"
+      ],
+      "environment": {
+        "MCP_TRANSPORT_TYPE": "stdio",
+        "MCP_LOG_LEVEL": "info",
+        "GIT_BASE_DIR": "$WORKSPACE",
+        "LOGS_DIR": "$WORKSPACE/.logs/git-mcp-server",
+        "GIT_USERNAME": "$USERNAME",
+        "GIT_EMAIL": "$EMAIL",
+        "GIT_SIGN_COMMITS": "true"
+      },
+      "enabled": true
+    }
+  }
+}

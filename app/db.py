@@ -106,6 +106,7 @@ class UserRecord(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()), primary_key=True)
     group_id: str = Field(index=True)
     username: str = Field(index=True)
+    email: Optional[str] = Field(default=None)
     workspace_path: Optional[str] = Field(default=None)
     storage_path: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -139,17 +140,24 @@ def get_engine(db_path: Optional[str] = None):
 def _migrate(engine) -> None:
     """Add missing columns to existing tables (simple alter-table migration)."""
     import sqlalchemy
+
     with engine.connect() as conn:
         for table in SQLModel.metadata.tables.values():
             for col in table.columns:
                 try:
-                    conn.execute(sqlalchemy.text(f"ALTER TABLE {table.name} ADD COLUMN {col.name} {col.type}"))
+                    conn.execute(
+                        sqlalchemy.text(
+                            f"ALTER TABLE {table.name} ADD COLUMN {col.name} {col.type}"
+                        )
+                    )
                 except Exception:
                     pass
         try:
-            conn.execute(sqlalchemy.text(
-                "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_group_username ON user_records (group_id, username)"
-            ))
+            conn.execute(
+                sqlalchemy.text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_group_username ON user_records (group_id, username)"
+                )
+            )
         except Exception:
             pass
         conn.commit()
@@ -208,7 +216,9 @@ def upsert_record(
         return record
 
 
-def get_record(sandbox_id: str, db_path: Optional[str] = None) -> Optional[SandboxRecord]:
+def get_record(
+    sandbox_id: str, db_path: Optional[str] = None
+) -> Optional[SandboxRecord]:
     """Look up a sandbox record by sandbox_id."""
     with get_session(db_path) as session:
         return session.exec(
@@ -243,7 +253,9 @@ def mark_terminated(sandbox_id: str, db_path: Optional[str] = None) -> None:
             session.commit()
 
 
-def update_endpoint(sandbox_id: str, endpoint: str, db_path: Optional[str] = None) -> None:
+def update_endpoint(
+    sandbox_id: str, endpoint: str, db_path: Optional[str] = None
+) -> None:
     """Update the endpoint for a sandbox record."""
     with get_session(db_path) as session:
         record = session.exec(
@@ -258,18 +270,14 @@ def update_endpoint(sandbox_id: str, endpoint: str, db_path: Optional[str] = Non
 def get_setting(key: str, db_path: Optional[str] = None) -> Optional[str]:
     """Retrieve a global setting value by key."""
     with get_session(db_path) as session:
-        setting = session.exec(
-            select(AppSetting).where(AppSetting.key == key)
-        ).first()
+        setting = session.exec(select(AppSetting).where(AppSetting.key == key)).first()
         return setting.value if setting else None
 
 
 def set_setting(key: str, value: str, db_path: Optional[str] = None) -> None:
     """Set a global setting value."""
     with get_session(db_path) as session:
-        setting = session.exec(
-            select(AppSetting).where(AppSetting.key == key)
-        ).first()
+        setting = session.exec(select(AppSetting).where(AppSetting.key == key)).first()
         if setting:
             setting.value = value
         else:
@@ -278,7 +286,9 @@ def set_setting(key: str, value: str, db_path: Optional[str] = None) -> None:
         session.commit()
 
 
-def get_settings_by_prefix(prefix: str, db_path: Optional[str] = None) -> dict[str, str]:
+def get_settings_by_prefix(
+    prefix: str, db_path: Optional[str] = None
+) -> dict[str, str]:
     """Retrieve all settings whose key starts with prefix."""
     with get_session(db_path) as session:
         settings = session.exec(
@@ -290,9 +300,7 @@ def get_settings_by_prefix(prefix: str, db_path: Optional[str] = None) -> dict[s
 def delete_setting(key: str, db_path: Optional[str] = None) -> bool:
     """Delete a global setting by key."""
     with get_session(db_path) as session:
-        setting = session.exec(
-            select(AppSetting).where(AppSetting.key == key)
-        ).first()
+        setting = session.exec(select(AppSetting).where(AppSetting.key == key)).first()
         if not setting:
             return False
         session.delete(setting)
@@ -379,7 +387,9 @@ def get_group(group_id: str, db_path: Optional[str] = None) -> Optional[GroupRec
         ).first()
 
 
-def rename_group(group_id: str, new_name: str, db_path: Optional[str] = None) -> Optional[GroupRecord]:
+def rename_group(
+    group_id: str, new_name: str, db_path: Optional[str] = None
+) -> Optional[GroupRecord]:
     """Rename a group."""
     with get_session(db_path) as session:
         group = session.exec(
@@ -431,9 +441,7 @@ def create_user(
             )
         ).first()
         if existing:
-            raise ValueError(
-                f"User '{username}' already exists in group '{group_id}'"
-            )
+            raise ValueError(f"User '{username}' already exists in group '{group_id}'")
         user = UserRecord(
             group_id=group_id,
             username=username,
@@ -449,17 +457,17 @@ def create_user(
 def get_users(group_id: str, db_path: Optional[str] = None) -> list[UserRecord]:
     """List all users in a group."""
     with get_session(db_path) as session:
-        return list(session.exec(
-            select(UserRecord).where(UserRecord.group_id == group_id)
-        ).all())
+        return list(
+            session.exec(
+                select(UserRecord).where(UserRecord.group_id == group_id)
+            ).all()
+        )
 
 
 def get_user(user_id: str, db_path: Optional[str] = None) -> Optional[UserRecord]:
     """Get a user by ID."""
     with get_session(db_path) as session:
-        return session.exec(
-            select(UserRecord).where(UserRecord.id == user_id)
-        ).first()
+        return session.exec(select(UserRecord).where(UserRecord.id == user_id)).first()
 
 
 def update_user(
@@ -471,9 +479,7 @@ def update_user(
 ) -> Optional[UserRecord]:
     """Update a user's fields."""
     with get_session(db_path) as session:
-        user = session.exec(
-            select(UserRecord).where(UserRecord.id == user_id)
-        ).first()
+        user = session.exec(select(UserRecord).where(UserRecord.id == user_id)).first()
         if not user:
             return None
         if username is not None:
@@ -491,9 +497,7 @@ def update_user(
 def delete_user(user_id: str, db_path: Optional[str] = None) -> bool:
     """Remove a user."""
     with get_session(db_path) as session:
-        user = session.exec(
-            select(UserRecord).where(UserRecord.id == user_id)
-        ).first()
+        user = session.exec(select(UserRecord).where(UserRecord.id == user_id)).first()
         if not user:
             return False
         session.delete(user)
@@ -506,9 +510,7 @@ def transfer_user(
 ) -> Optional[UserRecord]:
     """Move a user to a different group. Raises ValueError on name conflict."""
     with get_session(db_path) as session:
-        user = session.exec(
-            select(UserRecord).where(UserRecord.id == user_id)
-        ).first()
+        user = session.exec(select(UserRecord).where(UserRecord.id == user_id)).first()
         if not user:
             return None
         conflict = session.exec(
@@ -545,6 +547,7 @@ def load_groups_from_yaml(
     If event_id is provided, links all groups to that event.
     """
     import yaml
+
     with open(yaml_path) as f:
         data = yaml.safe_load(f)
     groups = data.get("groups", {})

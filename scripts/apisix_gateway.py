@@ -122,8 +122,12 @@ class ApisixGatewayManager:
             if APISIX_CONFIG_PATH.exists():
                 with open(APISIX_CONFIG_PATH) as f:
                     data = yaml.safe_load(f)
-                deployment = data.get("deployment", {}) if isinstance(data, dict) else {}
-                admin = deployment.get("admin", {}) if isinstance(deployment, dict) else {}
+                deployment = (
+                    data.get("deployment", {}) if isinstance(data, dict) else {}
+                )
+                admin = (
+                    deployment.get("admin", {}) if isinstance(deployment, dict) else {}
+                )
                 keys = admin.get("admin_key", []) if isinstance(admin, dict) else []
                 for key_entry in keys:
                     if isinstance(key_entry, dict) and key_entry.get("role") == "admin":
@@ -471,14 +475,26 @@ class ApisixGatewayManager:
         return created
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into *base*, returning a new dict."""
+    result = dict(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 def generate_kilo_gateway_config(
     gateway_url: str,
     api_key: str,
     model: str = "user.gemma-4-31b-it",
     embedding_model: str = "user.harrier-oss-v1-0.6b",
     enable_embedding: bool = True,
+    skeleton_path: Optional[str] = None,
 ) -> str:
-    config: dict = {
+    generated: dict = {
         "providers": {
             "lemonade-gateway": {
                 "baseUrl": gateway_url,
@@ -491,17 +507,9 @@ def generate_kilo_gateway_config(
                 "modelId": model,
             }
         },
-        "experimental": {
-            "batch_tool": False,
-            "codebase_search": True,
-            "openTelemetry": False,
-            "continue_loop_on_deny": True,
-            "semantic_indexing": True,
-            "agent_manager_tool": True,
-        },
     }
     if enable_embedding:
-        config["indexing"] = {
+        generated["indexing"] = {
             "enabled": True,
             "provider": "openai-compatible",
             "vectorStore": "lancedb",
@@ -511,6 +519,16 @@ def generate_kilo_gateway_config(
                 "model": embedding_model,
             },
         }
+
+    skeleton: dict = {}
+    if skeleton_path and Path(skeleton_path).is_file():
+        try:
+            with open(skeleton_path) as f:
+                skeleton = json.load(f)
+        except Exception as e:
+            print(f"[Gateway] Warning: failed to load skeleton {skeleton_path}: {e}")
+
+    config = _deep_merge(skeleton, generated)
     return json.dumps(config, indent=2)
 
 
@@ -650,9 +668,7 @@ Examples:
         default=TOKEN_WINDOW_DEFAULT,
         help=f"Token limit time window in seconds (default: {TOKEN_WINDOW_DEFAULT})",
     )
-    consumer_parser.add_argument(
-        "--admin-key", type=str, default=None
-    )
+    consumer_parser.add_argument("--admin-key", type=str, default=None)
     consumer_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
     )
@@ -662,9 +678,7 @@ Examples:
 
     delete_parser = subparsers.add_parser("delete-consumer", help="Delete a consumer")
     delete_parser.add_argument("--username", type=str, required=True)
-    delete_parser.add_argument(
-        "--admin-key", type=str, default=None
-    )
+    delete_parser.add_argument("--admin-key", type=str, default=None)
     delete_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
     )
@@ -693,9 +707,7 @@ Examples:
     )
 
     status_parser = subparsers.add_parser("status", help="Check gateway status")
-    status_parser.add_argument(
-        "--admin-key", type=str, default=None
-    )
+    status_parser.add_argument("--admin-key", type=str, default=None)
     status_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
     )
@@ -703,9 +715,7 @@ Examples:
     cleanup_parser = subparsers.add_parser(
         "cleanup", help="Remove all gateway resources"
     )
-    cleanup_parser.add_argument(
-        "--admin-key", type=str, default=None
-    )
+    cleanup_parser.add_argument("--admin-key", type=str, default=None)
     cleanup_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
     )
@@ -744,8 +754,14 @@ Examples:
                         continue
                     group_users = group_data.get("users", [])
                     user_count = len(group_users)
-                    group_token_limit = args.token_limit * user_count if args.token_limit > 0 else 0
-                    group_concurrency = args.concurrency_limit * user_count if args.concurrency_limit > 0 else 0
+                    group_token_limit = (
+                        args.token_limit * user_count if args.token_limit > 0 else 0
+                    )
+                    group_concurrency = (
+                        args.concurrency_limit * user_count
+                        if args.concurrency_limit > 0
+                        else 0
+                    )
                     users.append(
                         ConsumerConfig(
                             username=f"group-{group_name}",
@@ -807,7 +823,9 @@ Examples:
             if consumer.concurrency_limit > 0:
                 limits_parts.append(f"concurrency={consumer.concurrency_limit}")
             if consumer.token_limit > 0:
-                limits_parts.append(f"tokens={consumer.token_limit}/{consumer.token_window}s")
+                limits_parts.append(
+                    f"tokens={consumer.token_limit}/{consumer.token_window}s"
+                )
             limits_str = ", ".join(limits_parts) if limits_parts else "no limits"
             print(f"    Limits: {limits_str}")
             print(f"    Chat Endpoint: {gateway_base}/v1/chat/completions")
@@ -843,7 +861,9 @@ Examples:
         if consumer.concurrency_limit > 0:
             limits_parts.append(f"concurrency={consumer.concurrency_limit}")
         if consumer.token_limit > 0:
-            limits_parts.append(f"tokens={consumer.token_limit}/{consumer.token_window}s")
+            limits_parts.append(
+                f"tokens={consumer.token_limit}/{consumer.token_window}s"
+            )
         limits_str = ", ".join(limits_parts) if limits_parts else "no limits"
         print(f"  Limits: {limits_str}")
 
