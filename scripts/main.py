@@ -459,7 +459,7 @@ async def run_from_config(
 ) -> None:
     """Run VS Code instances directly from a ThonConfig object.
 
-    This is the programmatic entry point used by ``thon run`` so it
+    This is the programmatic entry point used by ``python -m thon run`` so it
     doesn't need to shell out to a subprocess.
     """
     use_nginx = thon_cfg.nginx.enabled

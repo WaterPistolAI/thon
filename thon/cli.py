@@ -46,7 +46,7 @@ def _load_config(path: Optional[str] = None) -> ThonConfig:
     p = Path(path) if path else DEFAULT_CONFIG_PATH
     if not p.is_file():
         print(f"Error: Config file not found at {p}")
-        print("Run `thon init` to create one.")
+        print("Run `python -m thon init` to create one.")
         sys.exit(1)
     return ThonConfig.from_yaml(p)
 
@@ -192,7 +192,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print(f"    AI Gateway:    {'enabled' if config.gateway.enabled else 'disabled'}")
     print(f"    Dashboard:     {config.dashboard.host}:{config.dashboard.port}")
     print()
-    print("  Run `thon run` to start instances.")
+    print("  Run `python -m thon run` to start instances.")
 
 
 def cmd_run(args: argparse.Namespace) -> None:

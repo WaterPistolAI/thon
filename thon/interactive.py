@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Interactive guided setup for thon.yaml — `thon init`.
+"""Interactive guided setup for thon.yaml — `python -m thon init`.
 
 Walks the user through every THON feature with sensible defaults,
 validates choices, and writes a thon.yaml config file.
