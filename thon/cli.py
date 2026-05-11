@@ -197,6 +197,8 @@ def cmd_setup(args: argparse.Namespace) -> None:
 
 def cmd_run(args: argparse.Namespace) -> None:
     config = _load_config(args.config)
+    if getattr(args, "demo", False):
+        config.demo = True
     config.apply_env()
 
     sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
@@ -388,6 +390,12 @@ Examples:
     )
     run_parser.add_argument(
         "--group", type=str, default=None, help="Run only this group"
+    )
+    run_parser.add_argument(
+        "--demo",
+        action="store_true",
+        default=False,
+        help="Create a default workspace when no users/groups are configured",
     )
 
     # config

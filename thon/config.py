@@ -128,6 +128,7 @@ class AuthSettings(BaseModel):
 class ThonConfig(BaseModel):
     """Root configuration model — maps 1:1 to thon.yaml."""
 
+    demo: bool = False
     external_ip: str = ""
     groups: dict[str, list[str]] = Field(default_factory=dict)
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)

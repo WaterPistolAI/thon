@@ -487,6 +487,12 @@ async def run_from_config(
     user_tuples = thon_cfg.get_users(group_filter)
     users = [UserInfo(group=g, username=u) for g, u in user_tuples]
     if not users:
+        if not thon_cfg.demo:
+            print(
+                "Error: No users configured. Load a groups.yaml, set users in thon.yaml, "
+                "or use --demo to start with a default workspace."
+            )
+            sys.exit(1)
         users = [UserInfo(group="default", username="workspace")]
 
     groups_svc = GroupsService(
@@ -954,6 +960,12 @@ Examples:
         "Each user gets {workspace_dir}/{group}/{username} mounted to /workspace/{group}/{username}",
     )
     parser.add_argument(
+        "--demo",
+        action="store_true",
+        default=False,
+        help="Create a default workspace when no users/groups are configured",
+    )
+    parser.add_argument(
         "--cleanup",
         action="store_true",
         default=False,
@@ -1103,6 +1115,12 @@ Examples:
                     groups_svc.backfill_storage_paths()
                     print(f"  Loaded {len(users)} user(s) from DB-stored groups.yaml")
             if not users:
+                if not args.demo:
+                    print(
+                        "Error: No users configured. Load a groups.yaml, set users in thon.yaml, "
+                        "or use --demo to start with a default workspace."
+                    )
+                    sys.exit(1)
                 users = [UserInfo(group="default", username="workspace")]
                 groups_svc = GroupsService(
                     db_path=db_path_env,
