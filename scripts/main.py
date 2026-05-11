@@ -261,7 +261,7 @@ async def _inject_kilo_config(
 ) -> None:
     if "PLACEHOLDER" in config_content:
         print(
-            f"[{user.label}] Warning: kilo.json contains PLACEHOLDER — "
+            f"[{user.label}] Warning: kilo.jsonc contains PLACEHOLDER — "
             f"run setup-lemonade.sh --generate-keys to generate real API keys"
         )
 
@@ -276,13 +276,7 @@ async def _inject_kilo_config(
 async def _inject_vscode_settings(
     user: UserInfo, sandbox: "Sandbox", settings_content: str
 ) -> None:
-    try:
-        with open(settings_path) as f:
-            settings_content = f.read()
-    except FileNotFoundError:
-        print(
-            f"[{user.label}] Warning: VS Code settings not found at {settings_path}, skipping"
-        )
+    if not settings_content:
         return
 
     settings_dir = "/home/vscode/.local/share/code-server/User"
@@ -483,6 +477,12 @@ async def run_from_config(
     workspace_dir = thon_cfg.workspace.dir or None
     lemonade_path = thon_cfg.kilo.config_file or None
     vscode_settings_path = thon_cfg.vscode.settings_file or None
+    lemonade_config_content = _resolve_file_content(
+        lemonade_path, "config_kilo_json", "kilo.jsonc", db_path=os.getenv("THON_DB_PATH")
+    )
+    vscode_settings_content = _resolve_file_content(
+        vscode_settings_path, "config_vscode_settings", "VS Code settings", db_path=os.getenv("THON_DB_PATH")
+    )
 
     user_tuples = thon_cfg.get_users(group_filter)
     users = [UserInfo(group=g, username=u) for g, u in user_tuples]
@@ -519,9 +519,13 @@ async def run_from_config(
     if vscode_settings_path:
         print(f"  VS Code settings: {vscode_settings_path}")
     if thon_cfg.gateway.enabled:
-        print(
-            f"  AI Gateway: enabled (rate limit: {thon_cfg.gateway.rate_limit} tokens/{thon_cfg.gateway.time_window}s)"
-        )
+        limits_parts = []
+        if thon_cfg.gateway.concurrency_limit > 0:
+            limits_parts.append(f"concurrency={thon_cfg.gateway.concurrency_limit}")
+        if thon_cfg.gateway.token_limit > 0:
+            limits_parts.append(f"tokens={thon_cfg.gateway.token_limit}/{thon_cfg.gateway.token_window}s")
+        limits_str = ", ".join(limits_parts) if limits_parts else "no limits"
+        print(f"  AI Gateway: enabled ({limits_str})")
         if thon_cfg.gateway.redis_host:
             print(f"  Gateway Redis: {thon_cfg.gateway.redis_host}")
     if group_filter:
@@ -588,39 +592,49 @@ async def run_from_config(
                 group_names.setdefault(user.group, []).append(user)
             for gn, group_users in group_names.items():
                 user_count = len(group_users)
-                group_rate_limit = thon_cfg.gateway.rate_limit * user_count
+                group_token_limit = thon_cfg.gateway.token_limit * user_count if thon_cfg.gateway.token_limit > 0 else 0
+                group_concurrency = thon_cfg.gateway.concurrency_limit * user_count if thon_cfg.gateway.concurrency_limit > 0 else 0
                 consumer = gateway_mgr.create_consumer(
                     username=f"group-{gn}",
-                    rate_limit=group_rate_limit,
-                    time_window=thon_cfg.gateway.time_window,
+                    concurrency_limit=group_concurrency,
+                    token_limit=group_token_limit,
+                    token_window=thon_cfg.gateway.token_window,
                 )
                 for user in group_users:
                     gateway_consumers.append(
                         {
                             "user": user,
                             "api_key": consumer.api_key,
-                            "rate_limit": consumer.rate_limit,
-                            "time_window": consumer.time_window,
+                            "concurrency_limit": consumer.concurrency_limit,
+                            "token_limit": consumer.token_limit,
+                            "token_window": consumer.token_window,
                             "group_name": gn,
                             "user_count": user_count,
                         }
                     )
+                limits_parts = []
+                if group_concurrency > 0:
+                    limits_parts.append(f"concurrency={group_concurrency}")
+                if group_token_limit > 0:
+                    limits_parts.append(f"tokens={group_token_limit}/{thon_cfg.gateway.token_window}s")
                 print(
-                    f"[Gateway] Created group consumer: group-{gn} ({user_count} users, {group_rate_limit} tokens/{thon_cfg.gateway.time_window}s)"
+                    f"[Gateway] Created group consumer: group-{gn} ({user_count} users, {', '.join(limits_parts)})"
                 )
         else:
             for user in users:
                 consumer = gateway_mgr.create_consumer(
                     username=user.label,
-                    rate_limit=thon_cfg.gateway.rate_limit,
-                    time_window=thon_cfg.gateway.time_window,
+                    concurrency_limit=thon_cfg.gateway.concurrency_limit,
+                    token_limit=thon_cfg.gateway.token_limit,
+                    token_window=thon_cfg.gateway.token_window,
                 )
                 gateway_consumers.append(
                     {
                         "user": user,
                         "api_key": consumer.api_key,
-                        "rate_limit": consumer.rate_limit,
-                        "time_window": consumer.time_window,
+                        "concurrency_limit": consumer.concurrency_limit,
+                        "token_limit": consumer.token_limit,
+                        "token_window": consumer.token_window,
                     }
                 )
     try:
@@ -645,8 +659,8 @@ async def run_from_config(
                     external_ip=external_ip,
                     secure=secure,
                     workspace_dir=workspace_dir,
-                    lemonade_config=lemonade_path,
-                    vscode_settings=vscode_settings_path,
+                    lemonade_config_content=lemonade_config_content,
+                    vscode_settings_content=vscode_settings_content,
                     gateway_api_key=gw_api_key,
                     gateway_external_ip=external_ip,
                     db_user=db_user,
@@ -751,9 +765,13 @@ async def run_from_config(
                             print(
                                 f"      Gateway Mode: per-group ({gc['group_name']}, {gc.get('user_count', '?')} users sharing)"
                             )
-                        print(
-                            f"      Rate Limit: {gc['rate_limit']} tokens / {gc['time_window']}s"
-                        )
+                        gc_limits_parts = []
+                        if gc.get("concurrency_limit", 0) > 0:
+                            gc_limits_parts.append(f"concurrency={gc['concurrency_limit']}")
+                        if gc.get("token_limit", 0) > 0:
+                            gc_limits_parts.append(f"tokens={gc['token_limit']}/{gc.get('token_window', 60)}s")
+                        gc_limits_str = ", ".join(gc_limits_parts) if gc_limits_parts else "no limits"
+                        print(f"      Gateway Limits: {gc_limits_str}")
                         break
 
         print()
@@ -946,7 +964,7 @@ Examples:
         type=str,
         default=None,
         metavar="KILO_JSON",
-        help="Path to kilo.json generated by lemonade_server.py; injected into each sandbox workspace",
+        help="Path to kilo.jsonc generated by lemonade_server.py; injected into each sandbox workspace",
     )
     parser.add_argument(
         "--vscode-settings",
@@ -974,16 +992,22 @@ Examples:
         help="Redis host for gateway rate limiting (default: local policy if not set)",
     )
     parser.add_argument(
-        "--gateway-rate-limit",
+        "--gateway-concurrency-limit",
         type=int,
-        default=500,
-        help="Token limit per consumer per time window (default: 500)",
+        default=1,
+        help="Max concurrent requests per consumer (default: 1, set 0 for no limit)",
     )
     parser.add_argument(
-        "--gateway-time-window",
+        "--gateway-token-limit",
+        type=int,
+        default=0,
+        help="Token limit per consumer per time window (default: 0 = no token limit)",
+    )
+    parser.add_argument(
+        "--gateway-token-window",
         type=int,
         default=60,
-        help="Rate limit time window in seconds (default: 60)",
+        help="Token limit time window in seconds (default: 60)",
     )
 
     args = parser.parse_args()
@@ -1089,7 +1113,7 @@ Examples:
                 groups_svc.backfill_storage_paths()
 
     lemonade_config_content = _resolve_file_content(
-        args.lemonade, "config_kilo_json", "kilo.json", db_path=db_path_env
+        args.lemonade, "config_kilo_json", "kilo.jsonc", db_path=db_path_env
     )
     vscode_settings_content = _resolve_file_content(
         args.vscode_settings, "config_vscode_settings", "VS Code settings", db_path=db_path_env
@@ -1117,9 +1141,13 @@ Examples:
         src = "file" if args.vscode_settings else "database"
         print(f"  VS Code settings: ({src})")
     if args.gateway:
-        print(
-            f"  AI Gateway: enabled (rate limit: {args.gateway_rate_limit} tokens/{args.gateway_time_window}s)"
-        )
+        limits_parts = []
+        if args.gateway_concurrency_limit > 0:
+            limits_parts.append(f"concurrency={args.gateway_concurrency_limit}")
+        if args.gateway_token_limit > 0:
+            limits_parts.append(f"tokens={args.gateway_token_limit}/{args.gateway_token_window}s")
+        limits_str = ", ".join(limits_parts) if limits_parts else "no limits"
+        print(f"  AI Gateway: enabled ({limits_str})")
         if args.gateway_redis_host:
             print(f"  Gateway Redis: {args.gateway_redis_host}")
     if args.groups:
@@ -1194,39 +1222,49 @@ Examples:
                 group_names.setdefault(user.group, []).append(user)
             for group_name, group_users in group_names.items():
                 user_count = len(group_users)
-                group_rate_limit = args.gateway_rate_limit * user_count
+                group_token_limit = args.gateway_token_limit * user_count if args.gateway_token_limit > 0 else 0
+                group_concurrency = args.gateway_concurrency_limit * user_count if args.gateway_concurrency_limit > 0 else 0
                 consumer = gateway_mgr.create_consumer(
                     username=f"group-{group_name}",
-                    rate_limit=group_rate_limit,
-                    time_window=args.gateway_time_window,
+                    concurrency_limit=group_concurrency,
+                    token_limit=group_token_limit,
+                    token_window=args.gateway_token_window,
                 )
                 for user in group_users:
                     gateway_consumers.append(
                         {
                             "user": user,
                             "api_key": consumer.api_key,
-                            "rate_limit": consumer.rate_limit,
-                            "time_window": consumer.time_window,
+                            "concurrency_limit": consumer.concurrency_limit,
+                            "token_limit": consumer.token_limit,
+                            "token_window": consumer.token_window,
                             "group_name": group_name,
                             "user_count": user_count,
                         }
                     )
+                limits_parts = []
+                if group_concurrency > 0:
+                    limits_parts.append(f"concurrency={group_concurrency}")
+                if group_token_limit > 0:
+                    limits_parts.append(f"tokens={group_token_limit}/{args.gateway_token_window}s")
                 print(
-                    f"[Gateway] Created group consumer: group-{group_name} ({user_count} users, {group_rate_limit} tokens/{args.gateway_time_window}s)"
+                    f"[Gateway] Created group consumer: group-{group_name} ({user_count} users, {', '.join(limits_parts)})"
                 )
         else:
             for user in users:
                 consumer = gateway_mgr.create_consumer(
                     username=user.label,
-                    rate_limit=args.gateway_rate_limit,
-                    time_window=args.gateway_time_window,
+                    concurrency_limit=args.gateway_concurrency_limit,
+                    token_limit=args.gateway_token_limit,
+                    token_window=args.gateway_token_window,
                 )
                 gateway_consumers.append(
                     {
                         "user": user,
                         "api_key": consumer.api_key,
-                        "rate_limit": consumer.rate_limit,
-                        "time_window": consumer.time_window,
+                        "concurrency_limit": consumer.concurrency_limit,
+                        "token_limit": consumer.token_limit,
+                        "token_window": consumer.token_window,
                     }
                 )
     try:
@@ -1356,9 +1394,13 @@ Examples:
                             print(
                                 f"      Gateway Mode: per-group ({gc['group_name']}, {gc.get('user_count', '?')} users sharing)"
                             )
-                        print(
-                            f"      Rate Limit: {gc['rate_limit']} tokens / {gc['time_window']}s"
-                        )
+                        gc_limits_parts = []
+                        if gc.get("concurrency_limit", 0) > 0:
+                            gc_limits_parts.append(f"concurrency={gc['concurrency_limit']}")
+                        if gc.get("token_limit", 0) > 0:
+                            gc_limits_parts.append(f"tokens={gc['token_limit']}/{gc.get('token_window', 60)}s")
+                        gc_limits_str = ", ".join(gc_limits_parts) if gc_limits_parts else "no limits"
+                        print(f"      Gateway Limits: {gc_limits_str}")
                         break
 
         print()

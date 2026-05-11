@@ -88,15 +88,16 @@ class KiloSettings(BaseModel):
 
 
 class GatewaySettings(BaseModel):
-    """APISIX AI Gateway settings for rate limiting and per-consumer keys."""
+    """APISIX AI Gateway settings for concurrency control and per-consumer keys."""
 
     enabled: bool = False
     mode: str = "per-user"
     admin_key: str = ""
     redis_host: str = ""
     redis_port: int = 6379
-    rate_limit: int = 500
-    time_window: int = 60
+    concurrency_limit: int = 1
+    token_limit: int = 0
+    token_window: int = 60
 
 
 class DashboardSettings(BaseModel):
@@ -224,10 +225,11 @@ class ThonConfig(BaseModel):
             env["GATEWAY_ADMIN_KEY"] = self.gateway.admin_key
         if self.gateway.redis_host:
             env["GATEWAY_REDIS_HOST"] = self.gateway.redis_host
-        if self.gateway.rate_limit:
-            env["GATEWAY_RATE_LIMIT_TOKENS"] = str(self.gateway.rate_limit)
-        if self.gateway.time_window:
-            env["GATEWAY_RATE_LIMIT_WINDOW"] = str(self.gateway.time_window)
+        if self.gateway.concurrency_limit > 0:
+            env["GATEWAY_CONCURRENCY_LIMIT"] = str(self.gateway.concurrency_limit)
+        if self.gateway.token_limit > 0:
+            env["GATEWAY_TOKEN_LIMIT"] = str(self.gateway.token_limit)
+            env["GATEWAY_TOKEN_WINDOW"] = str(self.gateway.token_window)
         if self.gateway.mode:
             env["GATEWAY_MODE"] = self.gateway.mode
 

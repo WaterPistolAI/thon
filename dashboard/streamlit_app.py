@@ -1193,7 +1193,7 @@ def _config_files_section(db_path: str) -> None:
 
     labels = {
         "config_groups_yaml": "Groups YAML",
-        "config_kilo_json": "Kilo Code Config (kilo.json)",
+        "config_kilo_json": "Kilo Code Config (kilo.jsonc)",
         "config_vscode_settings": "VS Code Settings",
     }
     descriptions = {

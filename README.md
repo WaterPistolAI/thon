@@ -19,7 +19,7 @@ via Lemonade Server.
 - **Semantic Indexing**: Embedding model for Kilo Code's semantic code search
 - **AI Gateway**: Optional APISIX gateway with per-user or per-group rate limiting and API keys
 - **Authentication**: Local password for dashboard; OIDC/OAuth2 (GitHub, GitLab, LinkedIn) for REST API
-- **Config Files**: Store and manage groups YAML, kilo.json, and VS Code settings in the database
+- **Config Files**: Store and manage groups YAML, kilo.jsonc, and VS Code settings in the database
 - **Kilo Code Ready**: Auto-generated config with experimental flags and indexing for Kilo Code
 
 ## Video Guide
@@ -233,7 +233,7 @@ python ./scripts/main.py [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--lemonade KILO_JSON` | kilo.json path for LLM config injection | (none) |
+| `--lemonade KILO_JSON` | kilo.jsonc path for LLM config injection | (none) |
 | `--vscode-settings JSON` | VS Code settings file to inject | (none) |
 
 ### AI Gateway
@@ -277,7 +277,7 @@ python ./scripts/main.py --groups groups.yaml --no-nginx
 python ./scripts/main.py
 
 # With Lemonade LLM inference
-python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc
 
 # With AI Gateway (per-user rate limiting)
 python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
@@ -350,7 +350,7 @@ and embedding models for semantic code search.
 ### Setup
 
 ```bash
-# Full setup (install + configure + API keys + pull model + kilo.json)
+# Full setup (install + configure + API keys + pull model + kilo.jsonc)
 bash ./scripts/setup-lemonade.sh \
     --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 ```
@@ -426,11 +426,11 @@ Lemonade-managed args (reserved, must NOT appear in `llamacpp_args`):
 | `--model MODEL` | HuggingFace checkpoint | `unsloth/gemma-4-31B-it-GGUF:Q8_K_XL` |
 | `--model-name NAME` | Short model name | `gemma-4-31b-it` |
 | `--mmproj FILE` | Vision mmproj filename | `mmproj-BF16.gguf` |
-| `--external-ip IP` | External IP for kilo.json | (auto-detect) |
+| `--external-ip IP` | External IP for kilo.jsonc | (auto-detect) |
 | `--generate-keys` | Generate API keys | `false` |
 | `--no-prefer-system` | Use bundled llama.cpp | (system preferred) |
 | `--llamacpp-bin PATH` | Path to system llama-server | `/usr/local/bin/llama-server` |
-| `--kilo-config PATH` | Output path for kilo.json | `./kilo.json` |
+| `--kilo-config PATH` | Output path for kilo.jsonc | `./kilo.jsonc` |
 | `--no-embedding` | Disable embedding model | `false` |
 | `--embedding-model MODEL` | Embedding model checkpoint | `SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16` |
 | `--embedding-model-name NAME` | Short name for embedding model | `harrier-oss-v1-0.6b` |
@@ -446,11 +446,11 @@ config uses `prefer_system: true` with `rocm_bin: /usr/local/bin/llama-server` b
 
 ### Kilo Code Integration
 
-1. `setup-lemonade.sh --generate-keys` creates API keys and writes `kilo.json`
-2. `kilo.json` contains: provider (`lemonade`), base URL, API key, model ID (`user.gemma-4-31b-it`),
+1. `setup-lemonade.sh --generate-keys` creates API keys and writes `kilo.jsonc`
+2. `kilo.jsonc` contains: provider (`lemonade`), base URL, API key, model ID (`user.gemma-4-31b-it`),
    `experimental` flags, and `indexing` config for semantic code search
 3. Base URL resolution: `--external-ip` > Docker bridge gateway > `localhost`
-4. `main.py --lemonade kilo.json` injects config into each sandbox at `/home/vscode/.config/kilo/config.json`
+4. `main.py --lemonade kilo.jsonc` injects config into each sandbox at `/home/vscode/.config/kilo/config.json`
 5. Kilo Code reads the config and connects to the Lemonade server
 
 ### Full Workflow
@@ -460,7 +460,7 @@ config uses `prefer_system: true` with `rocm_bin: /usr/local/bin/llama-server` b
 bash setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 
 # Terminal 2: Start VS Code sandboxes with Lemonade inference
-python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc
 ```
 
 ## AI Gateway (APISIX Rate Limiting)
@@ -515,9 +515,9 @@ python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --
 | **Local** | (not set) | `local` | Per-gateway-instance counters |
 | **Redis** | `127.0.0.1` | `redis` | Shared across all gateway instances |
 
-When enabled, `main.py` generates a gateway-aware `kilo.json` that points to the
+When enabled, `main.py` generates a gateway-aware `kilo.jsonc` that points to the
 gateway instead of directly to Lemonade. In per-group mode, all users in the same
-group receive the same `kilo.json` with the shared group API key.
+group receive the same `kilo.jsonc` with the shared group API key.
 
 ## Security
 
@@ -717,7 +717,7 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Entry point; CLI; groups; sandbox orchestration; kilo.json injection |
+| `main.py` | Entry point; CLI; groups; sandbox orchestration; kilo.jsonc injection |
 | `scripts/setup.sh` | One-time host prerequisite installation |
 | `scripts/nginx_config.py` | Per-port nginx config generation |
 | `scripts/ssl_cert.py` | SSL certificate generation (mkcert/openssl) |
@@ -759,6 +759,6 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 | File | Purpose |
 |------|---------|
 | `config/groups.yaml.example` | Groups and users configuration template |
-| `config/kilo.json.example` | Kilo Code config template |
+| `config/kilo.jsonc.example` | Kilo Code config template |
 | `config/vscode-settings.jsonc.example` | VS Code settings template |
 | `Dockerfile` | Sandbox image: python:3.12-slim + code-server |

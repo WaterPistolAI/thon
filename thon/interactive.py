@@ -267,9 +267,9 @@ def run_interactive(
     if not non_interactive:
         if lemonade.enabled:
             _info("Kilo Code config will be auto-generated from Lemonade settings")
-            kilo.config_file = "kilo.json"
+            kilo.config_file = "kilo.jsonc"
         elif _yes_no("Use a custom Kilo Code config?", default=False):
-            kilo.config_file = _prompt("Path to kilo.json", default="kilo.json")
+            kilo.config_file = _prompt("Path to kilo.jsonc", default="kilo.jsonc")
 
     # ── AI Gateway ───────────────────────────────────────────
     _section("AI Gateway (APISIX Rate Limiting)")

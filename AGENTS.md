@@ -71,8 +71,8 @@ sudo journalctl -u lemonade-server -f
 lemonade pull unsloth/gemma-4-31B-it-GGUF:Q8_K_XL
 lemonade config set llamacpp.backend=auto host=0.0.0.0
 
-# Run VS Code instances with Lemonade inference (injects kilo.json into each sandbox)
-python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+# Run VS Code instances with Lemonade inference (injects kilo.jsonc into each sandbox)
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc
 
 # AI Gateway: one-time install (APISIX, etcd, Redis)
 INSTALL_GATEWAY=true bash ./scripts/setup.sh
@@ -263,7 +263,7 @@ Python process needed.
 **Two ways to set up:**
 1. **`setup-lemonade.sh`** (recommended) — Shell script that uses the `lemonade` CLI
    and `systemctl` directly. One command does everything: install, configure, generate
-   API keys, pull model, generate kilo.json.
+   API keys, pull model, generate kilo.jsonc.
 2. **`lemonade_server.py`** — Python wrapper with `LemonadeServerManager` class.
    Provides subcommands (`install`, `configure`, `start`, `stop`, `pull`, `run`, etc.)
    and programmatic access to the same operations. Useful for scripted automation.
@@ -365,20 +365,20 @@ Custom llama.cpp args (safe to override):
 When both are set, either key is accepted for regular endpoints; admin key is required for internal.
 
 **Kilo Code Integration:**
-1. `setup-lemonade.sh --groups groups.yaml --generate-keys` generates API keys and writes `kilo.json`
-2. `kilo.json` contains: provider name (`lemonade`), base URL (auto-detected), API key, model ID (`user.gemma-4-31b-it`), `experimental` flags, and `indexing` config for semantic code search
+1. `setup-lemonade.sh --groups groups.yaml --generate-keys` generates API keys and writes `kilo.jsonc`
+2. `kilo.jsonc` contains: provider name (`lemonade`), base URL (auto-detected), API key, model ID (`user.gemma-4-31b-it`), `experimental` flags, and `indexing` config for semantic code search
 3. Base URL resolution order: `--external-ip` > Docker bridge gateway > `localhost`
-4. `main.py --lemonade kilo.json` injects the config into each sandbox at `/workspace/.kilo/kilo.json`
+4. `main.py --lemonade kilo.jsonc` injects the config into each sandbox at `/workspace/.kilo/kilo.jsonc`
 5. Kilo Code extension in the sandbox reads the config and connects to the Lemonade server
 6. The `indexing` section configures semantic code search using the embedding model (`user.harrier-oss-v1-0.6b`)
 
 **Full Workflow:**
 ```bash
-# Terminal 1: Start Lemonade server with groups-based user count (generates kilo.json)
+# Terminal 1: Start Lemonade server with groups-based user count (generates kilo.jsonc)
 python lemonade_server.py run --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 
 # Terminal 2: Start VS Code sandboxes with Lemonade inference
-python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc
 ```
 
 ### AI Gateway (APISIX Rate Limiting & Per-Consumer Keys)
@@ -430,7 +430,7 @@ python scripts/apisix_gateway.py status
 # Remove all consumers and routes
 python scripts/apisix_gateway.py cleanup
 
-# Generate kilo.json pointing to gateway
+# Generate kilo.jsonc pointing to gateway
 python scripts/apisix_gateway.py generate-kilo --username alice --api-key alice-key --external-ip 1.2.3.4
 ```
 
@@ -454,7 +454,7 @@ When `--gateway` is enabled:
 1. Gateway consumers are created BEFORE sandbox instances
 2. Each consumer gets `key-auth` credential + `ai-rate-limiting` plugin config
 3. In per-group mode, all users in a group share the same API key; rate limit is `per_user_limit * num_users`
-4. A gateway-aware `kilo.json` is injected into each sandbox, pointing to the gateway
+4. A gateway-aware `kilo.jsonc` is injected into each sandbox, pointing to the gateway
    instead of directly to Lemonade
 5. Gateway cleanup runs in the `finally` block alongside nginx and sandbox cleanup
 
@@ -557,18 +557,18 @@ extensions making cross-site requests to github.com — cannot be fixed server-s
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Entry point; argparse CLI; groups loading; instance orchestration; persistent workspaces; Lemonade kilo.json injection |
+| `main.py` | Entry point; argparse CLI; groups loading; instance orchestration; persistent workspaces; Lemonade kilo.jsonc injection |
 | `scripts/setup.sh` | One-time install: python3, nginx, docker.io, mkcert, openssl |
 | `scripts/nginx_config.py` | `NginxConfigGenerator`; per-port individual configs in sites-available |
 | `scripts/ssl_cert.py` | `SSLCertificateGenerator`; mkcert primary with openssl fallback |
 | `scripts/generate-certs.py` | Legacy mkcert helper (preserved for local dev) |
-| `scripts/lemonade_server.py` | `LemonadeServerManager`; Python wrapper for install, configure, start/stop, pull/load models, generate kilo.json |
-| `scripts/setup-lemonade.sh` | All-in-one shell script: install, configure, generate API keys, pull model, generate kilo.json (recommended) |
+| `scripts/lemonade_server.py` | `LemonadeServerManager`; Python wrapper for install, configure, start/stop, pull/load models, generate kilo.jsonc |
+| `scripts/setup-lemonade.sh` | All-in-one shell script: install, configure, generate API keys, pull model, generate kilo.jsonc (recommended) |
 | `scripts/build.sh` | Build helper script |
 | `scripts/build-amd-mi300x-llama-server.sh` | Build llama.cpp from source for AMD MI300X (gfx942) with ROCm |
 | `scripts/prerequisite-script.sh` | Prerequisite installation |
 | `config/groups.yaml.example` | Groups and users configuration template |
-| `config/kilo.json.example` | Kilo Code config template for Lemonade OpenAI-compatible provider |
+| `config/kilo.jsonc.example` | Kilo Code config template for Lemonade OpenAI-compatible provider |
 | `config/vscode-settings.jsonc.example` | VS Code settings template injected into each sandbox's code-server |
 | `config/extensions.txt.example` | VS Code extensions list for Docker image |
 | `reference/kilo.config.schema.json` | Kilo config JSON schema |

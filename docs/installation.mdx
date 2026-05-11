@@ -279,7 +279,7 @@ This will:
 3. Generate API keys
 4. Download the default chat model (gemma-4-31b-it)
 5. Download the default embedding model (harrier-oss-v1-0.6b)
-6. Create `kilo.json` for Kilo Code (with semantic indexing config)
+6. Create `kilo.jsonc` for Kilo Code (with semantic indexing config)
 
 ### Without Embedding Model
 
@@ -356,10 +356,10 @@ After setting up Lemonade Server:
 python ./scripts/main.py \
     --groups groups.yaml \
     --external-ip YOUR_EXTERNAL_IP \
-    --lemonade kilo.json
+    --lemonade kilo.jsonc
 ```
 
-This injects `kilo.json` into each sandbox at `/home/vscode/.config/kilo/config.json`,
+This injects `kilo.jsonc` into each sandbox at `/home/vscode/.config/kilo/config.json`,
 enabling Kilo Code to connect to your local LLM with both chat and semantic indexing.
 
 ## Verification

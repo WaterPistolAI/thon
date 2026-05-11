@@ -1,1 +1,49 @@
-{"name": "thon", "displayName": "THON - The Hackathon Organizer Node", "description": "Run multiple VS Code sandbox instances concurrently with nginx SSL reverse proxy, groups-based user management, persistent workspaces, and optional local LLM inference via Lemonade Server", "version": "0.1.0", "license": "Apache-2.0", "repository": "https://github.com/WaterPistolAI/thon.git", "image": "waterpistol/thon:latest", "language": "Python", "requires": ">=3.10", "entrypoint": "main.py", "features": ["Multi-instance concurrent VS Code sandboxes", "Groups-based user management via YAML config", "SSL/TLS termination via nginx (mkcert/openssl)", "Persistent workspace bind mounts", "Local LLM inference via Lemonade Server integration", "Kilo Code auto-configuration", "FastAPI dashboard with REST API", "OIDC authentication (GitHub, GitLab, LinkedIn)"], "config": {"groups": "config/groups.yaml.example", "extensions": "config/extensions.txt.example", "vscode-settings": "config/vscode-settings.jsonc.example", "kilo": "config/kilo.json.example"}, "environment": {"SANDBOX_DOMAIN": {"description": "Sandbox server address", "default": "localhost:8080"}, "SANDBOX_API_KEY": {"description": "Optional sandbox API key"}, "SANDBOX_IMAGE": {"description": "Docker image for sandboxes", "default": "waterpistol/thon:latest"}, "LEMONADE_HOST": {"description": "Lemonade server bind address", "default": "0.0.0.0"}, "LEMONADE_PORT": {"description": "Lemonade server port", "default": "13305"}}}
+{
+    "name": "thon",
+    "displayName": "THON - The Hackathon Organizer Node",
+    "description": "Run multiple VS Code sandbox instances concurrently with nginx SSL reverse proxy, groups-based user management, persistent workspaces, and optional local LLM inference via Lemonade Server",
+    "version": "0.1.0",
+    "license": "Apache-2.0",
+    "repository": "https://github.com/WaterPistolAI/thon.git",
+    "image": "waterpistol/thon:latest",
+    "language": "Python",
+    "requires": ">=3.10",
+    "entrypoint": "main.py",
+    "features": [
+        "Multi-instance concurrent VS Code sandboxes",
+        "Groups-based user management via YAML config",
+        "SSL/TLS termination via nginx (mkcert/openssl)",
+        "Persistent workspace bind mounts",
+        "Local LLM inference via Lemonade Server integration",
+        "Kilo Code auto-configuration",
+        "FastAPI dashboard with REST API",
+        "OIDC authentication (GitHub, GitLab, LinkedIn)"
+    ],
+    "config": {
+        "groups": "config/groups.yaml.example",
+        "extensions": "config/extensions.txt.example",
+        "vscode-settings": "config/vscode-settings.jsonc.example",
+        "kilo": "config/kilo.jsonc.example"
+    },
+    "environment": {
+        "SANDBOX_DOMAIN": {
+            "description": "Sandbox server address",
+            "default": "localhost:8080"
+        },
+        "SANDBOX_API_KEY": {
+            "description": "Optional sandbox API key"
+        },
+        "SANDBOX_IMAGE": {
+            "description": "Docker image for sandboxes",
+            "default": "waterpistol/thon:latest"
+        },
+        "LEMONADE_HOST": {
+            "description": "Lemonade server bind address",
+            "default": "0.0.0.0"
+        },
+        "LEMONADE_PORT": {
+            "description": "Lemonade server port",
+            "default": "13305"
+        }
+    }
+}

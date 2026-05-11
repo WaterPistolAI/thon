@@ -200,7 +200,7 @@ python ./scripts/main.py [OPTIONS]
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `--lemonade KILO_JSON` | string | (none) | Path to kilo.json for LLM config injection |
+| `--lemonade KILO_JSON` | string | (none) | Path to kilo.jsonc for LLM config injection |
 | `--vscode-settings JSON` | string | (none) | VS Code settings file to inject |
 
 #### AI Gateway
@@ -258,7 +258,7 @@ python ./scripts/main.py --groups groups.yaml --workspace-dir /thon-workspace --
 
 ```bash
 # Local LLM inference
-python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc
 ```
 
 #### With AI Gateway
@@ -321,11 +321,11 @@ bash ./scripts/setup-lemonade.sh [OPTIONS]
 | `--model MODEL` | unsloth/gemma-4-31B-it-GGUF:Q8_K_XL | HuggingFace checkpoint |
 | `--model-name NAME` | gemma-4-31b-it | Short model name |
 | `--mmproj FILE` | mmproj-BF16.gguf | Vision mmproj filename |
-| `--external-ip IP` | (auto) | External IP for kilo.json |
+| `--external-ip IP` | (auto) | External IP for kilo.jsonc |
 | `--generate-keys` | false | Generate API keys |
 | `--no-prefer-system` | (system) | Use bundled llama.cpp |
 | `--llamacpp-bin PATH` | /usr/local/bin/llama-server | System binary path |
-| `--kilo-config PATH` | ./kilo.json | Output path for kilo.json |
+| `--kilo-config PATH` | ./kilo.jsonc | Output path for kilo.jsonc |
 | `--embedding` | true | Enable embedding model for semantic indexing |
 | `--no-embedding` | false | Disable embedding model |
 | `--embedding-model MODEL` | SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16 | Embedding model HuggingFace checkpoint |
@@ -345,7 +345,7 @@ bash ./scripts/setup-lemonade.sh [OPTIONS]
 | `LEMONADE_EXTERNAL_IP` | External IP |
 | `LEMONADE_GENERATE_KEYS` | Generate API keys (true/false) |
 | `LEMONADE_NUM_USERS` | Parallel user count |
-| `LEMONADE_KILO_CONFIG` | kilo.json output path |
+| `LEMONADE_KILO_CONFIG` | kilo.jsonc output path |
 | `LEMONADE_PREFER_SYSTEM` | Prefer system binary (true/false) |
 | `LEMONADE_LLMACPP_BIN` | System binary path |
 | `LEMONADE_MMPROJ` | mmproj filename |
@@ -426,7 +426,7 @@ python ./lemonade_server.py COMMAND [OPTIONS]
 | `run` | Full setup + keep alive |
 | `count-users` | Count users from groups.yaml |
 | `write-model-configs` | Write user_models.json and recipe_options.json |
-| `generate-kilo-config` | Generate kilo.json for Kilo Code |
+| `generate-kilo-config` | Generate kilo.jsonc for Kilo Code |
 | `cleanup` | Stop server and clean up |
 
 ### install
@@ -454,9 +454,9 @@ python lemonade_server.py configure [OPTIONS]
 | `--prefer-system` | true | Prefer system llama.cpp |
 | `--no-prefer-system` | | Use bundled llama.cpp |
 | `--llamacpp-bin PATH` | /usr/local/bin/llama-server | System binary path |
-| `--kilo-config PATH` | (none) | Generate kilo.json |
-| `--model MODEL` | (default) | Model for kilo.json |
-| `--external-ip IP` | (auto) | External IP for kilo.json |
+| `--kilo-config PATH` | (none) | Generate kilo.jsonc |
+| `--model MODEL` | (default) | Model for kilo.jsonc |
+| `--external-ip IP` | (auto) | External IP for kilo.jsonc |
 
 ### pull
 
@@ -489,7 +489,7 @@ Full setup: install + configure + start + pull model + keep alive.
 | `--ctx-size SIZE` | 4096 | Default context size |
 | `--generate-keys` | false | Generate API keys |
 | `--external-ip IP` | (auto) | External IP |
-| `--kilo-config PATH` | (auto) | kilo.json output path |
+| `--kilo-config PATH` | (auto) | kilo.jsonc output path |
 | `--prefer-system` | true | Prefer system binary |
 | `--llamacpp-bin PATH` | /usr/local/bin/llama-server | System binary path |
 | `--mmproj FILE` | mmproj-BF16.gguf | Vision mmproj filename |
@@ -528,11 +528,11 @@ python lemonade_server.py generate-kilo-config [OPTIONS]
 | `--model MODEL` | (default) | HuggingFace checkpoint |
 | `--model-name NAME` | gemma-4-31b-it | Short model name |
 | `--external-ip IP` | (auto) | External IP |
-| `--output PATH` | kilo.json | Output path |
+| `--output PATH` | kilo.jsonc | Output path |
 | `--api-key KEY` | (none) | API key |
 | `--admin-api-key KEY` | (none) | Admin API key |
 | `--embedding-model-name NAME` | harrier-oss-v1-0.6b | Embedding model name for indexing config |
-| `--no-embedding` | false | Omit indexing section from kilo.json |
+| `--no-embedding` | false | Omit indexing section from kilo.jsonc |
 
 ### Examples
 
@@ -549,7 +549,7 @@ python lemonade_server.py configure --generate-keys --external-ip 1.2.3.4
 # Write model configs only (includes embedding by default)
 python lemonade_server.py write-model-configs --num-users 6
 
-# Generate kilo.json without embedding/indexing section
+# Generate kilo.jsonc without embedding/indexing section
 python lemonade_server.py generate-kilo-config --admin-api-key YOUR_KEY --external-ip 1.2.3.4 --no-embedding
 ```
 
@@ -629,7 +629,7 @@ python scripts/apisix_gateway.py COMMAND [OPTIONS]
 | `setup` | Full gateway setup: create routes + consumers from groups.yaml |
 | `create-consumer` | Create a single consumer with API key |
 | `delete-consumer` | Delete a consumer by username |
-| `generate-kilo` | Generate kilo.json for a consumer |
+| `generate-kilo` | Generate kilo.jsonc for a consumer |
 | `status` | Check gateway status |
 | `cleanup` | Remove all consumers and routes |
 
@@ -659,8 +659,8 @@ Creates two APISIX routes:
 | `--redis-password PW` | (none) | Redis password |
 | `--rate-limit N` | 500 | Token limit per consumer per time window |
 | `--time-window N` | 60 | Rate limit time window in seconds |
-| `--generate-kilo` | false | Generate kilo.json for each consumer |
-| `--external-ip IP` | (auto) | External IP for kilo.json base URL |
+| `--generate-kilo` | false | Generate kilo.jsonc for each consumer |
+| `--external-ip IP` | (auto) | External IP for kilo.jsonc base URL |
 | `--embedding-model MODEL` | user.harrier-oss-v1-0.6b | Embedding model name for Lemonade |
 | `--no-embedding` | false | Disable embedding route creation |
 
@@ -689,9 +689,9 @@ python scripts/apisix_gateway.py generate-kilo --username alice --api-key KEY [O
 | `--api-key` | (required) | Consumer API key |
 | `--proxy-port` | 9080 | APISIX proxy port |
 | `--external-ip` | 127.0.0.1 | External IP for gateway URL |
-| `--model` | user.gemma-4-31b-it | Model name for kilo.json |
+| `--model` | user.gemma-4-31b-it | Model name for kilo.jsonc |
 | `--embedding-model` | user.harrier-oss-v1-0.6b | Embedding model name for indexing config |
-| `--no-embedding` | false | Omit indexing section from kilo.json |
+| `--no-embedding` | false | Omit indexing section from kilo.jsonc |
 
 ### Examples
 
@@ -711,11 +711,11 @@ python scripts/apisix_gateway.py setup --groups groups.yaml \
 # Create single consumer
 python scripts/apisix_gateway.py create-consumer --username alice --rate-limit 500
 
-# Generate kilo.json (with embedding/indexing config)
+# Generate kilo.jsonc (with embedding/indexing config)
 python scripts/apisix_gateway.py generate-kilo --username alice --api-key KEY \
     --external-ip 1.2.3.4
 
-# Generate kilo.json without embedding
+# Generate kilo.jsonc without embedding
 python scripts/apisix_gateway.py generate-kilo --username alice --api-key KEY \
     --external-ip 1.2.3.4 --no-embedding
 

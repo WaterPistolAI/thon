@@ -651,20 +651,20 @@ class LemonadeServerManager:
         output_path: Optional[Path] = None,
         embedding_model_name: Optional[str] = DEFAULT_EMBEDDING_MODEL_NAME,
     ) -> Path:
-        """Generate a kilo.json config for Kilo Code pointing at this Lemonade server.
+        """Generate a kilo.jsonc config for Kilo Code pointing at this Lemonade server.
 
         The base URL is resolved to the best reachable address from inside
         sandbox containers: external_ip > Docker bridge gateway > localhost.
 
         Args:
             model: HuggingFace checkpoint for display name.
-            model_name: Short model name used as kilo.json model ID.
+            model_name: Short model name used as kilo.jsonc model ID.
             external_ip: External IP for sandbox access.
-            output_path: Path to write kilo.json. Defaults to ./kilo.json.
+            output_path: Path to write kilo.jsonc. Defaults to ./kilo.jsonc.
             embedding_model_name: Short name of the embedding model for indexing.
 
         Returns:
-            Path to the generated kilo.json file.
+            Path to the generated kilo.jsonc file.
         """
         port = self.get_port()
         docker_ip = detect_docker_host_ip()
@@ -722,7 +722,7 @@ class LemonadeServerManager:
             prefixed_emb = f"user.{embedding_model_name}"
             config["indexing"]["openai-compatible"]["model"] = prefixed_emb
 
-        target = output_path or Path("kilo.json")
+        target = output_path or Path("kilo.jsonc")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(config, indent=2))
 
@@ -882,7 +882,7 @@ async def cmd_run(
     _print_endpoint_info(manager, model, port, external_ip)
 
     if generate_keys or kilo_config:
-        output = Path(kilo_config) if kilo_config else Path("kilo.json")
+        output = Path(kilo_config) if kilo_config else Path("kilo.jsonc")
         manager.generate_kilo_config(
             model=model,
             model_name=model_name,
@@ -1009,19 +1009,19 @@ Examples:
         "--kilo-config",
         type=str,
         default=None,
-        help="Generate kilo.json for Kilo Code at this path (requires --generate-keys or --api-key)",
+        help="Generate kilo.jsonc for Kilo Code at this path (requires --generate-keys or --api-key)",
     )
     config_parser.add_argument(
         "--model",
         type=str,
         default=DEFAULT_MODEL,
-        help=f"Model ID for kilo.json (default: {DEFAULT_MODEL})",
+        help=f"Model ID for kilo.jsonc (default: {DEFAULT_MODEL})",
     )
     config_parser.add_argument(
         "--external-ip",
         type=str,
         default=None,
-        help="External IP for kilo.json base URL (auto-detect Docker gateway if omitted)",
+        help="External IP for kilo.jsonc base URL (auto-detect Docker gateway if omitted)",
     )
 
     subparsers.add_parser("start", help="Start the server")
@@ -1156,7 +1156,7 @@ Examples:
         "--kilo-config",
         type=str,
         default=None,
-        help="Generate kilo.json for Kilo Code at this path (default: ./kilo.json when --generate-keys is set)",
+        help="Generate kilo.jsonc for Kilo Code at this path (default: ./kilo.jsonc when --generate-keys is set)",
     )
     run_parser.add_argument(
         "--embedding",
@@ -1261,7 +1261,7 @@ Examples:
 
     generate_kilo_parser = subparsers.add_parser(
         "generate-kilo-config",
-        help="Generate kilo.json for Kilo Code",
+        help="Generate kilo.jsonc for Kilo Code",
     )
     generate_kilo_parser.add_argument(
         "--model",
@@ -1284,14 +1284,14 @@ Examples:
     generate_kilo_parser.add_argument(
         "--output",
         type=str,
-        default="kilo.json",
-        help="Output path for kilo.json (default: kilo.json)",
+        default="kilo.jsonc",
+        help="Output path for kilo.jsonc (default: kilo.jsonc)",
     )
     generate_kilo_parser.add_argument(
         "--api-key",
         type=str,
         default=None,
-        help="API key to include in kilo.json",
+        help="API key to include in kilo.jsonc",
     )
     generate_kilo_parser.add_argument(
         "--admin-api-key",
@@ -1309,7 +1309,7 @@ Examples:
         "--no-embedding",
         action="store_true",
         default=False,
-        help="Omit indexing section from kilo.json",
+        help="Omit indexing section from kilo.jsonc",
     )
 
     subparsers.add_parser("cleanup", help="Stop server and clean up")

@@ -125,7 +125,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
             if config.lemonade.admin_api_key:
                 cmd.extend(["--admin-api-key", config.lemonade.admin_api_key])
 
-            kilo_output = config.kilo.config_file or "kilo.json"
+            kilo_output = config.kilo.config_file or "kilo.jsonc"
             cmd.extend(["--kilo-config", kilo_output])
 
             print(f"  Running: {' '.join(cmd)}")

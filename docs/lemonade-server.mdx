@@ -57,7 +57,7 @@ This command:
 3. Generates API keys
 4. Downloads the default chat model (gemma-4-31b-it)
 5. Downloads the default embedding model (harrier-oss-v1-0.6b)
-6. Creates `kilo.json` for Kilo Code (with indexing config)
+6. Creates `kilo.jsonc` for Kilo Code (with indexing config)
 
 ### Without Embedding Model
 
@@ -241,7 +241,7 @@ When disabled:
 - No embedding model entry in `user_models.json` or `recipe_options.json`
 - Embedding model is not pulled or loaded
 - `max_loaded_models` stays at `1`
-- `kilo.json` omits the `indexing` section
+- `kilo.jsonc` omits the `indexing` section
 
 ### Custom Embedding Model
 
@@ -329,7 +329,7 @@ bash ./scripts/setup-lemonade.sh \
     --external-ip YOUR_IP
 ```
 
-Creates `kilo.json` with chat model, experimental flags, and semantic indexing:
+Creates `kilo.jsonc` with chat model, experimental flags, and semantic indexing:
 
 ```json
 {
@@ -387,7 +387,7 @@ python lemonade_server.py generate-kilo-config \
 python ./scripts/main.py \
     --groups groups.yaml \
     --external-ip YOUR_IP \
-    --lemonade kilo.json
+    --lemonade kilo.jsonc
 ```
 
 Injects config to `/home/vscode/.config/kilo/config.json` in each sandbox.
@@ -408,11 +408,11 @@ Injects config to `/home/vscode/.config/kilo/config.json` in each sandbox.
 | `--model MODEL` | unsloth/gemma-4-31B-it-GGUF:Q8_K_XL | HuggingFace checkpoint |
 | `--model-name NAME` | gemma-4-31b-it | Short model name |
 | `--mmproj FILE` | mmproj-BF16.gguf | Vision mmproj filename |
-| `--external-ip IP` | (auto) | External IP for kilo.json |
+| `--external-ip IP` | (auto) | External IP for kilo.jsonc |
 | `--generate-keys` | false | Generate API keys |
 | `--no-prefer-system` | (system) | Use bundled llama.cpp |
 | `--llamacpp-bin PATH` | /usr/local/bin/llama-server | System binary path |
-| `--kilo-config PATH` | ./kilo.json | Output path for kilo.json |
+| `--kilo-config PATH` | ./kilo.jsonc | Output path for kilo.jsonc |
 | `--embedding` | true | Enable embedding model |
 | `--no-embedding` | false | Disable embedding model |
 | `--embedding-model MODEL` | SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16 | Embedding model checkpoint |

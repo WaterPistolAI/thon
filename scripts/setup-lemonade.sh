@@ -30,7 +30,7 @@ EMBEDDING_MODEL="${LEMONADE_EMBEDDING_MODEL:-SuperPauly/harrier-oss-v1-0.6b-gguf
 EMBEDDING_MODEL_NAME="${LEMONADE_EMBEDDING_MODEL_NAME:-harrier-oss-v1-0.6b}"
 EXTERNAL_IP="${LEMONADE_EXTERNAL_IP:-}"
 GENERATE_KEYS="${LEMONADE_GENERATE_KEYS:-false}"
-KILO_CONFIG_OUTPUT="${LEMONADE_KILO_CONFIG:-${SCRIPT_DIR}/kilo.json}"
+KILO_CONFIG_OUTPUT="${LEMONADE_KILO_CONFIG:-${SCRIPT_DIR}/kilo.jsonc}"
 GROUPS_FILE=""
 GROUP_FILTER=""
 NUM_USERS="${LEMONADE_NUM_USERS:-1}"
@@ -45,7 +45,7 @@ usage() {
 Usage: $(basename "$0") [OPTIONS]
 
 Install, configure, and start the Lemonade inference server as a systemd
-service.  Generates user_models.json, recipe_options.json, and kilo.json
+service.  Generates user_models.json, recipe_options.json, and kilo.jsonc
 for Kilo Code so sandbox VS Code instances can connect to the local LLM.
 
 The --groups flag reads a groups.yaml to determine the number of parallel
@@ -66,11 +66,11 @@ Options:
   --no-embedding        Disable embedding model
   --embedding-model MODEL   HuggingFace checkpoint for embedding model (default: ${EMBEDDING_MODEL})
   --embedding-model-name NAME  Short name for embedding model (default: ${EMBEDDING_MODEL_NAME})
-  --external-ip IP      External IP for kilo.json base URL
+  --external-ip IP      External IP for kilo.jsonc base URL
   --generate-keys       Generate API key and admin key in systemd override
   --no-prefer-system    Use bundled llama.cpp instead of system-installed
   --llamacpp-bin PATH   Path to system llama-server binary (default: /usr/local/bin/llama-server)
-  --kilo-config PATH    Output path for kilo.json (default: ${KILO_CONFIG_OUTPUT})
+  --kilo-config PATH    Output path for kilo.jsonc (default: ${KILO_CONFIG_OUTPUT})
   -h, --help            Show this help
 
 Environment variables (override defaults):
@@ -280,7 +280,7 @@ if [[ "${EMBEDDING}" == "true" ]]; then
         echo "[Lemonade] Warning: Embedding model load request failed (model may still be loading)"
 fi
 
-echo "[Lemonade] Generating kilo.json at ${KILO_CONFIG_OUTPUT}"
+echo "[Lemonade] Generating kilo.jsonc at ${KILO_CONFIG_OUTPUT}"
 KILO_ARGS=(
     --model "${MODEL}"
     --model-name "${MODEL_NAME}"
