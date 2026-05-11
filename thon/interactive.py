@@ -347,6 +347,7 @@ def run_interactive(
     print(f"    1. Review: cat {target}")
     print("    2. Setup:  python -m thon setup")
     print("    3. Run:    python -m thon run")
+    print("    4. Launch: python -m thon launch  (batch instance creation)")
     print()
 
     return config

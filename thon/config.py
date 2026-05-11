@@ -135,6 +135,7 @@ class ThonConfig(BaseModel):
 
     demo: bool = False
     external_ip: str = ""
+    log_level: str = "INFO"
     groups: dict[str, list[str]] = Field(default_factory=dict)
     sandbox: SandboxSettings = Field(default_factory=SandboxSettings)
     vscode: VscodeSettings = Field(default_factory=VscodeSettings)
@@ -181,6 +182,9 @@ class ThonConfig(BaseModel):
 
         if self.external_ip:
             env["EXTERNAL_IP"] = self.external_ip
+
+        if self.log_level and self.log_level.upper() != "INFO":
+            env["THON_LOG_LEVEL"] = self.log_level.upper()
 
         if self.sandbox.domain:
             env["SANDBOX_DOMAIN"] = self.sandbox.domain

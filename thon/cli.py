@@ -17,7 +17,8 @@
 Usage:
     thon init                  # Interactive guided setup wizard
     thon setup                 # Install prerequisites + configure from thon.yaml
-    thon run                   # Start VS Code instances from thon.yaml
+    thon run                   # Start the API server (default, no users required)
+    thon launch                # Launch VS Code instances from thon.yaml (legacy batch mode)
     thon config show           # Display current config
     thon config env            # Export config as .env file
     thon config validate       # Validate thon.yaml
@@ -206,10 +207,54 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print(f"    AI Gateway:    {'enabled' if config.gateway.enabled else 'disabled'}")
     print(f"    Dashboard:     {config.dashboard.host}:{config.dashboard.port}")
     print()
-    print("  Run `python -m thon run` to start instances.")
+    print("  Run `python -m thon run` to start the API server.")
+    print("  Run `python -m thon launch` to launch VS Code instances.")
 
 
 def cmd_run(args: argparse.Namespace) -> None:
+    p = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
+    if p.is_file():
+        config = ThonConfig.from_yaml(p)
+        config.apply_env()
+    else:
+        config = None
+
+    log_level = getattr(args, "log_level", None)
+    if config and config.log_level:
+        log_level = log_level or config.log_level
+    log_level = (log_level or "INFO").upper()
+    os.environ.setdefault("THON_LOG_LEVEL", log_level)
+
+    host = (config.dashboard.host if config else None) or "0.0.0.0"
+    port = (config.dashboard.port if config else None) or 8100
+    debug = config.dashboard.debug if config else False
+
+    print()
+    print("═" * 60)
+    print("  THON API Server")
+    print("═" * 60)
+    print(f"  Host:      {host}")
+    print(f"  Port:      {port}")
+    print(f"  Log level: {log_level.upper()}")
+    print(f"  Debug:     {'on' if debug else 'off'}")
+    print(
+        f"  API docs:  http://{host if host != '0.0.0.0' else 'localhost'}:{port}/docs"
+    )
+    print("═" * 60)
+    print()
+
+    import uvicorn
+
+    uvicorn.run(
+        "app.main:app",
+        host=host,
+        port=port,
+        reload=debug,
+        log_level=log_level.lower(),
+    )
+
+
+def cmd_launch(args: argparse.Namespace) -> None:
     config = _load_config(args.config)
     if getattr(args, "demo", False):
         config.demo = True
@@ -309,9 +354,6 @@ def _validate_config(config: ThonConfig) -> list[str]:
     """Return a list of validation error messages."""
     errors: list[str] = []
 
-    if not config.groups:
-        errors.append("No groups defined")
-
     for group_name, users in config.groups.items():
         if not users:
             errors.append(f"Group '{group_name}' has no users")
@@ -368,7 +410,9 @@ Examples:
   thon init                    Interactive setup wizard
   thon init --non-interactive  Generate config with defaults
   thon setup                   Install prerequisites + configure
-  thon run                     Start VS Code instances
+  thon run                     Start the API server (default)
+  thon run --log-level DEBUG   Start with debug logging
+  thon launch                  Launch VS Code instances (batch mode)
   thon config show             Display current config
   thon config env              Export config as .env file
   thon config validate         Validate thon.yaml
@@ -400,12 +444,24 @@ Examples:
 
     # run
     run_parser = subparsers.add_parser(
-        "run", help="Start VS Code instances from thon.yaml"
+        "run", help="Start the THON API server (default)"
     )
     run_parser.add_argument(
-        "--group", type=str, default=None, help="Run only this group"
+        "--log-level",
+        type=str,
+        default=None,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log level (default: from thon.yaml or INFO)",
     )
-    run_parser.add_argument(
+
+    # launch
+    launch_parser = subparsers.add_parser(
+        "launch", help="Launch VS Code instances from thon.yaml (legacy batch mode)"
+    )
+    launch_parser.add_argument(
+        "--group", type=str, default=None, help="Launch only this group"
+    )
+    launch_parser.add_argument(
         "--demo",
         action="store_true",
         default=False,
@@ -437,6 +493,8 @@ Examples:
         cmd_setup(args)
     elif args.command == "run":
         cmd_run(args)
+    elif args.command == "launch":
+        cmd_launch(args)
     elif args.command == "config":
         if not args.config_command:
             config_parser.print_help()

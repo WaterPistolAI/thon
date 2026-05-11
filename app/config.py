@@ -128,6 +128,19 @@ class DatabaseConfig:
 
 
 @dataclass
+class LogConfig:
+    """Logging configuration."""
+
+    level: str = field(default_factory=lambda: os.getenv("THON_LOG_LEVEL", "INFO"))
+    format: str = field(
+        default_factory=lambda: os.getenv(
+            "THON_LOG_FORMAT",
+            "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+        )
+    )
+
+
+@dataclass
 class EventConfig:
     """Event (hackathon) identity settings."""
 
@@ -147,9 +160,7 @@ class GatewayConfig:
     admin_url: str = field(
         default_factory=lambda: os.getenv("GATEWAY_ADMIN_URL", "http://127.0.0.1:9180")
     )
-    admin_key: str = field(
-        default_factory=lambda: os.getenv("GATEWAY_ADMIN_KEY", "")
-    )
+    admin_key: str = field(default_factory=lambda: os.getenv("GATEWAY_ADMIN_KEY", ""))
     proxy_port: int = field(
         default_factory=lambda: int(os.getenv("GATEWAY_PROXY_PORT", "9080"))
     )
@@ -188,6 +199,7 @@ class AppConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     event: EventConfig = field(default_factory=EventConfig)
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
+    log: LogConfig = field(default_factory=LogConfig)
     groups_file: Optional[Path] = None
     workspace_dir: str = field(
         default_factory=lambda: os.getenv(

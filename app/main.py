@@ -36,6 +36,32 @@ _apisix_service: ApisixService | None = None
 _groups_service: GroupsService | None = None
 
 
+def configure_logging(cfg: AppConfig) -> None:
+    """Configure root and service-level logging from AppConfig."""
+    level_name = cfg.log.level.upper()
+    level = getattr(logging, level_name, logging.INFO)
+    fmt = cfg.log.format
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(level)
+
+    if not root_logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setLevel(level)
+        handler.setFormatter(logging.Formatter(fmt))
+        root_logger.addHandler(handler)
+    else:
+        for handler in root_logger.handlers:
+            handler.setLevel(level)
+            handler.setFormatter(logging.Formatter(fmt))
+
+    for name in (
+        "opensandbox.adapters.sandboxes_adapter",
+        "opensandbox.sandbox",
+    ):
+        logging.getLogger(name).setLevel(logging.CRITICAL)
+
+
 def get_app_config() -> AppConfig:
     global _app_config
     if _app_config is None:
@@ -78,17 +104,64 @@ def get_groups_service() -> GroupsService:
     return _groups_service
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    svc = get_sandbox_service()
+def _log_startup_diagnostics(cfg: AppConfig) -> None:
+    """Log status of all services at startup."""
+    logger.info("THON server starting")
+    logger.info("  Database: %s", cfg.database.path)
+    logger.info("  Dashboard: %s:%s", cfg.dashboard.host, cfg.dashboard.port)
+    logger.info("  Sandbox domain: %s", cfg.sandbox.domain)
+    logger.info("  Sandbox image: %s", cfg.sandbox.image)
+    logger.info("  Log level: %s", cfg.log.level.upper())
+
     gs = get_groups_service()
     backfilled = gs.backfill_storage_paths()
     if backfilled:
         logger.info("Backfilled storage paths for %d user(s)", backfilled)
-    logger.info("THON dashboard starting")
+
+    groups = gs.list_groups()
+    total_users = sum(len(g.users) for g in groups)
+    logger.info("  Groups: %d, Users: %d", len(groups), total_users)
+
+    ls = get_lemonade_service()
+    lemonade_status = ls.get_status()
+    logger.info(
+        "  Lemonade: %s (endpoint=%s, model=%s)",
+        "running" if lemonade_status.running else "offline",
+        lemonade_status.endpoint,
+        lemonade_status.model or "N/A",
+    )
+
+    try:
+        aps = get_apisix_service()
+        gateway_status = aps.get_status()
+        logger.info(
+            "  Gateway: %s (installed=%s, consumers=%d, route=%s)",
+            "running" if gateway_status.running else "offline",
+            gateway_status.installed,
+            gateway_status.consumers_count,
+            "configured" if gateway_status.route_configured else "not configured",
+        )
+        if gateway_status.redis_connected:
+            logger.info("  Gateway Redis: connected")
+    except Exception as exc:
+        logger.debug("Gateway diagnostics failed: %s", exc)
+        logger.info("  Gateway: not configured")
+
+    if cfg.nginx.external_ip:
+        logger.info("  External IP: %s", cfg.nginx.external_ip)
+    if cfg.auth.enabled:
+        logger.info("  Auth: enabled")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    cfg = get_app_config()
+    configure_logging(cfg)
+    _log_startup_diagnostics(cfg)
     yield
+    svc = get_sandbox_service()
     await svc.close()
-    logger.info("THON dashboard stopped")
+    logger.info("THON server stopped")
 
 
 def _get_git_version() -> str:
