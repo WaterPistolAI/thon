@@ -37,15 +37,18 @@ g.async=true; g.src=${trackerSrc}; s.parentNode.insertBefore(g,s);
 }
 
 export function MatomoAnalytics() {
-  if (!MATOMO_URL || !MATOMO_SITE_ID) return null;
+  const enabled = !!(MATOMO_URL && MATOMO_SITE_ID);
 
   useEffect(() => {
+    if (!enabled) return;
     const stored = localStorage.getItem(CONSENT_KEY);
     if (stored === "true") {
       const _paq = (window._paq = window._paq || []);
       _paq.push(["setConsentGiven"]);
     }
-  }, []);
+  }, [enabled]);
+
+  if (!enabled) return null;
 
   return (
     <Script id="matomo-init" strategy="beforeInteractive">
@@ -72,9 +75,10 @@ export function MatomoConsent() {
   const [consentGiven, setConsentGiven] = useState<boolean | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [optedOut, setOptedOut] = useState(false);
+  const enabled = !!(MATOMO_URL && MATOMO_SITE_ID);
 
   useEffect(() => {
-    if (!MATOMO_URL || !MATOMO_SITE_ID) return;
+    if (!enabled) return;
     const stored = localStorage.getItem(CONSENT_KEY);
     if (stored === "true") {
       setConsentGiven(true);
@@ -86,7 +90,7 @@ export function MatomoConsent() {
     } else {
       setConsentGiven(null);
     }
-  }, []);
+  }, [enabled]);
 
   const grantConsent = useCallback(() => {
     const _paq = (window._paq = window._paq || []);
@@ -119,7 +123,7 @@ export function MatomoConsent() {
     }
   }, [optedOut]);
 
-  if (!MATOMO_URL || !MATOMO_SITE_ID) return null;
+  if (!enabled) return null;
 
   if (consentGiven === null && !dismissed) {
     return (
