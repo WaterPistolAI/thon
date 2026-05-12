@@ -68,6 +68,8 @@ LEMONADE_CONFIG_DIR = Path("/var/lib/lemonade/.cache/lemonade")
 LEMONADE_CONFIG_PATH = LEMONADE_CONFIG_DIR / "config.json"
 SYSTEMD_SERVICE_NAME = "lemond"
 SYSTEMD_OVERRIDE_DIR = Path(f"/etc/systemd/system/{SYSTEMD_SERVICE_NAME}.service.d")
+THON_DIR = Path.home() / ".thon"
+DEFAULT_KILO_OUTPUT = THON_DIR / "kilo.jsonc"
 DEFAULT_MODEL = "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL"
 DEFAULT_MODEL_NAME = "gemma-4-31b-it"
 DEFAULT_MMPROJ = "mmproj-BF16.gguf"
@@ -446,7 +448,9 @@ class LemonadeServerManager:
 
         result = subprocess.run(cmd, check=False, env=env)
         if result.returncode != 0:
-            print(f"[Lemonade] WARNING: Model pull failed for {model} (exit code {result.returncode})")
+            print(
+                f"[Lemonade] WARNING: Model pull failed for {model} (exit code {result.returncode})"
+            )
         else:
             print(f"[Lemonade] Model pull completed: {model}")
 
@@ -764,11 +768,13 @@ class LemonadeServerManager:
             model_context=self._get_ctx_size(),
             chat_models=chat_models,
             default_model=default_model,
-            embedding_model=f"user.{embedding_model_name}" if embedding_model_name else None,
+            embedding_model=f"user.{embedding_model_name}"
+            if embedding_model_name
+            else None,
             skeleton_path=skeleton_path,
         )
 
-        target = output_path or Path("config/kilo.jsonc")
+        target = output_path or DEFAULT_KILO_OUTPUT
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(config, indent=2))
 
@@ -931,7 +937,7 @@ async def cmd_run(
     _print_endpoint_info(manager, model, port, external_ip)
 
     if generate_keys or kilo_config:
-        output = Path(kilo_config) if kilo_config else Path("config/kilo.jsonc")
+        output = Path(kilo_config) if kilo_config else DEFAULT_KILO_OUTPUT
         manager.generate_kilo_config(
             model=model,
             model_name=model_name,
@@ -1339,8 +1345,8 @@ Examples:
     generate_kilo_parser.add_argument(
         "--output",
         type=str,
-        default="config/kilo.jsonc",
-        help="Output path for kilo.jsonc (default: config/kilo.jsonc)",
+        default=str(DEFAULT_KILO_OUTPUT),
+        help=f"Output path for kilo.jsonc (default: {DEFAULT_KILO_OUTPUT})",
     )
     generate_kilo_parser.add_argument(
         "--api-key",

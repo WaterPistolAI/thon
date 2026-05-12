@@ -42,9 +42,21 @@ def _sandbox_unavailable() -> HTTPException:
     )
 
 
-def _is_connection_error(exc: BaseException) -> bool:
-    return isinstance(exc, (httpx.ConnectError, SandboxInternalException)) or (
-        "connect" in str(exc).lower() and "failed" in str(exc).lower()
+def _is_sandbox_error(exc: BaseException) -> bool:
+    import json as _json
+
+    return isinstance(
+        exc, (httpx.ConnectError, _json.JSONDecodeError, SandboxInternalException)
+    ) or any(
+        kw in str(exc).lower()
+        for kw in (
+            "imagenotfound",
+            "no such image",
+            "connect",
+            "failed",
+            "500",
+            "internal server error",
+        )
     )
 
 
@@ -101,7 +113,7 @@ async def list_instances(
             page_size=page_size,
         )
     except Exception as e:
-        if _is_connection_error(e):
+        if _is_sandbox_error(e):
             raise _sandbox_unavailable()
         raise
     return InstancesListResponse(
@@ -121,7 +133,7 @@ async def register_instance(
     try:
         inst = await svc.get_instance(instance_id)
     except Exception as e:
-        if _is_connection_error(e):
+        if _is_sandbox_error(e):
             raise _sandbox_unavailable()
         raise HTTPException(
             status_code=404, detail=f"Instance {instance_id} not found: {e}"
@@ -146,7 +158,7 @@ async def get_instance(instance_id: str) -> InstanceInfo:
     try:
         return await svc.get_instance(instance_id)
     except Exception as e:
-        if _is_connection_error(e):
+        if _is_sandbox_error(e):
             raise _sandbox_unavailable()
         raise HTTPException(
             status_code=404, detail=f"Instance {instance_id} not found: {e}"
@@ -165,7 +177,7 @@ async def create_instance(req: CreateInstanceRequest) -> InstanceInfo:
             secure=req.secure,
         )
     except Exception as e:
-        if _is_connection_error(e):
+        if _is_sandbox_error(e):
             raise _sandbox_unavailable()
         raise HTTPException(status_code=500, detail=f"Failed to create instance: {e}")
 
@@ -178,7 +190,7 @@ async def pause_instance(instance_id: str) -> dict:
         await svc.pause_instance(instance_id)
         return {"status": "paused", "id": instance_id}
     except Exception as e:
-        if _is_connection_error(e):
+        if _is_sandbox_error(e):
             raise _sandbox_unavailable()
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -190,7 +202,7 @@ async def resume_instance(instance_id: str) -> InstanceInfo:
     try:
         return await svc.resume_instance(instance_id)
     except Exception as e:
-        if _is_connection_error(e):
+        if _is_sandbox_error(e):
             raise _sandbox_unavailable()
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -203,7 +215,7 @@ async def kill_instance(instance_id: str) -> dict:
         await svc.kill_instance(instance_id)
         return {"status": "terminated", "id": instance_id}
     except Exception as e:
-        if _is_connection_error(e):
+        if _is_sandbox_error(e):
             raise _sandbox_unavailable()
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -215,7 +227,7 @@ async def recreate_instance(instance_id: str) -> InstanceInfo:
     try:
         return await svc.recreate_instance(instance_id)
     except Exception as e:
-        if _is_connection_error(e):
+        if _is_sandbox_error(e):
             raise _sandbox_unavailable()
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -232,7 +244,7 @@ async def renew_instance(instance_id: str, req: RenewRequest = RenewRequest()) -
             "timeout_minutes": req.timeout_minutes,
         }
     except Exception as e:
-        if _is_connection_error(e):
+        if _is_sandbox_error(e):
             raise _sandbox_unavailable()
         raise HTTPException(status_code=400, detail=str(e))
 

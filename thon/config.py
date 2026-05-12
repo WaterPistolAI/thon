@@ -29,7 +29,8 @@ import yaml
 from pydantic import BaseModel, Field
 
 
-DEFAULT_CONFIG_PATH = Path("thon.yaml")
+THON_DIR = Path.home() / ".thon"
+DEFAULT_CONFIG_PATH = THON_DIR / "thon.yaml"
 
 
 class SandboxSettings(BaseModel):
@@ -92,20 +93,22 @@ class LemonadeSettings(BaseModel):
     generate_keys: bool = True
     api_key: str = ""
     admin_api_key: str = ""
-    chat_models: list[ModelOption] = Field(default_factory=lambda: [
-        ModelOption(
-            name="gemma-4-31b-it",
-            checkpoint="unsloth/gemma-4-31B-it-GGUF:Q8_K_XL",
-            context=262144,
-            output=4096,
-        ),
-        ModelOption(
-            name="qwen3.6-27b",
-            checkpoint="unsloth/Qwen3.6-27B-GGUF:Q8_K_XL",
-            context=262144,
-            output=4096,
-        ),
-    ])
+    chat_models: list[ModelOption] = Field(
+        default_factory=lambda: [
+            ModelOption(
+                name="gemma-4-31b-it",
+                checkpoint="unsloth/gemma-4-31B-it-GGUF:Q8_K_XL",
+                context=262144,
+                output=4096,
+            ),
+            ModelOption(
+                name="qwen3.6-27b",
+                checkpoint="unsloth/Qwen3.6-27B-GGUF:Q8_K_XL",
+                context=262144,
+                output=4096,
+            ),
+        ]
+    )
 
 
 class KiloSettings(BaseModel):
@@ -114,6 +117,13 @@ class KiloSettings(BaseModel):
     config_file: str = ""
     skeleton_file: str = "config/kilo.jsonc.skeleton"
     chat_model: str = "lemonade/user.gemma-4-31b-it"
+
+    @property
+    def resolved_config_file(self) -> Path:
+        """Resolve config_file to a path, defaulting to ~/.thon/kilo.jsonc."""
+        if self.config_file:
+            return Path(self.config_file)
+        return THON_DIR / "kilo.jsonc"
 
 
 class GatewaySettings(BaseModel):

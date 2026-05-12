@@ -98,15 +98,34 @@ class SandboxService:
             self._closed = True
 
     @staticmethod
-    def _is_connection_error(exc: BaseException) -> bool:
+    def _is_sandbox_error(exc: BaseException) -> bool:
+        """Check if an exception indicates a sandbox server problem.
+
+        Covers connection failures, broken responses, Docker/image errors,
+        and any other server-side failure that means we cannot list sandboxes.
+        """
+        import json
+
         if isinstance(exc, httpx.ConnectError):
             return True
         if SandboxInternalException is not None and isinstance(
             exc, SandboxInternalException
         ):
             return True
+        if isinstance(exc, json.JSONDecodeError):
+            return True
         msg = str(exc).lower()
-        return "connect" in msg and "failed" in msg
+        return any(
+            kw in msg
+            for kw in (
+                "imagenotfound",
+                "no such image",
+                "connect",
+                "failed",
+                "500",
+                "internal server error",
+            )
+        )
 
     def sync_nginx(self) -> list[int]:
         """Regenerate nginx config from all active instance endpoints.
@@ -169,8 +188,8 @@ class SandboxService:
             )
             result = await mgr.list_sandbox_infos(f)
         except Exception as e:
-            if self._is_connection_error(e):
-                logger.warning("Sandbox server unreachable: %s", e)
+            if self._is_sandbox_error(e):
+                logger.warning("Sandbox server error: %s", e)
                 return [], 0
             raise
 

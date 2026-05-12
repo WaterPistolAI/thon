@@ -39,7 +39,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))  # noqa: E402
 
-from thon.config import DEFAULT_CONFIG_PATH, ThonConfig  # noqa: E402
+from thon.config import DEFAULT_CONFIG_PATH, THON_DIR, ThonConfig  # noqa: E402
 
 
 def _sync_lemonade_keys(config: ThonConfig) -> None:
@@ -72,9 +72,7 @@ def _sync_lemonade_keys(config: ThonConfig) -> None:
             found_admin = False
             for line in lines:
                 if line.startswith("LEMONADE_API_KEY="):
-                    updated.append(
-                        f"LEMONADE_API_KEY={config.lemonade.api_key}"
-                    )
+                    updated.append(f"LEMONADE_API_KEY={config.lemonade.api_key}")
                     found_api = True
                 elif line.startswith("LEMONADE_ADMIN_API_KEY="):
                     updated.append(
@@ -84,9 +82,7 @@ def _sync_lemonade_keys(config: ThonConfig) -> None:
                 else:
                     updated.append(line)
             if not found_api and config.lemonade.api_key:
-                updated.append(
-                    f"LEMONADE_API_KEY={config.lemonade.api_key}"
-                )
+                updated.append(f"LEMONADE_API_KEY={config.lemonade.api_key}")
             if not found_admin and config.lemonade.admin_api_key:
                 updated.append(
                     f"LEMONADE_ADMIN_API_KEY={config.lemonade.admin_api_key}"
@@ -96,12 +92,17 @@ def _sync_lemonade_keys(config: ThonConfig) -> None:
 
 
 def _load_config(path: Optional[str] = None) -> ThonConfig:
-    """Load config from the given path, falling back to ./thon.yaml."""
+    """Load config from the given path, falling back to ~/.thon/thon.yaml."""
     p = Path(path) if path else DEFAULT_CONFIG_PATH
     if not p.is_file():
-        print(f"Error: Config file not found at {p}")
-        print("Run `python -m thon init` to create one.")
-        sys.exit(1)
+        legacy = Path("thon.yaml")
+        if legacy.is_file():
+            print(f"Note: Found {legacy} — consider moving to {DEFAULT_CONFIG_PATH}")
+            p = legacy
+        else:
+            print(f"Error: Config file not found at {p}")
+            print("Run `python -m thon init` to create one.")
+            sys.exit(1)
     return ThonConfig.from_yaml(p)
 
 
@@ -183,7 +184,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
             if config.lemonade.admin_api_key:
                 cmd.extend(["--admin-api-key", config.lemonade.admin_api_key])
 
-            kilo_output = config.kilo.config_file or "kilo.jsonc"
+            kilo_output = str(config.kilo.resolved_config_file)
             cmd.extend(["--kilo-config", kilo_output])
 
             skeleton = config.kilo.skeleton_file
@@ -267,7 +268,12 @@ def cmd_setup(args: argparse.Namespace) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> None:
+    THON_DIR.mkdir(parents=True, exist_ok=True)
     p = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
+    if not p.is_file():
+        legacy = Path("thon.yaml")
+        if legacy.is_file():
+            p = legacy
     if p.is_file():
         config = ThonConfig.from_yaml(p)
         config.apply_env()
@@ -389,19 +395,23 @@ def _write_temp_groups(config: ThonConfig) -> None:
     import yaml
 
     data = {"groups": {name: {"users": users} for name, users in config.groups.items()}}
-    target = PROJECT_ROOT / ".thon-groups.yaml"
+    THON_DIR.mkdir(parents=True, exist_ok=True)
+    target = THON_DIR / "groups.yaml"
     target.write_text(yaml.dump(data, default_flow_style=False))
     print(f"  Wrote groups to {target}")
 
 
 def _resolve_path(path_str: str) -> Path:
-    """Resolve a path relative to PROJECT_ROOT if not absolute."""
+    """Resolve a path relative to PROJECT_ROOT or ~/.thon/ if not absolute."""
     p = Path(path_str)
     if p.is_absolute():
         return p
     resolved = PROJECT_ROOT / p
     if resolved.exists():
         return resolved
+    thon_resolved = THON_DIR / p
+    if thon_resolved.exists():
+        return thon_resolved
     return p
 
 
@@ -478,7 +488,7 @@ Examples:
         "--config",
         type=str,
         default=None,
-        help="Path to thon.yaml (default: ./thon.yaml)",
+        help=f"Path to thon.yaml (default: {DEFAULT_CONFIG_PATH})",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Command to run")

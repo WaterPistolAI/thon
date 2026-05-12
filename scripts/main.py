@@ -298,9 +298,7 @@ async def _inject_kilo_config(
         )
 
     config_content = config_content.replace("$THON_USERNAME", user.username)
-    config_content = config_content.replace(
-        "$THON_USER_EMAIL", user.display_email
-    )
+    config_content = config_content.replace("$THON_USER_EMAIL", user.display_email)
     config_content = config_content.replace(
         "$WORKSPACE", f"/workspace/{user.workspace}"
     )
@@ -510,12 +508,12 @@ async def run_from_config(
     timeout_minutes = thon_cfg.sandbox.timeout_minutes
     secure = thon_cfg.vscode.secure
     workspace_dir = thon_cfg.workspace.dir or None
-    lemonade_path = thon_cfg.kilo.config_file or None
+    lemonade_path = str(thon_cfg.kilo.resolved_config_file) or None
     vscode_settings_path = thon_cfg.vscode.settings_file or None
     lemonade_config_content = _resolve_file_content(
         lemonade_path,
         "config_kilo_json",
-        "config/kilo.jsonc",
+        str(Path.home() / ".thon" / "kilo.jsonc"),
         db_path=os.getenv("THON_DB_PATH"),
     )
     vscode_settings_content = _resolve_file_content(
@@ -1193,7 +1191,10 @@ Examples:
                 groups_svc.backfill_storage_paths()
 
     lemonade_config_content = _resolve_file_content(
-        args.lemonade, "config_kilo_json", "config/kilo.jsonc", db_path=db_path_env
+        args.lemonade,
+        "config_kilo_json",
+        str(Path.home() / ".thon" / "kilo.jsonc"),
+        db_path=db_path_env,
     )
     vscode_settings_content = _resolve_file_content(
         args.vscode_settings,

@@ -14,7 +14,7 @@
     "vectorStore": "lancedb",
     "openai-compatible": {
       "baseUrl": "http://52.162.90.16:13305/v1",
-      "apiKey": "qlMNQWz0qP1tq8eDD1vzPDzvxZvLppsb",
+      "apiKey": "AmnVwR6GLuJh3CN-sFQlmS4Q6LPY5thU",
       "model": "user.harrier-oss-v1-0.6b"
     }
   },
@@ -51,7 +51,7 @@
         }
       },
       "options": {
-        "apiKey": "qlMNQWz0qP1tq8eDD1vzPDzvxZvLppsb",
+        "apiKey": "AmnVwR6GLuJh3CN-sFQlmS4Q6LPY5thU",
         "baseURL": "http://52.162.90.16:13305/v1"
       }
     }

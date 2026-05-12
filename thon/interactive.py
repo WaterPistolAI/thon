@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Optional
 
 from thon.config import (
+    THON_DIR,
     AuthSettings,
     DashboardSettings,
     GatewaySettings,
@@ -130,7 +131,7 @@ def run_interactive(
         non_interactive: If True, generate a config with defaults without
             prompting (useful for CI or scripted setup).
     """
-    target = Path(config_path) if config_path else Path("thon.yaml")
+    target = Path(config_path) if config_path else THON_DIR / "thon.yaml"
 
     if target.exists():
         print(f"Found existing config at {target}")
@@ -257,7 +258,7 @@ def run_interactive(
     if not non_interactive:
         if lemonade.enabled:
             _info("Kilo Code config will be auto-generated during setup")
-            kilo.config_file = "config/kilo.jsonc"
+            kilo.config_file = str(THON_DIR / "kilo.jsonc")
             if _yes_no("Use a kilo.jsonc skeleton for custom overrides?", default=True):
                 kilo.skeleton_file = _prompt(
                     "Path to skeleton file",
@@ -273,7 +274,9 @@ def run_interactive(
                     default=model_options[0] if model_options else kilo.chat_model,
                 )
         elif _yes_no("Use a custom Kilo Code config?", default=False):
-            kilo.config_file = _prompt("Path to kilo.jsonc", default="config/kilo.jsonc")
+            kilo.config_file = _prompt(
+                "Path to kilo.jsonc", default=str(THON_DIR / "kilo.jsonc")
+            )
 
     # ── AI Gateway ───────────────────────────────────────────
     _section("AI Gateway (APISIX Rate Limiting)")
