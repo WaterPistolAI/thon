@@ -742,6 +742,24 @@ Examples:
             with open(args.groups) as f:
                 data = yaml.safe_load(f)
             groups = data.get("groups", {})
+        else:
+            try:
+                sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+                from app.db import get_groups, get_users
+
+                db_path = str(Path.home() / ".thon" / "thon.db")
+                db_groups = get_groups(db_path=db_path)
+                groups = {}
+                for g in db_groups:
+                    group_users = get_users(g.id, db_path=db_path)
+                    groups[g.name] = {"users": [u.username for u in group_users]}
+                if groups:
+                    print(f"  Loaded {len(db_groups)} group(s) from DB ({db_path})")
+            except Exception as e:
+                print(f"  Could not load groups from DB: {e}")
+                groups = {}
+
+        if groups:
             if args.per_group:
                 for group_name, group_data in groups.items():
                     if args.group and group_name != args.group:

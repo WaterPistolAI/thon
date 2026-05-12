@@ -164,6 +164,105 @@ def _dialog_container(title: str):
     return st.container(border=True)
 
 
+def page_workspaces() -> None:
+    st.header("Workspaces")
+
+    groups_svc = _get_groups_service()
+
+    try:
+        groups = groups_svc.list_groups()
+    except Exception:
+        groups = []
+
+    if not groups:
+        st.info("No groups found. Create a group first.")
+        return
+
+    all_users: list[UserRecord] = []
+    for g in groups:
+        all_users.extend(get_users(g.id, db_path=groups_svc._db_path))
+
+    total_with_workspace = sum(1 for u in all_users if u.workspace_path)
+    total_with_instance = sum(1 for u in all_users if u.sandbox_id)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Workspaces", total_with_workspace)
+    c2.metric("Mounted (Instance Running)", total_with_instance)
+    c3.metric("Unmounted", total_with_workspace - total_with_instance)
+
+    st.divider()
+
+    col_search = st.columns(1)[0]
+    with col_search:
+        search = st.text_input(
+            "Search", placeholder="Search workspaces...", label_visibility="collapsed"
+        )
+
+    filtered = all_users
+    if search:
+        search_lower = search.lower()
+        filtered = [
+            u
+            for u in all_users
+            if search_lower in (u.workspace_path or "").lower()
+            or search_lower in u.username.lower()
+            or any(search_lower in g.name.lower() for g in groups if g.id == u.group_id)
+        ]
+
+    if not filtered:
+        st.info("No workspaces found.")
+        return
+
+    for g in groups:
+        group_users = [u for u in filtered if u.group_id == g.id]
+        if not group_users:
+            continue
+        with st.expander(f"{g.name} ({len(group_users)})", expanded=True):
+            for user in group_users:
+                cols = st.columns([2, 3, 2, 2])
+                group_name = g.name
+                with cols[0]:
+                    st.write(f"**{user.username}**")
+                with cols[1]:
+                    vol = user.workspace_path or "—"
+                    st.code(vol, language=None)
+                with cols[2]:
+                    if user.sandbox_id:
+                        st.write("📎 Mounted")
+                    else:
+                        st.write("📄 Unmounted")
+                with cols[3]:
+                    vol_name = user.workspace_path or ""
+                    is_docker_vol = vol_name.startswith("thon-")
+                    if is_docker_vol:
+                        if st.button("Inspect", key=f"ws_inspect_{user.id}"):
+                            try:
+                                result = subprocess.run(
+                                    ["docker", "volume", "inspect", vol_name],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=10,
+                                )
+                                if result.returncode == 0:
+                                    st.json(result.stdout)
+                                else:
+                                    st.warning(f"Volume not found: {vol_name}")
+                            except Exception as e:
+                                st.error(f"Failed: {e}")
+                    elif vol_name.startswith("/"):
+                        if st.button("Browse", key=f"ws_browse_{user.id}"):
+                            try:
+                                result = subprocess.run(
+                                    ["ls", "-la", vol_name],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5,
+                                )
+                                st.code(result.stdout or "Empty directory")
+                            except Exception as e:
+                                st.error(f"Failed: {e}")
+
+
 def page_instances() -> None:
     st.header("Instances")
 
@@ -311,7 +410,7 @@ def _create_instance_dialog() -> None:
                 except Exception as e:
                     st.error(f"Create failed: {e}")
         with c2:
-            if st.button("Cancel"):
+            if st.button("Cancel", key="cancel_create_instance"):
                 st.session_state.show_create_instance = False
                 st.rerun()
 
@@ -453,7 +552,7 @@ def page_users() -> None:
                         except Exception as e:
                             st.error(f"Failed: {e}")
             with c2:
-                if st.button("Cancel"):
+                if st.button("Cancel", key="cancel_add_user_page"):
                     st.session_state.show_add_user = False
                     st.rerun()
 
@@ -749,7 +848,7 @@ def _create_group_dialog() -> None:
                 except Exception as e:
                     st.error(f"Failed to create group: {e}")
         with c2:
-            if st.button("Cancel"):
+            if st.button("Cancel", key="cancel_create_group"):
                 st.session_state.show_create_group = False
                 st.rerun()
 
@@ -777,7 +876,7 @@ def _add_user_dialog(svc: GroupsService) -> None:
                 except Exception as e:
                     st.error(f"Failed to add user: {e}")
         with c2:
-            if st.button("Cancel"):
+            if st.button("Cancel", key="cancel_add_user_group"):
                 st.session_state.show_add_user = False
                 st.rerun()
 
@@ -804,7 +903,7 @@ def _rename_group_dialog(svc: GroupsService) -> None:
                 except Exception as e:
                     st.error(f"Failed to rename group: {e}")
         with c2:
-            if st.button("Cancel"):
+            if st.button("Cancel", key="cancel_rename_group"):
                 st.session_state.show_rename_group = False
                 st.rerun()
 
@@ -850,7 +949,7 @@ def _transfer_user_dialog(svc: GroupsService, group_id_map: dict) -> None:
                     except Exception as e:
                         st.error(f"Transfer failed: {e}")
         with c2:
-            if st.button("Cancel"):
+            if st.button("Cancel", key="cancel_transfer_user"):
                 st.session_state.show_transfer_user = False
                 st.rerun()
 
@@ -1484,6 +1583,9 @@ def main() -> None:
     pages = {
         "Users": st.Page(page_users, title="Users", url_path="users", icon="👤"),
         "Groups": st.Page(page_groups, title="Groups", url_path="groups", icon="👥"),
+        "Workspaces": st.Page(
+            page_workspaces, title="Workspaces", url_path="workspaces", icon="📁"
+        ),
         "Instances": st.Page(
             page_instances, title="Instances", url_path="instances", icon="🖥️"
         ),

@@ -189,5 +189,6 @@
     "kilo-code.new.showTaskTimeline": true,
     "kilo-code.new.browserAutomation.enabled": true,
     "window.newWindowProfile": "Default",
+    "window.autoDetectColorScheme": true,
     "jdk.telemetry.enabled": false
 }
