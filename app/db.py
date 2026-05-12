@@ -528,7 +528,9 @@ def transfer_user(
             select(GroupRecord).where(GroupRecord.id == target_group_id)
         ).first()
         if group:
-            user.workspace_path = f"thon-workspace-{group.name}-{user.username}"
+            user.workspace_path = (
+                f"thon-workspace-{group.name}-{user.username}".replace("/", "-")
+            )
         user.updated_at = datetime.utcnow()
         session.add(user)
         session.commit()

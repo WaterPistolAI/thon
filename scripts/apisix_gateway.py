@@ -489,45 +489,40 @@ def generate_kilo_gateway_config(
     gateway_url: str,
     api_key: str,
     model: str = "user.gemma-4-31b-it",
+    model_checkpoint: str = "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL",
+    model_context: int = 262144,
     embedding_model: str = "user.harrier-oss-v1-0.6b",
     enable_embedding: bool = True,
     skeleton_path: Optional[str] = None,
+    gateway_mode: str = "per-user",
+    chat_models: Optional[list[dict]] = None,
+    default_model: Optional[str] = None,
 ) -> str:
-    generated: dict = {
-        "providers": {
-            "lemonade-gateway": {
-                "baseUrl": gateway_url,
-                "apiKey": api_key,
-            }
-        },
-        "models": {
-            "gemma-4-31b-it": {
-                "provider": "lemonade-gateway",
-                "modelId": model,
-            }
-        },
-    }
-    if enable_embedding:
-        generated["indexing"] = {
-            "enabled": True,
-            "provider": "openai-compatible",
-            "vectorStore": "lancedb",
-            "openai-compatible": {
-                "baseUrl": f"{gateway_url}/v1",
-                "apiKey": api_key,
-                "model": embedding_model,
-            },
-        }
+    import sys
 
-    skeleton: dict = {}
-    if skeleton_path and Path(skeleton_path).is_file():
-        try:
-            with open(skeleton_path) as f:
-                skeleton = json.load(f)
-        except Exception as e:
-            print(f"[Gateway] Warning: failed to load skeleton {skeleton_path}: {e}")
+    project_root = str(Path(__file__).resolve().parent.parent)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
 
-    config = _deep_merge(skeleton, generated)
+    from app.kilo_config import KiloMode, generate_kilo_config
+
+    kilo_mode = (
+        KiloMode.GATEWAY_PER_GROUP
+        if gateway_mode == "per-group"
+        else KiloMode.GATEWAY_PER_USER
+    )
+    config = generate_kilo_config(
+        mode=kilo_mode,
+        base_url=f"{gateway_url}/v1",
+        api_key=api_key,
+        model_name=model,
+        model_checkpoint=model_checkpoint,
+        model_context=model_context,
+        chat_models=chat_models,
+        default_model=default_model,
+        embedding_model=embedding_model if enable_embedding else None,
+        skeleton_path=skeleton_path,
+    )
     return json.dumps(config, indent=2)
 
 

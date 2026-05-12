@@ -78,7 +78,7 @@ DEFAULT_HOST = "0.0.0.0"
 PER_USER_CTX = 262144
 EMBEDDING_PER_USER_CTX = 32768
 
-DEFAULT_LLMACPP_BIN = "/usr/local/bin/llama-server"
+DEFAULT_LLMACPP_BIN = "builtin"
 
 LLAMACPP_DEFAULTS: dict = {
     "backend": "auto",
@@ -280,7 +280,20 @@ class LemonadeServerManager:
         llamacpp_bin: str = DEFAULT_LLMACPP_BIN,
     ) -> None:
         """Write config.json and optionally set API keys in systemd override."""
+        import shutil
+
         existing = _sudo_read_json(self.config_path) or {}
+
+        resolved_bin = llamacpp_bin
+        if resolved_bin != "builtin":
+            if not shutil.which(resolved_bin) and not Path(resolved_bin).is_file():
+                system_llama = shutil.which("llama-server")
+                if system_llama:
+                    resolved_bin = system_llama
+                    print(f"[Lemonade] Found system llama-server: {resolved_bin}")
+                else:
+                    resolved_bin = "builtin"
+                    print("[Lemonade] No system llama-server found, using builtin")
 
         config: dict = {
             "config_version": existing.get("config_version", 1),
@@ -301,9 +314,9 @@ class LemonadeServerManager:
                 **existing.get("llamacpp", {}),
                 "backend": llamacpp_backend,
                 "prefer_system": prefer_system,
-                "rocm_bin": llamacpp_bin if prefer_system else "builtin",
-                "vulkan_bin": llamacpp_bin if prefer_system else "builtin",
-                "cpu_bin": llamacpp_bin if prefer_system else "builtin",
+                "rocm_bin": resolved_bin if prefer_system else "builtin",
+                "vulkan_bin": resolved_bin if prefer_system else "builtin",
+                "cpu_bin": resolved_bin if prefer_system else "builtin",
             },
             "whispercpp": {
                 **WHISPERCPP_DEFAULTS,
@@ -431,8 +444,11 @@ class LemonadeServerManager:
         if checkpoint and model.startswith("user."):
             cmd += ["--checkpoint", "main", checkpoint, "--recipe", "llamacpp"]
 
-        subprocess.run(cmd, check=False, env=env)
-        print(f"[Lemonade] Model pull completed: {model}")
+        result = subprocess.run(cmd, check=False, env=env)
+        if result.returncode != 0:
+            print(f"[Lemonade] WARNING: Model pull failed for {model} (exit code {result.returncode})")
+        else:
+            print(f"[Lemonade] Model pull completed: {model}")
 
     def _is_model_downloaded(self, model: str) -> bool:
         """Check if a model is already downloaded by checking the HF cache."""
@@ -694,28 +710,37 @@ class LemonadeServerManager:
         output_path: Optional[Path] = None,
         embedding_model_name: Optional[str] = DEFAULT_EMBEDDING_MODEL_NAME,
         skeleton_path: Optional[Path] = None,
+        chat_models: Optional[list[dict]] = None,
+        default_model: Optional[str] = None,
     ) -> Path:
         """Generate a kilo.jsonc config for Kilo Code pointing at this Lemonade server.
 
-        The base URL is resolved to the best reachable address from inside
-        sandbox containers: external_ip > Docker bridge gateway > localhost.
-
-        If a skeleton file exists, it is loaded first and the auto-generated
-        values are deep-merged on top, so user overrides in the skeleton
-        take precedence over defaults but not over auto-detected values
-        like apiKey and baseURL.
+        Uses the unified ``app.kilo_config.generate_kilo_config`` generator
+        in lemonade-direct mode.  The base URL is resolved to the best
+        reachable address from inside sandbox containers:
+        external_ip > Docker bridge gateway > localhost.
 
         Args:
             model: HuggingFace checkpoint for display name.
             model_name: Short model name used as kilo.jsonc model ID.
             external_ip: External IP for sandbox access.
-            output_path: Path to write kilo.jsonc. Defaults to ./kilo.jsonc.
+            output_path: Path to write kilo.jsonc. Defaults to config/kilo.jsonc.
             embedding_model_name: Short name of the embedding model for indexing.
             skeleton_path: Path to a kilo.jsonc.skeleton file with user overrides.
+            chat_models: Additional model options [{name, checkpoint, context, output}].
+            default_model: Override for the top-level model field.
 
         Returns:
             Path to the generated kilo.jsonc file.
         """
+        import sys as _sys
+
+        _project_root = str(Path(__file__).resolve().parent.parent)
+        if _project_root not in _sys.path:
+            _sys.path.insert(0, _project_root)
+
+        from app.kilo_config import KiloMode, generate_kilo_config as _gen
+
         port = self.get_port()
         docker_ip = detect_docker_host_ip()
 
@@ -728,63 +753,31 @@ class LemonadeServerManager:
 
         base_url = f"http://{base_host}:{port}/v1"
         auth_key = self.admin_api_key or self.api_key or "none"
-
         prefixed_model_name = f"user.{model_name}"
-        generated: dict = {
-            "provider": {
-                "lemonade": {
-                    "models": {
-                        prefixed_model_name: {
-                            "name": model,
-                            "limit": {
-                                "context": self._get_ctx_size(),
-                                "output": 4096,
-                            },
-                        },
-                    },
-                    "options": {
-                        "apiKey": auth_key,
-                        "baseURL": base_url,
-                    },
-                },
-            },
-            "model": f"lemonade/{prefixed_model_name}",
-            "indexing": {
-                "enabled": True,
-                "provider": "openai-compatible",
-                "vectorStore": "lancedb",
-                "openai-compatible": {
-                    "baseUrl": base_url,
-                    "apiKey": auth_key,
-                },
-            },
-        }
 
-        if embedding_model_name:
-            prefixed_emb = f"user.{embedding_model_name}"
-            generated["indexing"]["openai-compatible"]["model"] = prefixed_emb
+        config = _gen(
+            mode=KiloMode.LEMONADE_DIRECT,
+            base_url=base_url,
+            api_key=auth_key,
+            model_name=prefixed_model_name,
+            model_checkpoint=model,
+            model_context=self._get_ctx_size(),
+            chat_models=chat_models,
+            default_model=default_model,
+            embedding_model=f"user.{embedding_model_name}" if embedding_model_name else None,
+            skeleton_path=skeleton_path,
+        )
 
-        skeleton: dict = {}
-        if skeleton_path and Path(skeleton_path).is_file():
-            try:
-                with open(skeleton_path) as f:
-                    skeleton = json.load(f)
-                print(f"[Lemonade] Loaded skeleton from {skeleton_path}")
-            except Exception as e:
-                print(
-                    f"[Lemonade] Warning: failed to load skeleton {skeleton_path}: {e}"
-                )
-
-        config = _deep_merge(skeleton, generated)
-
-        target = output_path or Path("kilo.jsonc")
+        target = output_path or Path("config/kilo.jsonc")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(json.dumps(config, indent=2))
 
         print(f"[Lemonade] Kilo Code config written to {target}")
-        print("[Lemonade]   Provider:  lemonade")
+        print("[Lemonade]   Mode:      lemonade-direct")
         print(f"[Lemonade]   Base URL:  {base_url}")
         print(f"[Lemonade]   Model:     lemonade/{prefixed_model_name}")
+        if chat_models:
+            print(f"[Lemonade]   Alt models: {len(chat_models)}")
         if embedding_model_name:
             print(f"[Lemonade]   Embedding: user.{embedding_model_name}")
         if auth_key != "none":
@@ -938,7 +931,7 @@ async def cmd_run(
     _print_endpoint_info(manager, model, port, external_ip)
 
     if generate_keys or kilo_config:
-        output = Path(kilo_config) if kilo_config else Path("kilo.jsonc")
+        output = Path(kilo_config) if kilo_config else Path("config/kilo.jsonc")
         manager.generate_kilo_config(
             model=model,
             model_name=model_name,
@@ -1346,8 +1339,8 @@ Examples:
     generate_kilo_parser.add_argument(
         "--output",
         type=str,
-        default="kilo.jsonc",
-        help="Output path for kilo.jsonc (default: kilo.jsonc)",
+        default="config/kilo.jsonc",
+        help="Output path for kilo.jsonc (default: config/kilo.jsonc)",
     )
     generate_kilo_parser.add_argument(
         "--api-key",

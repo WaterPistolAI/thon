@@ -3,7 +3,7 @@
   "experimental": {
     "batch_tool": false,
     "codebase_search": true,
-    "openTelemetry": false,
+    "openTelemetry": true,
     "continue_loop_on_deny": true,
     "semantic_indexing": true,
     "agent_manager_tool": false
@@ -11,10 +11,7 @@
   "indexing": {
     "enabled": true,
     "provider": "openai-compatible",
-    "vectorStore": "lancedb",
-    "openai-compatible": {
-      "model": "user.harrier-oss-v1-0.6b"
-    }
+    "vectorStore": "lancedb"
   },
   "mcp": {
     "git-mcp-server": {
@@ -29,8 +26,8 @@
         "MCP_LOG_LEVEL": "info",
         "GIT_BASE_DIR": "$WORKSPACE",
         "LOGS_DIR": "$WORKSPACE/.logs/git-mcp-server",
-        "GIT_USERNAME": "$USERNAME",
-        "GIT_EMAIL": "$EMAIL",
+        "GIT_USERNAME": "$THON_USERNAME",
+        "GIT_EMAIL": "$THON_USER_EMAIL",
         "GIT_SIGN_COMMITS": "true"
       },
       "enabled": true

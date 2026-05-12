@@ -297,8 +297,10 @@ async def _inject_kilo_config(
             f"run setup-lemonade.sh --generate-keys to generate real API keys"
         )
 
-    config_content = config_content.replace("$USERNAME", user.username)
-    config_content = config_content.replace("$EMAIL", user.display_email)
+    config_content = config_content.replace("$THON_USERNAME", user.username)
+    config_content = config_content.replace(
+        "$THON_USER_EMAIL", user.display_email
+    )
     config_content = config_content.replace(
         "$WORKSPACE", f"/workspace/{user.workspace}"
     )
@@ -513,7 +515,7 @@ async def run_from_config(
     lemonade_config_content = _resolve_file_content(
         lemonade_path,
         "config_kilo_json",
-        "kilo.jsonc",
+        "config/kilo.jsonc",
         db_path=os.getenv("THON_DB_PATH"),
     )
     vscode_settings_content = _resolve_file_content(
@@ -1191,7 +1193,7 @@ Examples:
                 groups_svc.backfill_storage_paths()
 
     lemonade_config_content = _resolve_file_content(
-        args.lemonade, "config_kilo_json", "kilo.jsonc", db_path=db_path_env
+        args.lemonade, "config_kilo_json", "config/kilo.jsonc", db_path=db_path_env
     )
     vscode_settings_content = _resolve_file_content(
         args.vscode_settings,

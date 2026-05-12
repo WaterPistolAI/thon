@@ -42,6 +42,59 @@ sys.path.insert(0, str(PROJECT_ROOT))  # noqa: E402
 from thon.config import DEFAULT_CONFIG_PATH, ThonConfig  # noqa: E402
 
 
+def _sync_lemonade_keys(config: ThonConfig) -> None:
+    """Read API keys from lemonade systemd override and write into config + .env."""
+    override_path = Path("/etc/systemd/system/lemond.service.d/override.conf")
+    if not override_path.is_file():
+        override_path = Path(
+            "/etc/systemd/system/lemonade-server.service.d/override.conf"
+        )
+    if not override_path.is_file():
+        return
+
+    import re
+
+    content = override_path.read_text()
+    api_match = re.search(r'LEMONADE_API_KEY="?([^"\s]+)"?', content)
+    admin_match = re.search(r'LEMONADE_ADMIN_API_KEY="?([^"\s]+)"?', content)
+
+    if api_match:
+        config.lemonade.api_key = api_match.group(1)
+    if admin_match:
+        config.lemonade.admin_api_key = admin_match.group(1)
+
+    if api_match or admin_match:
+        env_path = PROJECT_ROOT / ".env"
+        if env_path.is_file():
+            lines = env_path.read_text().splitlines()
+            updated: list[str] = []
+            found_api = False
+            found_admin = False
+            for line in lines:
+                if line.startswith("LEMONADE_API_KEY="):
+                    updated.append(
+                        f"LEMONADE_API_KEY={config.lemonade.api_key}"
+                    )
+                    found_api = True
+                elif line.startswith("LEMONADE_ADMIN_API_KEY="):
+                    updated.append(
+                        f"LEMONADE_ADMIN_API_KEY={config.lemonade.admin_api_key}"
+                    )
+                    found_admin = True
+                else:
+                    updated.append(line)
+            if not found_api and config.lemonade.api_key:
+                updated.append(
+                    f"LEMONADE_API_KEY={config.lemonade.api_key}"
+                )
+            if not found_admin and config.lemonade.admin_api_key:
+                updated.append(
+                    f"LEMONADE_ADMIN_API_KEY={config.lemonade.admin_api_key}"
+                )
+            env_path.write_text("\n".join(updated) + "\n")
+        print("  Synced Lemonade API keys to .env")
+
+
 def _load_config(path: Optional[str] = None) -> ThonConfig:
     """Load config from the given path, falling back to ./thon.yaml."""
     p = Path(path) if path else DEFAULT_CONFIG_PATH
@@ -141,10 +194,11 @@ def cmd_setup(args: argparse.Namespace) -> None:
 
             print(f"  Running: {' '.join(cmd)}")
             subprocess.run(cmd, check=False)
+
+            if config.lemonade.generate_keys and not config.lemonade.api_key:
+                _sync_lemonade_keys(config)
         else:
-            print("  Skipping (lemonade_server.py not found)")
-    else:
-        print("\n[3/6] Lemonade — skipped (disabled)")
+            print("\n[3/6] Lemonade — skipped (disabled)")
 
     # 4. AI Gateway
     if config.gateway.enabled:
@@ -178,9 +232,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
             if config.gateway.mode == "per-group":
                 cmd.append("--per-group")
 
-            groups_yaml = PROJECT_ROOT / "groups.yaml"
-            if groups_yaml.is_file():
-                cmd.extend(["--groups", str(groups_yaml)])
+            if config.groups:
+                groups_yaml = PROJECT_ROOT / "groups.yaml"
+                if groups_yaml.is_file():
+                    cmd.extend(["--groups", str(groups_yaml)])
 
             print(f"  Running: {' '.join(cmd)}")
             subprocess.run(cmd, check=False)

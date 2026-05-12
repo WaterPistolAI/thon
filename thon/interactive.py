@@ -256,15 +256,24 @@ def run_interactive(
     kilo = KiloSettings()
     if not non_interactive:
         if lemonade.enabled:
-            _info("Kilo Code config will be auto-generated from Lemonade settings")
-            kilo.config_file = "kilo.jsonc"
+            _info("Kilo Code config will be auto-generated during setup")
+            kilo.config_file = "config/kilo.jsonc"
             if _yes_no("Use a kilo.jsonc skeleton for custom overrides?", default=True):
                 kilo.skeleton_file = _prompt(
                     "Path to skeleton file",
                     default=kilo.skeleton_file,
                 )
+            if lemonade.chat_models:
+                model_options = [
+                    f"lemonade/user.{m.name}" for m in lemonade.chat_models
+                ]
+                _info(f"Available chat models: {', '.join(model_options)}")
+                kilo.chat_model = _prompt(
+                    "Default chat model",
+                    default=model_options[0] if model_options else kilo.chat_model,
+                )
         elif _yes_no("Use a custom Kilo Code config?", default=False):
-            kilo.config_file = _prompt("Path to kilo.jsonc", default="kilo.jsonc")
+            kilo.config_file = _prompt("Path to kilo.jsonc", default="config/kilo.jsonc")
 
     # ── AI Gateway ───────────────────────────────────────────
     _section("AI Gateway (APISIX Rate Limiting)")

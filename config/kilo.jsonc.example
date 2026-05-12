@@ -1,4 +1,6 @@
 {
+  "$schema": "https://app.kilo.ai/config.json",
+  "model": "lemonade/user.gemma-4-31b-it",
   "provider": {
     "lemonade": {
       "models": {
@@ -16,7 +18,6 @@
       }
     }
   },
-  "model": "lemonade/user.gemma-4-31b-it",
   "experimental": {
     "batch_tool": false,
     "codebase_search": true,

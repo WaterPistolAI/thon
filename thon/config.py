@@ -64,6 +64,15 @@ class WorkspaceSettings(BaseModel):
     dir: str = ""
 
 
+class ModelOption(BaseModel):
+    """A model available for selection as the default chat model."""
+
+    name: str
+    checkpoint: str
+    context: int = 262144
+    output: int = 4096
+
+
 class LemonadeSettings(BaseModel):
     """Lemonade local LLM inference server settings."""
 
@@ -79,10 +88,24 @@ class LemonadeSettings(BaseModel):
     embedding_model_name: str = "harrier-oss-v1-0.6b"
     llamacpp_backend: str = "auto"
     prefer_system: bool = True
-    llamacpp_bin: str = "/usr/local/bin/llama-server"
+    llamacpp_bin: str = "builtin"
     generate_keys: bool = True
     api_key: str = ""
     admin_api_key: str = ""
+    chat_models: list[ModelOption] = Field(default_factory=lambda: [
+        ModelOption(
+            name="gemma-4-31b-it",
+            checkpoint="unsloth/gemma-4-31B-it-GGUF:Q8_K_XL",
+            context=262144,
+            output=4096,
+        ),
+        ModelOption(
+            name="qwen3.6-27b",
+            checkpoint="unsloth/Qwen3.6-27B-GGUF:Q8_K_XL",
+            context=262144,
+            output=4096,
+        ),
+    ])
 
 
 class KiloSettings(BaseModel):
@@ -90,6 +113,7 @@ class KiloSettings(BaseModel):
 
     config_file: str = ""
     skeleton_file: str = "config/kilo.jsonc.skeleton"
+    chat_model: str = "lemonade/user.gemma-4-31b-it"
 
 
 class GatewaySettings(BaseModel):

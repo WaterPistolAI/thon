@@ -28,6 +28,7 @@ from opensandbox.models.execd import RunCommandOpts
 from opensandbox.models.sandboxes import Host, PVC, Volume, SandboxFilter
 
 from app.config import AppConfig, SandboxConfig
+from app.nginx_service import NginxConfigGenerator
 from app.db import (
     find_user_by_group_and_name,
     get_groups,
@@ -64,6 +65,16 @@ class SandboxService:
         self._sandbox_cfg: SandboxConfig = config.sandbox
         self._manager: Optional[SandboxManager] = None
         self._closed = False
+        self._nginx: Optional[NginxConfigGenerator] = None
+
+    @property
+    def nginx(self) -> Optional[NginxConfigGenerator]:
+        if self._nginx is None and self._config.nginx.external_ip:
+            try:
+                self._nginx = NginxConfigGenerator()
+            except Exception as exc:
+                logger.debug("Nginx init failed: %s", exc)
+        return self._nginx
 
     async def _get_manager(self) -> SandboxManager:
         """Lazy-initialize and return the shared SandboxManager."""
@@ -96,6 +107,18 @@ class SandboxService:
             return True
         msg = str(exc).lower()
         return "connect" in msg and "failed" in msg
+
+    def _sync_nginx(self) -> None:
+        """Regenerate nginx config from all active instance endpoints."""
+        ng = self.nginx
+        if ng is None:
+            return
+        try:
+            records = get_records(db_path=self._config.database.path)
+            endpoints = [r.endpoint for r in records if r.endpoint and r.port]
+            ng.sync_from_endpoints(endpoints)
+        except Exception as exc:
+            logger.debug("Nginx sync failed: %s", exc)
 
     # ── Fleet Operations ──────────────────────────────────────────────
 
@@ -269,6 +292,7 @@ class SandboxService:
         try:
             await mgr.kill_sandbox(sandbox_id)
             mark_terminated(sandbox_id, db_path=self._config.database.path)
+            self._sync_nginx()
         except Exception as e:
             raise SandboxOperationError(f"Failed to kill {sandbox_id}: {e}") from e
 
@@ -309,10 +333,11 @@ class SandboxService:
         volumes: list[Volume] | None = None
 
         if workspace_volume and workspace_volume.startswith("thon-"):
+            safe_volume = workspace_volume.replace("/", "-")
             volumes = [
                 Volume(
                     name="workspace",
-                    pvc=PVC(claimName=workspace_volume),
+                    pvc=PVC(claimName=safe_volume),
                     mountPath="/workspace",
                 ),
             ]
@@ -326,7 +351,7 @@ class SandboxService:
             os.makedirs(host_path, exist_ok=True)
             volumes = [
                 Volume(
-                    name=f"workspace-{user.group}-{user.username}",
+                    name=f"workspace-{user.group}-{user.username}".replace("/", "-"),
                     host=Host(path=host_path),
                     mount_path="/workspace",
                 )
@@ -404,6 +429,8 @@ class SandboxService:
             password=password,
             db_path=self._config.database.path,
         )
+
+        self._sync_nginx()
 
         return InstanceInfo(
             id=sandbox_id,
