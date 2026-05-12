@@ -188,10 +188,8 @@ class SandboxService:
             )
             result = await mgr.list_sandbox_infos(f)
         except Exception as e:
-            if self._is_sandbox_error(e):
-                logger.warning("Sandbox server error: %s", e)
-                return [], 0
-            raise
+            logger.warning("Sandbox server error: %s", e)
+            return [], 0
 
         instances = []
         for info in result.sandbox_infos:

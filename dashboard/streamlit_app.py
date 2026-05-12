@@ -160,9 +160,12 @@ def page_instances() -> None:
     with st.spinner("Loading instances..."):
         try:
             instances, total = _run_async(svc.list_instances())
-        except Exception as e:
-            st.error(f"Failed to load instances: {e}")
-            return
+        except Exception:
+            st.warning(
+                "Sandbox server is unavailable. "
+                "Ensure opensandbox-server is running on port 8080."
+            )
+            instances, total = [], 0
 
     if not instances:
         st.info("No instances found.")
