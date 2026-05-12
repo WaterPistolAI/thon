@@ -58,6 +58,8 @@ def configure_logging(cfg: AppConfig) -> None:
     for name in (
         "opensandbox.adapters.sandboxes_adapter",
         "opensandbox.sandbox",
+        "httpx",
+        "httpcore",
     ):
         logging.getLogger(name).setLevel(logging.CRITICAL)
 
@@ -229,6 +231,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     from app.api.routes.instances import router as instances_router
     from app.api.routes.lemonade import router as lemonade_router
     from app.api.routes.nginx import router as nginx_router
+    from app.api.routes.users import router as users_router
 
     app.include_router(auth_router)
     app.include_router(config_files_router)
@@ -237,6 +240,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(instances_router)
     app.include_router(lemonade_router)
     app.include_router(nginx_router)
+    app.include_router(users_router)
 
     @app.get("/")
     async def index():

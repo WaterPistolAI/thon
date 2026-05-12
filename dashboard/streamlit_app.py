@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import sys
 import threading
@@ -29,14 +30,25 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from app.env import load_env
+import logging
+
+for _sdk_logger in (
+    "opensandbox.adapters.sandboxes_adapter",
+    "opensandbox.sandbox",
+    "httpx",
+    "httpcore",
+):
+    logging.getLogger(_sdk_logger).setLevel(logging.CRITICAL)
+
+from app.env import load_env  # noqa: E402
 from app.config import AppConfig
-from app.db import GroupRecordWithUsers, UserRecord, get_setting, set_setting
+from app.db import GroupRecordWithUsers, UserRecord, get_setting, get_users, set_setting
 from app.exceptions import (
     GatewayAuthError,
     GatewayConnectionError,
     GatewayNotEnabledError,
     LemonadeConnectionError,
+    SandboxOperationError,
 )
 from app.models import GatewayMode, InstanceState, UserInfo
 from app.services.apisix_service import ApisixService
@@ -160,9 +172,9 @@ def page_instances() -> None:
     with st.spinner("Loading instances..."):
         try:
             instances, total = _run_async(svc.list_instances())
-        except Exception:
+        except Exception as e:
             st.warning(
-                "Sandbox server is unavailable. "
+                f"Sandbox server error: {type(e).__name__}: {e}. "
                 "Ensure opensandbox-server is running on port 8080."
             )
             instances, total = [], 0
@@ -372,6 +384,148 @@ def _bulk_action(svc: SandboxService, action: str, instance_ids: list[str]) -> N
         msg += f", {results['fail']} failed"
     st.toast(msg)
     st.rerun()
+
+
+def page_users() -> None:
+    st.header("Users")
+
+    groups_svc = _get_groups_service()
+    sandbox_svc = _get_sandbox_service()
+
+    try:
+        groups = groups_svc.list_groups()
+    except Exception:
+        groups = []
+
+    if not groups:
+        st.info("No groups found. Create a group first.")
+        return
+
+    all_users: list[UserRecord] = []
+    for g in groups:
+        all_users.extend(get_users(g.id, db_path=groups_svc._db_path))
+
+    total_with_instance = sum(1 for u in all_users if u.sandbox_id)
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Users", len(all_users))
+    c2.metric("With Instance", total_with_instance)
+    c3.metric("Without Instance", len(all_users) - total_with_instance)
+
+    st.divider()
+
+    col_search, col_add = st.columns([4, 1])
+    with col_search:
+        search = st.text_input(
+            "Search", placeholder="Search users...", label_visibility="collapsed"
+        )
+    with col_add:
+        if st.button("+ Add User", type="primary"):
+            st.session_state.show_add_user = True
+
+    if st.session_state.get("show_add_user"):
+        with st.container(border=True):
+            st.subheader("Add User")
+            group_names = {g.name: g.id for g in groups}
+            sel_group = st.selectbox(
+                "Group", options=list(group_names.keys()), key="add_user_group"
+            )
+            new_username = st.text_input("Username", key="add_user_username")
+            new_email = st.text_input("Email (optional)", key="add_user_email")
+            c1, c2 = st.columns(2)
+            with c1:
+                if st.button("Create", type="primary"):
+                    if not new_username.strip():
+                        st.error("Username is required")
+                    else:
+                        try:
+                            from app.db import create_user as db_create_user
+
+                            db_create_user(
+                                group_id=group_names[sel_group],
+                                username=new_username.strip(),
+                                email=new_email.strip() or None,
+                                db_path=groups_svc._db_path,
+                            )
+                            st.success(f"Created user {new_username}")
+                            st.session_state.show_add_user = False
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed: {e}")
+            with c2:
+                if st.button("Cancel"):
+                    st.session_state.show_add_user = False
+                    st.rerun()
+
+    filtered = all_users
+    if search:
+        search_lower = search.lower()
+        filtered = [
+            u
+            for u in all_users
+            if search_lower in u.username.lower()
+            or any(search_lower in g.name.lower() for g in groups if g.id == u.group_id)
+        ]
+
+    if not filtered:
+        st.info("No users found.")
+        return
+
+    for g in groups:
+        group_users = [u for u in filtered if u.group_id == g.id]
+        if not group_users:
+            continue
+        with st.expander(f"{g.name} ({len(group_users)} users)", expanded=True):
+            for user in group_users:
+                cols = st.columns([3, 2, 2, 1])
+                with cols[0]:
+                    st.write(f"**{user.username}**")
+                    if user.email:
+                        st.caption(user.email)
+                with cols[1]:
+                    if user.sandbox_id:
+                        st.write("🟢 Running")
+                    else:
+                        st.write("⚫ No instance")
+                with cols[2]:
+                    if user.sandbox_id:
+                        if st.button("Stop", key=f"stop_{user.id}"):
+                            try:
+                                _run_async(sandbox_svc.kill_instance(user.sandbox_id))
+                                st.success("Instance stopped")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Failed: {e}")
+                    else:
+                        if st.button("Launch", key=f"launch_{user.id}", type="primary"):
+                            cfg = _get_config()
+                            try:
+                                _run_async(
+                                    sandbox_svc.create_instance(
+                                        user=UserInfo(
+                                            group=g.name, username=user.username
+                                        ),
+                                        secure=os.getenv("THON_SECURE", "false").lower() in ("true", "1", "yes"),
+                                        workspace_dir=cfg.workspace_dir or None,
+                                        workspace_volume=user.workspace_path or None,
+                                    )
+                                )
+                                st.success("Instance launched")
+                                st.rerun()
+                            except SandboxOperationError as e:
+                                st.error(str(e))
+                            except Exception as e:
+                                st.error(f"Failed: {e}")
+                with cols[3]:
+                    if st.button("🗑", key=f"del_{user.id}"):
+                        try:
+                            if user.sandbox_id:
+                                _run_async(sandbox_svc.kill_instance(user.sandbox_id))
+                            groups_svc.delete_user(user.id)
+                            st.success("User deleted")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Failed: {e}")
 
 
 def page_groups() -> None:
@@ -1045,7 +1199,9 @@ def page_gateway() -> None:
     s5.metric("Mode", mode_label)
 
     if not status.installed:
-        st.info("APISIX is not installed. Run: `INSTALL_GATEWAY=true bash ./scripts/setup.sh`")
+        st.info(
+            "APISIX is not installed. Run: `INSTALL_GATEWAY=true bash ./scripts/setup.sh`"
+        )
         return
 
     if not status.running:
@@ -1322,28 +1478,28 @@ def main() -> None:
     cfg = _get_config()
     _check_auth(cfg)
 
-    cfg = _get_config()
-    _check_auth(cfg)
-
     st.sidebar.title("◆ THON")
     st.sidebar.caption(_get_git_version())
 
-    page = st.sidebar.radio(
-        "Navigation",
-        options=["Instances", "Groups", "Lemonade Server", "AI Gateway", "Settings"],
-        label_visibility="collapsed",
-    )
+    pages = {
+        "Users": st.Page(page_users, title="Users", url_path="users", icon="👤"),
+        "Groups": st.Page(page_groups, title="Groups", url_path="groups", icon="👥"),
+        "Instances": st.Page(
+            page_instances, title="Instances", url_path="instances", icon="🖥️"
+        ),
+        "Lemonade Server": st.Page(
+            page_lemonade, title="Lemonade Server", url_path="lemonade", icon="🧠"
+        ),
+        "AI Gateway": st.Page(
+            page_gateway, title="AI Gateway", url_path="gateway", icon="🛡️"
+        ),
+        "Settings": st.Page(
+            page_settings, title="Settings", url_path="settings", icon="⚙️"
+        ),
+    }
 
-    if page == "Instances":
-        page_instances()
-    elif page == "Groups":
-        page_groups()
-    elif page == "Lemonade Server":
-        page_lemonade()
-    elif page == "AI Gateway":
-        page_gateway()
-    elif page == "Settings":
-        page_settings()
+    pg = st.navigation(list(pages.values()), position="sidebar")
+    pg.run()
 
     if cfg.auth.local_password and st.session_state.get("authenticated"):
         st.sidebar.divider()

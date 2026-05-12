@@ -107,6 +107,7 @@ class UserRecord(SQLModel, table=True):
     group_id: str = Field(index=True)
     username: str = Field(index=True)
     email: Optional[str] = Field(default=None)
+    sandbox_id: Optional[str] = Field(default=None, index=True)
     workspace_path: Optional[str] = Field(default=None)
     storage_path: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -428,6 +429,7 @@ def delete_group(group_id: str, db_path: Optional[str] = None) -> bool:
 def create_user(
     group_id: str,
     username: str,
+    email: Optional[str] = None,
     workspace_path: Optional[str] = None,
     storage_path: Optional[str] = None,
     db_path: Optional[str] = None,
@@ -445,6 +447,7 @@ def create_user(
         user = UserRecord(
             group_id=group_id,
             username=username,
+            email=email,
             workspace_path=workspace_path,
             storage_path=storage_path,
         )
@@ -473,6 +476,7 @@ def get_user(user_id: str, db_path: Optional[str] = None) -> Optional[UserRecord
 def update_user(
     user_id: str,
     username: Optional[str] = None,
+    email: Optional[str] = None,
     workspace_path: Optional[str] = None,
     storage_path: Optional[str] = None,
     db_path: Optional[str] = None,
@@ -484,10 +488,13 @@ def update_user(
             return None
         if username is not None:
             user.username = username
+        if email is not None:
+            user.email = email
         if workspace_path is not None:
             user.workspace_path = workspace_path
         if storage_path is not None:
             user.storage_path = storage_path
+        user.updated_at = datetime.utcnow()
         session.add(user)
         session.commit()
         session.refresh(user)
@@ -601,4 +608,38 @@ def find_user_by_group_and_name(
                 UserRecord.group_id == group_id,
                 UserRecord.username == username,
             )
+        ).first()
+
+
+def link_user_sandbox(
+    user_id: str, sandbox_id: str, db_path: Optional[str] = None
+) -> None:
+    """Associate a user with their sandbox instance (1:1)."""
+    with get_session(db_path) as session:
+        user = session.get(UserRecord, user_id)
+        if user:
+            user.sandbox_id = sandbox_id
+            user.updated_at = datetime.utcnow()
+            session.add(user)
+            session.commit()
+
+
+def unlink_user_sandbox(user_id: str, db_path: Optional[str] = None) -> None:
+    """Remove the sandbox association from a user."""
+    with get_session(db_path) as session:
+        user = session.get(UserRecord, user_id)
+        if user and user.sandbox_id:
+            user.sandbox_id = None
+            user.updated_at = datetime.utcnow()
+            session.add(user)
+            session.commit()
+
+
+def find_user_by_sandbox(
+    sandbox_id: str, db_path: Optional[str] = None
+) -> Optional[UserRecord]:
+    """Find the user who owns a given sandbox instance."""
+    with get_session(db_path) as session:
+        return session.exec(
+            select(UserRecord).where(UserRecord.sandbox_id == sandbox_id)
         ).first()

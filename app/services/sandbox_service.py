@@ -31,11 +31,14 @@ from app.config import AppConfig, SandboxConfig
 from app.nginx_service import NginxConfigGenerator
 from app.db import (
     find_user_by_group_and_name,
+    find_user_by_sandbox,
     get_groups,
     get_record,
     get_records,
     get_setting,
+    link_user_sandbox,
     mark_terminated,
+    unlink_user_sandbox,
     update_endpoint,
     upsert_record,
 )
@@ -127,6 +130,33 @@ class SandboxService:
             )
         )
 
+    @staticmethod
+    def _is_sdk_or_server_error(exc: BaseException) -> bool:
+        """Check if an exception originates from the opensandbox SDK or network.
+
+        Only catches errors from the SDK call itself, NOT our own code bugs
+        (like AttributeError, KeyError, etc.).
+        """
+        import json
+
+        if isinstance(exc, httpx.ConnectError):
+            return True
+        if SandboxInternalException is not None and isinstance(
+            exc, SandboxInternalException
+        ):
+            return True
+        if isinstance(exc, json.JSONDecodeError):
+            return True
+        tb_module = type(exc).__module__
+        tb_name = type(exc).__name__
+        if tb_module.startswith("opensandbox") or tb_module.startswith("docker"):
+            return True
+        if tb_module.startswith("httpx") or tb_module.startswith("httpcore"):
+            return True
+        if "ImageNotFound" in tb_name or "docker.errors" in tb_module:
+            return True
+        return False
+
     def sync_nginx(self) -> list[int]:
         """Regenerate nginx config from all active instance endpoints.
 
@@ -188,8 +218,10 @@ class SandboxService:
             )
             result = await mgr.list_sandbox_infos(f)
         except Exception as e:
-            logger.warning("Sandbox server error: %s", e)
-            return [], 0
+            if self._is_sdk_or_server_error(e):
+                logger.warning("Sandbox server error: %s", e)
+                return [], 0
+            raise
 
         instances = []
         for info in result.sandbox_infos:
@@ -332,6 +364,11 @@ class SandboxService:
         try:
             await mgr.kill_sandbox(sandbox_id)
             mark_terminated(sandbox_id, db_path=self._config.database.path)
+            db_user = find_user_by_sandbox(
+                sandbox_id, db_path=self._config.database.path
+            )
+            if db_user:
+                unlink_user_sandbox(db_user.id, db_path=self._config.database.path)
             self._sync_nginx()
         except Exception as e:
             raise SandboxOperationError(f"Failed to kill {sandbox_id}: {e}") from e
@@ -357,6 +394,9 @@ class SandboxService:
     ) -> InstanceInfo:
         """Create a new VS Code sandbox instance and start code-server.
 
+        Enforces 1:1 user→instance: if the user already has a running
+        instance, raises SandboxOperationError.
+
         Args:
             user: Group/username for this instance.
             port: Port for code-server inside the container.
@@ -369,6 +409,23 @@ class SandboxService:
         Returns:
             InstanceInfo with endpoint and state.
         """
+        db_user = None
+        groups = get_groups(db_path=self._config.database.path)
+        for g in groups:
+            if g.name == user.group:
+                db_user = find_user_by_group_and_name(
+                    group_id=g.id,
+                    username=user.username,
+                    db_path=self._config.database.path,
+                )
+                break
+        if db_user and db_user.sandbox_id:
+            rec = get_record(db_user.sandbox_id, db_path=self._config.database.path)
+            if rec and rec.terminated_at is None:
+                raise SandboxOperationError(
+                    f"User {user.label} already has instance {db_user.sandbox_id}"
+                )
+
         env = {"PYTHON_VERSION": "3.12"}
         volumes: list[Volume] | None = None
 
@@ -469,6 +526,11 @@ class SandboxService:
             password=password,
             db_path=self._config.database.path,
         )
+
+        if db_user:
+            link_user_sandbox(
+                db_user.id, sandbox_id, db_path=self._config.database.path
+            )
 
         self._sync_nginx()
 
