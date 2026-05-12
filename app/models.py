@@ -52,6 +52,7 @@ class UserInfo:
 
     group: str
     username: str
+    email: str = ""
 
     @property
     def workspace(self) -> str:
@@ -60,6 +61,10 @@ class UserInfo:
     @property
     def label(self) -> str:
         return f"{self.group}/{self.username}"
+
+    @property
+    def display_email(self) -> str:
+        return self.email or f"{self.username}@thon.local"
 
 
 class InstanceInfo(BaseModel):
@@ -238,3 +243,14 @@ class GatewaySetupRequest(BaseModel):
     rate_limit: int = 500
     time_window: int = 60
     mode: GatewayMode = GatewayMode.PER_USER
+
+
+@dataclass
+class NginxStatus:
+    """Status snapshot of the nginx reverse proxy."""
+
+    available: bool = False
+    external_ip: str = ""
+    ssl_configured: bool = False
+    ports: list[int] = field(default_factory=list)
+    config_path: str = ""

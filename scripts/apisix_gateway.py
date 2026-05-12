@@ -21,11 +21,16 @@ Wraps APISIX Admin API to configure:
 - ``key-auth`` plugin for individual consumer API keys
 - Redis-backed rate limiting for multi-instance consistency
 
+The admin API key is auto-detected from the APISIX config file
+(``/usr/local/apisix/conf/config.yaml``). An explicit key can be passed
+via the ``admin_key`` parameter or the ``GATEWAY_ADMIN_KEY`` env var,
+but the default is always read from the installed config.
+
 Usage:
     from apisix_gateway import ApisixGatewayManager
 
-    mgr = ApisixGatewayManager(admin_url="http://127.0.0.1:9180", admin_key="edd1c9f034335f136f87ad84b625c8f1")
-    mgr.create_consumer(username="alice", api_key="alice-key-123", rate_limit=500, time_window=60)
+    mgr = ApisixGatewayManager()  # auto-detects key from APISIX config
+    mgr.create_consumer(username="alice", api_key="alice-key-123", concurrency_limit=1)
     mgr.create_ai_route(lemonade_url="http://127.0.0.1:13305", lemonade_api_key="sk-xxx")
     mgr.setup_gateway(lemonade_url="http://127.0.0.1:13305", users=[...])
 """
@@ -33,6 +38,7 @@ Usage:
 import argparse
 import json
 import logging
+import os
 import secrets
 import sys
 import urllib.error
@@ -41,24 +47,28 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+import yaml
+
 logger = logging.getLogger(__name__)
 
-APISIX_ADMIN_API_KEY_DEFAULT = "edd1c9f034335f136f87ad84b625c8f1"
 APISIX_ADMIN_PORT_DEFAULT = 9180
 APISIX_PROXY_PORT_DEFAULT = 9080
+APISIX_CONFIG_PATH = Path("/usr/local/apisix/conf/config.yaml")
 APISIX_ROUTE_ID = "ai-gateway-route"
 APISIX_EMBEDDING_ROUTE_ID = "ai-gateway-embedding-route"
 LEMONADE_INSTANCE_NAME = "lemonade-instance"
-RATE_LIMIT_TOKENS_DEFAULT = 500
-RATE_LIMIT_WINDOW_DEFAULT = 60
+CONCURRENCY_LIMIT_DEFAULT = 1
+TOKEN_LIMIT_DEFAULT = 0
+TOKEN_WINDOW_DEFAULT = 60
 
 
 @dataclass
 class ConsumerConfig:
     username: str
     api_key: str
-    rate_limit: int = RATE_LIMIT_TOKENS_DEFAULT
-    time_window: int = RATE_LIMIT_WINDOW_DEFAULT
+    concurrency_limit: int = CONCURRENCY_LIMIT_DEFAULT
+    token_limit: int = TOKEN_LIMIT_DEFAULT
+    token_window: int = TOKEN_WINDOW_DEFAULT
 
 
 @dataclass
@@ -83,7 +93,7 @@ class ApisixGatewayManager:
     def __init__(
         self,
         admin_url: str = "http://127.0.0.1:9180",
-        admin_key: str = APISIX_ADMIN_API_KEY_DEFAULT,
+        admin_key: Optional[str] = None,
         proxy_port: int = APISIX_PROXY_PORT_DEFAULT,
         redis_host: Optional[str] = None,
         redis_port: int = 6379,
@@ -91,12 +101,42 @@ class ApisixGatewayManager:
         lemonade_api_key: Optional[str] = None,
     ) -> None:
         self._admin_url = admin_url.rstrip("/")
-        self._admin_key = admin_key
+        detected = self._detect_admin_key()
+        resolved_key = admin_key or os.getenv("GATEWAY_ADMIN_KEY") or detected
+        if not resolved_key:
+            raise RuntimeError(
+                "APISIX admin key not found. Either pass admin_key, "
+                "set GATEWAY_ADMIN_KEY env var, or install APISIX "
+                f"(config expected at {APISIX_CONFIG_PATH})"
+            )
+        self._admin_key = resolved_key
         self._proxy_port = proxy_port
         self._redis_host = redis_host
         self._redis_port = redis_port
         self._redis_password = redis_password
         self._lemonade_api_key = lemonade_api_key
+
+    @staticmethod
+    def _detect_admin_key() -> Optional[str]:
+        try:
+            if APISIX_CONFIG_PATH.exists():
+                with open(APISIX_CONFIG_PATH) as f:
+                    data = yaml.safe_load(f)
+                deployment = (
+                    data.get("deployment", {}) if isinstance(data, dict) else {}
+                )
+                admin = (
+                    deployment.get("admin", {}) if isinstance(deployment, dict) else {}
+                )
+                keys = admin.get("admin_key", []) if isinstance(admin, dict) else []
+                for key_entry in keys:
+                    if isinstance(key_entry, dict) and key_entry.get("role") == "admin":
+                        detected = key_entry.get("key")
+                        if detected:
+                            return detected
+        except Exception:
+            pass
+        return None
 
     @property
     def proxy_url(self) -> str:
@@ -173,54 +213,85 @@ class ApisixGatewayManager:
         self,
         username: str,
         api_key: Optional[str] = None,
-        rate_limit: int = RATE_LIMIT_TOKENS_DEFAULT,
-        time_window: int = RATE_LIMIT_WINDOW_DEFAULT,
+        concurrency_limit: int = CONCURRENCY_LIMIT_DEFAULT,
+        token_limit: int = TOKEN_LIMIT_DEFAULT,
+        token_window: int = TOKEN_WINDOW_DEFAULT,
         lemonade_instance_name: str = LEMONADE_INSTANCE_NAME,
     ) -> ConsumerConfig:
         api_key = api_key or secrets.token_urlsafe(24)
+        safe_username = username.replace("/", "-").replace(" ", "_")
 
-        rate_limit_config: dict = {
-            "policy": "redis" if self._redis_host else "local",
-            "limit_strategy": "total_tokens",
-            "instances": [
-                {
-                    "name": lemonade_instance_name,
-                    "limit": rate_limit,
-                    "time_window": time_window,
-                }
-            ],
-            "rejected_code": 429,
+        plugins: dict = {
+            "key-auth": {"key": api_key},
         }
 
-        if self._redis_host:
-            rate_limit_config["redis_host"] = self._redis_host
-            rate_limit_config["redis_port"] = self._redis_port
-            if self._redis_password:
-                rate_limit_config["redis_password"] = self._redis_password
+        if concurrency_limit > 0:
+            limit_conn_config: dict = {
+                "conn": concurrency_limit,
+                "burst": 0,
+                "default_conn_delay": 0.1,
+                "key_type": "var",
+                "key": "consumer_name",
+                "rejected_code": 429,
+                "rejected_msg": "Concurrency limit exceeded. Please wait for your current request to complete.",
+            }
+            if self._redis_host:
+                limit_conn_config["policy"] = "redis"
+                limit_conn_config["redis_host"] = self._redis_host
+                limit_conn_config["redis_port"] = self._redis_port
+                if self._redis_password:
+                    limit_conn_config["redis_password"] = self._redis_password
+            else:
+                limit_conn_config["policy"] = "local"
+            plugins["limit-conn"] = limit_conn_config
+
+        if token_limit > 0:
+            rate_limit_config: dict = {
+                "policy": "redis" if self._redis_host else "local",
+                "limit_strategy": "total_tokens",
+                "instances": [
+                    {
+                        "name": lemonade_instance_name,
+                        "limit": token_limit,
+                        "time_window": token_window,
+                    }
+                ],
+                "rejected_code": 429,
+            }
+            if self._redis_host:
+                rate_limit_config["redis_host"] = self._redis_host
+                rate_limit_config["redis_port"] = self._redis_port
+                if self._redis_password:
+                    rate_limit_config["redis_password"] = self._redis_password
+            plugins["ai-rate-limiting"] = rate_limit_config
 
         consumer_data = {
-            "username": username,
-            "plugins": {
-                "key-auth": {"key": api_key},
-                "ai-rate-limiting": rate_limit_config,
-            },
+            "username": safe_username,
+            "plugins": plugins,
         }
 
         self._request("/consumers", method="PUT", data=consumer_data)
-        print(
-            f"[Gateway] Created consumer: {username} (rate limit: {rate_limit} tokens/{time_window}s)"
-        )
+
+        limits_desc = []
+        if concurrency_limit > 0:
+            limits_desc.append(f"concurrency={concurrency_limit}")
+        if token_limit > 0:
+            limits_desc.append(f"tokens={token_limit}/{token_window}s")
+        limits_str = ", ".join(limits_desc) if limits_desc else "no limits"
+        print(f"[Gateway] Created consumer: {safe_username} ({limits_str})")
 
         return ConsumerConfig(
-            username=username,
+            username=safe_username,
             api_key=api_key,
-            rate_limit=rate_limit,
-            time_window=time_window,
+            concurrency_limit=concurrency_limit,
+            token_limit=token_limit,
+            token_window=token_window,
         )
 
     def delete_consumer(self, username: str) -> None:
-        self._request(f"/consumers/{username}", method="DELETE")
-        print(f"[Gateway] Deleted consumer: {username}")
+        safe_username = username.replace("/", "-").replace(" ", "_")
+        self._request(f"/consumers/{safe_username}", method="DELETE")
+        print(f"[Gateway] Deleted consumer: {safe_username}")
 
     def list_consumers(self) -> list[dict]:
         try:
@@ -246,6 +317,9 @@ class ApisixGatewayManager:
         uri: str = "/v1/chat/completions",
     ) -> dict:
         effective_key = lemonade_api_key or self._lemonade_api_key
+        auth_header: dict = {}
+        if effective_key:
+            auth_header["Authorization"] = f"Bearer {effective_key}"
         route_data: dict = {
             "uri": uri,
             "methods": ["POST"],
@@ -261,12 +335,8 @@ class ApisixGatewayManager:
                                 "endpoint": lemonade_url,
                             },
                             "auth": {
-                                "header": {
-                                    "Authorization": f"Bearer {effective_key}",
-                                }
-                            }
-                            if effective_key
-                            else {},
+                                "header": auth_header,
+                            },
                             "options": {
                                 "model": lemonade_model,
                             },
@@ -315,19 +385,19 @@ class ApisixGatewayManager:
         upstream_port = parsed.port or 13305
 
         effective_key = lemonade_api_key or self._lemonade_api_key
-        headers: dict = {}
+
+        plugins: dict = {"key-auth": {}}
         if effective_key:
-            headers["Authorization"] = f"Bearer {effective_key}"
+            plugins["proxy-rewrite"] = {
+                "headers": {
+                    "set": {"Authorization": f"Bearer {effective_key}"},
+                },
+            }
 
         route_data: dict = {
             "uri": "/v1/embeddings",
             "methods": ["POST"],
-            "plugins": {
-                "key-auth": {},
-                "proxy-rewrite": {
-                    "headers": headers if headers else {},
-                },
-            },
+            "plugins": plugins,
             "upstream": {
                 "type": "roundrobin",
                 "nodes": {
@@ -395,54 +465,64 @@ class ApisixGatewayManager:
                 consumer = self.create_consumer(
                     username=user_cfg.username,
                     api_key=user_cfg.api_key,
-                    rate_limit=user_cfg.rate_limit,
-                    time_window=user_cfg.time_window,
+                    concurrency_limit=user_cfg.concurrency_limit,
+                    token_limit=user_cfg.token_limit,
+                    token_window=user_cfg.token_window,
                 )
                 created.append(consumer)
 
         return created
 
 
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into *base*, returning a new dict."""
+    result = dict(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
 def generate_kilo_gateway_config(
     gateway_url: str,
     api_key: str,
     model: str = "user.gemma-4-31b-it",
+    model_checkpoint: str = "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL",
+    model_context: int = 262144,
     embedding_model: str = "user.harrier-oss-v1-0.6b",
     enable_embedding: bool = True,
+    skeleton_path: Optional[str] = None,
+    gateway_mode: str = "per-user",
+    chat_models: Optional[list[dict]] = None,
+    default_model: Optional[str] = None,
 ) -> str:
-    config: dict = {
-        "providers": {
-            "lemonade-gateway": {
-                "baseUrl": gateway_url,
-                "apiKey": api_key,
-            }
-        },
-        "models": {
-            "gemma-4-31b-it": {
-                "provider": "lemonade-gateway",
-                "modelId": model,
-            }
-        },
-        "experimental": {
-            "batch_tool": False,
-            "codebase_search": True,
-            "openTelemetry": False,
-            "continue_loop_on_deny": True,
-            "semantic_indexing": True,
-            "agent_manager_tool": True,
-        },
-    }
-    if enable_embedding:
-        config["indexing"] = {
-            "enabled": True,
-            "provider": "openai-compatible",
-            "vectorStore": "lancedb",
-            "openai-compatible": {
-                "baseUrl": f"{gateway_url}/v1",
-                "apiKey": api_key,
-                "model": embedding_model,
-            },
-        }
+    import sys
+
+    project_root = str(Path(__file__).resolve().parent.parent)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
+
+    from app.kilo_config import KiloMode, generate_kilo_config
+
+    kilo_mode = (
+        KiloMode.GATEWAY_PER_GROUP
+        if gateway_mode == "per-group"
+        else KiloMode.GATEWAY_PER_USER
+    )
+    config = generate_kilo_config(
+        mode=kilo_mode,
+        base_url=f"{gateway_url}/v1",
+        api_key=api_key,
+        model_name=model,
+        model_checkpoint=model_checkpoint,
+        model_context=model_context,
+        chat_models=chat_models,
+        default_model=default_model,
+        embedding_model=embedding_model if enable_embedding else None,
+        skeleton_path=skeleton_path,
+    )
     return json.dumps(config, indent=2)
 
 
@@ -459,9 +539,9 @@ Examples:
   python apisix_gateway.py setup --groups groups.yaml --lemonade-url http://127.0.0.1:13305 --redis-host 127.0.0.1
 
   # Create a single consumer
-  python apisix_gateway.py create-consumer --username alice --rate-limit 500
+  python apisix_gateway.py create-consumer --username alice --concurrency-limit 1
 
-  # Generate kilo.json for a consumer
+  # Generate kilo.jsonc for a consumer
   python apisix_gateway.py generate-kilo --username alice --api-key alice-key
 
   # Cleanup all gateway resources
@@ -490,8 +570,8 @@ Examples:
     setup_parser.add_argument(
         "--admin-key",
         type=str,
-        default=APISIX_ADMIN_API_KEY_DEFAULT,
-        help="APISIX Admin API key",
+        default=None,
+        help="APISIX Admin API key (auto-detected from config if not set)",
     )
     setup_parser.add_argument(
         "--admin-port",
@@ -511,21 +591,27 @@ Examples:
     setup_parser.add_argument("--redis-port", type=int, default=6379, help="Redis port")
     setup_parser.add_argument("--redis-password", type=str, help="Redis password")
     setup_parser.add_argument(
-        "--rate-limit",
+        "--concurrency-limit",
         type=int,
-        default=RATE_LIMIT_TOKENS_DEFAULT,
-        help=f"Token limit per consumer per time window (default: {RATE_LIMIT_TOKENS_DEFAULT})",
+        default=CONCURRENCY_LIMIT_DEFAULT,
+        help=f"Max concurrent requests per consumer (default: {CONCURRENCY_LIMIT_DEFAULT}, 0=no limit)",
     )
     setup_parser.add_argument(
-        "--time-window",
+        "--token-limit",
         type=int,
-        default=RATE_LIMIT_WINDOW_DEFAULT,
-        help=f"Rate limit time window in seconds (default: {RATE_LIMIT_WINDOW_DEFAULT})",
+        default=TOKEN_LIMIT_DEFAULT,
+        help=f"Token limit per consumer per time window (default: {TOKEN_LIMIT_DEFAULT} = no token limit)",
+    )
+    setup_parser.add_argument(
+        "--token-window",
+        type=int,
+        default=TOKEN_WINDOW_DEFAULT,
+        help=f"Token limit time window in seconds (default: {TOKEN_WINDOW_DEFAULT})",
     )
     setup_parser.add_argument(
         "--generate-kilo",
         action="store_true",
-        help="Generate kilo.json for each consumer",
+        help="Generate kilo.jsonc for each consumer",
     )
     setup_parser.add_argument(
         "--per-group",
@@ -536,7 +622,7 @@ Examples:
     setup_parser.add_argument(
         "--external-ip",
         type=str,
-        help="External IP for kilo.json base URL",
+        help="External IP for kilo.jsonc base URL",
     )
     setup_parser.add_argument(
         "--embedding-model",
@@ -559,14 +645,24 @@ Examples:
         "--api-key", type=str, help="API key (auto-generated if omitted)"
     )
     consumer_parser.add_argument(
-        "--rate-limit", type=int, default=RATE_LIMIT_TOKENS_DEFAULT
+        "--concurrency-limit",
+        type=int,
+        default=CONCURRENCY_LIMIT_DEFAULT,
+        help=f"Max concurrent requests (default: {CONCURRENCY_LIMIT_DEFAULT}, 0=no limit)",
     )
     consumer_parser.add_argument(
-        "--time-window", type=int, default=RATE_LIMIT_WINDOW_DEFAULT
+        "--token-limit",
+        type=int,
+        default=TOKEN_LIMIT_DEFAULT,
+        help=f"Token limit per time window (default: {TOKEN_LIMIT_DEFAULT} = no token limit)",
     )
     consumer_parser.add_argument(
-        "--admin-key", type=str, default=APISIX_ADMIN_API_KEY_DEFAULT
+        "--token-window",
+        type=int,
+        default=TOKEN_WINDOW_DEFAULT,
+        help=f"Token limit time window in seconds (default: {TOKEN_WINDOW_DEFAULT})",
     )
+    consumer_parser.add_argument("--admin-key", type=str, default=None)
     consumer_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
     )
@@ -576,15 +672,13 @@ Examples:
 
     delete_parser = subparsers.add_parser("delete-consumer", help="Delete a consumer")
     delete_parser.add_argument("--username", type=str, required=True)
-    delete_parser.add_argument(
-        "--admin-key", type=str, default=APISIX_ADMIN_API_KEY_DEFAULT
-    )
+    delete_parser.add_argument("--admin-key", type=str, default=None)
     delete_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
     )
 
     kilo_parser = subparsers.add_parser(
-        "generate-kilo", help="Generate kilo.json for a consumer"
+        "generate-kilo", help="Generate kilo.jsonc for a consumer"
     )
     kilo_parser.add_argument("--username", type=str, required=True)
     kilo_parser.add_argument("--api-key", type=str, required=True)
@@ -603,13 +697,11 @@ Examples:
         "--no-embedding",
         action="store_true",
         default=False,
-        help="Omit indexing section from kilo.json",
+        help="Omit indexing section from kilo.jsonc",
     )
 
     status_parser = subparsers.add_parser("status", help="Check gateway status")
-    status_parser.add_argument(
-        "--admin-key", type=str, default=APISIX_ADMIN_API_KEY_DEFAULT
-    )
+    status_parser.add_argument("--admin-key", type=str, default=None)
     status_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
     )
@@ -617,9 +709,7 @@ Examples:
     cleanup_parser = subparsers.add_parser(
         "cleanup", help="Remove all gateway resources"
     )
-    cleanup_parser.add_argument(
-        "--admin-key", type=str, default=APISIX_ADMIN_API_KEY_DEFAULT
-    )
+    cleanup_parser.add_argument("--admin-key", type=str, default=None)
     cleanup_parser.add_argument(
         "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
     )
@@ -632,7 +722,7 @@ Examples:
 
     def _make_mgr(parsed_args) -> ApisixGatewayManager:
         admin_port = getattr(parsed_args, "admin_port", APISIX_ADMIN_PORT_DEFAULT)
-        admin_key = getattr(parsed_args, "admin_key", APISIX_ADMIN_API_KEY_DEFAULT)
+        admin_key = getattr(parsed_args, "admin_key", None)
         return ApisixGatewayManager(
             admin_url=f"http://127.0.0.1:{admin_port}",
             admin_key=admin_key,
@@ -658,13 +748,21 @@ Examples:
                         continue
                     group_users = group_data.get("users", [])
                     user_count = len(group_users)
-                    group_rate_limit = args.rate_limit * user_count
+                    group_token_limit = (
+                        args.token_limit * user_count if args.token_limit > 0 else 0
+                    )
+                    group_concurrency = (
+                        args.concurrency_limit * user_count
+                        if args.concurrency_limit > 0
+                        else 0
+                    )
                     users.append(
                         ConsumerConfig(
                             username=f"group-{group_name}",
                             api_key=secrets.token_urlsafe(24),
-                            rate_limit=group_rate_limit,
-                            time_window=args.time_window,
+                            concurrency_limit=group_concurrency,
+                            token_limit=group_token_limit,
+                            token_window=args.token_window,
                         )
                     )
             else:
@@ -676,8 +774,9 @@ Examples:
                             ConsumerConfig(
                                 username=f"{group_name}-{username}",
                                 api_key=secrets.token_urlsafe(24),
-                                rate_limit=args.rate_limit,
-                                time_window=args.time_window,
+                                concurrency_limit=args.concurrency_limit,
+                                token_limit=args.token_limit,
+                                token_window=args.token_window,
                             )
                         )
         else:
@@ -685,8 +784,9 @@ Examples:
                 ConsumerConfig(
                     username="default",
                     api_key=secrets.token_urlsafe(24),
-                    rate_limit=args.rate_limit,
-                    time_window=args.time_window,
+                    concurrency_limit=args.concurrency_limit,
+                    token_limit=args.token_limit,
+                    token_window=args.token_window,
                 )
             )
 
@@ -713,9 +813,15 @@ Examples:
         for consumer in created:
             print(f"\n  Consumer: {consumer.username}")
             print(f"    API Key: {consumer.api_key}")
-            print(
-                f"    Rate Limit: {consumer.rate_limit} tokens / {consumer.time_window}s"
-            )
+            limits_parts = []
+            if consumer.concurrency_limit > 0:
+                limits_parts.append(f"concurrency={consumer.concurrency_limit}")
+            if consumer.token_limit > 0:
+                limits_parts.append(
+                    f"tokens={consumer.token_limit}/{consumer.token_window}s"
+                )
+            limits_str = ", ".join(limits_parts) if limits_parts else "no limits"
+            print(f"    Limits: {limits_str}")
             print(f"    Chat Endpoint: {gateway_base}/v1/chat/completions")
             if not args.no_embedding:
                 print(f"    Embedding Endpoint: {gateway_base}/v1/embeddings")
@@ -739,12 +845,21 @@ Examples:
         consumer = mgr.create_consumer(
             username=args.username,
             api_key=args.api_key,
-            rate_limit=args.rate_limit,
-            time_window=args.time_window,
+            concurrency_limit=args.concurrency_limit,
+            token_limit=args.token_limit,
+            token_window=args.token_window,
         )
         print(f"\n  Consumer: {consumer.username}")
         print(f"  API Key: {consumer.api_key}")
-        print(f"  Rate Limit: {consumer.rate_limit} tokens / {consumer.time_window}s")
+        limits_parts = []
+        if consumer.concurrency_limit > 0:
+            limits_parts.append(f"concurrency={consumer.concurrency_limit}")
+        if consumer.token_limit > 0:
+            limits_parts.append(
+                f"tokens={consumer.token_limit}/{consumer.token_window}s"
+            )
+        limits_str = ", ".join(limits_parts) if limits_parts else "no limits"
+        print(f"  Limits: {limits_str}")
 
     elif args.command == "delete-consumer":
         mgr = _make_mgr(args)

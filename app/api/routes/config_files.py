@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/config-files", tags=["config-files"])
 
 CONFIG_LABELS = {
     "config_groups_yaml": "Groups YAML",
-    "config_kilo_json": "Kilo Code Config (kilo.json)",
+    "config_kilo_json": "Kilo Code Config (kilo.jsonc)",
     "config_vscode_settings": "VS Code Settings",
 }
 

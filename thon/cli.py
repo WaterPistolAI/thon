@@ -17,7 +17,8 @@
 Usage:
     thon init                  # Interactive guided setup wizard
     thon setup                 # Install prerequisites + configure from thon.yaml
-    thon run                   # Start VS Code instances from thon.yaml
+    thon run                   # Start the API server (default, no users required)
+    thon launch                # Launch VS Code instances from thon.yaml (legacy batch mode)
     thon config show           # Display current config
     thon config env            # Export config as .env file
     thon config validate       # Validate thon.yaml
@@ -38,16 +39,70 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = SCRIPT_DIR.parent
 sys.path.insert(0, str(PROJECT_ROOT))  # noqa: E402
 
-from thon.config import DEFAULT_CONFIG_PATH, ThonConfig  # noqa: E402
+from thon.config import DEFAULT_CONFIG_PATH, THON_DIR, ThonConfig  # noqa: E402
+
+
+def _sync_lemonade_keys(config: ThonConfig) -> None:
+    """Read API keys from lemonade systemd override and write into config + .env."""
+    override_path = Path("/etc/systemd/system/lemond.service.d/override.conf")
+    if not override_path.is_file():
+        override_path = Path(
+            "/etc/systemd/system/lemonade-server.service.d/override.conf"
+        )
+    if not override_path.is_file():
+        return
+
+    import re
+
+    content = override_path.read_text()
+    api_match = re.search(r'LEMONADE_API_KEY="?([^"\s]+)"?', content)
+    admin_match = re.search(r'LEMONADE_ADMIN_API_KEY="?([^"\s]+)"?', content)
+
+    if api_match:
+        config.lemonade.api_key = api_match.group(1)
+    if admin_match:
+        config.lemonade.admin_api_key = admin_match.group(1)
+
+    if api_match or admin_match:
+        env_path = PROJECT_ROOT / ".env"
+        if env_path.is_file():
+            lines = env_path.read_text().splitlines()
+            updated: list[str] = []
+            found_api = False
+            found_admin = False
+            for line in lines:
+                if line.startswith("LEMONADE_API_KEY="):
+                    updated.append(f"LEMONADE_API_KEY={config.lemonade.api_key}")
+                    found_api = True
+                elif line.startswith("LEMONADE_ADMIN_API_KEY="):
+                    updated.append(
+                        f"LEMONADE_ADMIN_API_KEY={config.lemonade.admin_api_key}"
+                    )
+                    found_admin = True
+                else:
+                    updated.append(line)
+            if not found_api and config.lemonade.api_key:
+                updated.append(f"LEMONADE_API_KEY={config.lemonade.api_key}")
+            if not found_admin and config.lemonade.admin_api_key:
+                updated.append(
+                    f"LEMONADE_ADMIN_API_KEY={config.lemonade.admin_api_key}"
+                )
+            env_path.write_text("\n".join(updated) + "\n")
+        print("  Synced Lemonade API keys to .env")
 
 
 def _load_config(path: Optional[str] = None) -> ThonConfig:
-    """Load config from the given path, falling back to ./thon.yaml."""
+    """Load config from the given path, falling back to ~/.thon/thon.yaml."""
     p = Path(path) if path else DEFAULT_CONFIG_PATH
     if not p.is_file():
-        print(f"Error: Config file not found at {p}")
-        print("Run `thon init` to create one.")
-        sys.exit(1)
+        legacy = Path("thon.yaml")
+        if legacy.is_file():
+            print(f"Note: Found {legacy} — consider moving to {DEFAULT_CONFIG_PATH}")
+            p = legacy
+        else:
+            print(f"Error: Config file not found at {p}")
+            print("Run `python -m thon init` to create one.")
+            sys.exit(1)
     return ThonConfig.from_yaml(p)
 
 
@@ -106,6 +161,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 config.lemonade.model,
                 "--model-name",
                 config.lemonade.model_name,
+                "--embedding-model",
+                config.lemonade.embedding_model,
+                "--embedding-model-name",
+                config.lemonade.embedding_model_name,
                 "--num-users",
                 str(num_users),
                 "--port",
@@ -125,15 +184,22 @@ def cmd_setup(args: argparse.Namespace) -> None:
             if config.lemonade.admin_api_key:
                 cmd.extend(["--admin-api-key", config.lemonade.admin_api_key])
 
-            kilo_output = config.kilo.config_file or "kilo.json"
+            kilo_output = str(config.kilo.resolved_config_file)
             cmd.extend(["--kilo-config", kilo_output])
+
+            skeleton = config.kilo.skeleton_file
+            if skeleton:
+                skeleton_path = PROJECT_ROOT / skeleton
+                if skeleton_path.is_file():
+                    cmd.extend(["--kilo-skeleton", str(skeleton_path)])
 
             print(f"  Running: {' '.join(cmd)}")
             subprocess.run(cmd, check=False)
+
+            if config.lemonade.generate_keys and not config.lemonade.api_key:
+                _sync_lemonade_keys(config)
         else:
-            print("  Skipping (lemonade_server.py not found)")
-    else:
-        print("\n[3/6] Lemonade — skipped (disabled)")
+            print("\n[3/6] Lemonade — skipped (disabled)")
 
     # 4. AI Gateway
     if config.gateway.enabled:
@@ -151,11 +217,15 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 "setup",
                 "--lemonade-url",
                 lemonade_url,
-                "--rate-limit",
-                str(config.gateway.rate_limit),
-                "--time-window",
-                str(config.gateway.time_window),
+                "--concurrency-limit",
+                str(config.gateway.concurrency_limit),
+                "--token-limit",
+                str(config.gateway.token_limit),
+                "--token-window",
+                str(config.gateway.token_window),
             ]
+            if config.gateway.admin_key:
+                cmd.extend(["--admin-key", config.gateway.admin_key])
             if config.gateway.redis_host:
                 cmd.extend(["--redis-host", config.gateway.redis_host])
             if config.external_ip:
@@ -163,9 +233,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
             if config.gateway.mode == "per-group":
                 cmd.append("--per-group")
 
-            groups_yaml = PROJECT_ROOT / "groups.yaml"
-            if groups_yaml.is_file():
-                cmd.extend(["--groups", str(groups_yaml)])
+            if config.groups:
+                groups_yaml = PROJECT_ROOT / "groups.yaml"
+                if groups_yaml.is_file():
+                    cmd.extend(["--groups", str(groups_yaml)])
 
             print(f"  Running: {' '.join(cmd)}")
             subprocess.run(cmd, check=False)
@@ -192,11 +263,62 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print(f"    AI Gateway:    {'enabled' if config.gateway.enabled else 'disabled'}")
     print(f"    Dashboard:     {config.dashboard.host}:{config.dashboard.port}")
     print()
-    print("  Run `thon run` to start instances.")
+    print("  Run `python -m thon run` to start the API server.")
+    print("  Run `python -m thon launch` to launch VS Code instances.")
 
 
 def cmd_run(args: argparse.Namespace) -> None:
+    THON_DIR.mkdir(parents=True, exist_ok=True)
+    p = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
+    if not p.is_file():
+        legacy = Path("thon.yaml")
+        if legacy.is_file():
+            p = legacy
+    if p.is_file():
+        config = ThonConfig.from_yaml(p)
+        config.apply_env()
+    else:
+        config = None
+
+    log_level = getattr(args, "log_level", None)
+    if config and config.log_level:
+        log_level = log_level or config.log_level
+    log_level = (log_level or "INFO").upper()
+    os.environ.setdefault("THON_LOG_LEVEL", log_level)
+
+    host = (config.dashboard.host if config else None) or "0.0.0.0"
+    port = (config.dashboard.port if config else None) or 8100
+    debug = config.dashboard.debug if config else False
+
+    print()
+    print("═" * 60)
+    print("  THON API Server")
+    print("═" * 60)
+    print(f"  Host:      {host}")
+    print(f"  Port:      {port}")
+    print(f"  Log level: {log_level.upper()}")
+    print(f"  Debug:     {'on' if debug else 'off'}")
+    print(
+        f"  API docs:  http://{host if host != '0.0.0.0' else 'localhost'}:{port}/docs"
+    )
+    print("═" * 60)
+    print()
+
+    import uvicorn
+
+    uvicorn.run(
+        "app.main:app",
+        host=host,
+        port=port,
+        reload=debug,
+        log_level=log_level.lower(),
+    )
+
+
+def cmd_launch(args: argparse.Namespace) -> None:
     config = _load_config(args.config)
+    if getattr(args, "demo", False):
+        config.demo = True
     config.apply_env()
 
     sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
@@ -273,28 +395,29 @@ def _write_temp_groups(config: ThonConfig) -> None:
     import yaml
 
     data = {"groups": {name: {"users": users} for name, users in config.groups.items()}}
-    target = PROJECT_ROOT / ".thon-groups.yaml"
+    THON_DIR.mkdir(parents=True, exist_ok=True)
+    target = THON_DIR / "groups.yaml"
     target.write_text(yaml.dump(data, default_flow_style=False))
     print(f"  Wrote groups to {target}")
 
 
 def _resolve_path(path_str: str) -> Path:
-    """Resolve a path relative to PROJECT_ROOT if not absolute."""
+    """Resolve a path relative to PROJECT_ROOT or ~/.thon/ if not absolute."""
     p = Path(path_str)
     if p.is_absolute():
         return p
     resolved = PROJECT_ROOT / p
     if resolved.exists():
         return resolved
+    thon_resolved = THON_DIR / p
+    if thon_resolved.exists():
+        return thon_resolved
     return p
 
 
 def _validate_config(config: ThonConfig) -> list[str]:
     """Return a list of validation error messages."""
     errors: list[str] = []
-
-    if not config.groups:
-        errors.append("No groups defined")
 
     for group_name, users in config.groups.items():
         if not users:
@@ -352,7 +475,9 @@ Examples:
   thon init                    Interactive setup wizard
   thon init --non-interactive  Generate config with defaults
   thon setup                   Install prerequisites + configure
-  thon run                     Start VS Code instances
+  thon run                     Start the API server (default)
+  thon run --log-level DEBUG   Start with debug logging
+  thon launch                  Launch VS Code instances (batch mode)
   thon config show             Display current config
   thon config env              Export config as .env file
   thon config validate         Validate thon.yaml
@@ -363,7 +488,7 @@ Examples:
         "--config",
         type=str,
         default=None,
-        help="Path to thon.yaml (default: ./thon.yaml)",
+        help=f"Path to thon.yaml (default: {DEFAULT_CONFIG_PATH})",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
@@ -384,10 +509,28 @@ Examples:
 
     # run
     run_parser = subparsers.add_parser(
-        "run", help="Start VS Code instances from thon.yaml"
+        "run", help="Start the THON API server (default)"
     )
     run_parser.add_argument(
-        "--group", type=str, default=None, help="Run only this group"
+        "--log-level",
+        type=str,
+        default=None,
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        help="Log level (default: from thon.yaml or INFO)",
+    )
+
+    # launch
+    launch_parser = subparsers.add_parser(
+        "launch", help="Launch VS Code instances from thon.yaml (legacy batch mode)"
+    )
+    launch_parser.add_argument(
+        "--group", type=str, default=None, help="Launch only this group"
+    )
+    launch_parser.add_argument(
+        "--demo",
+        action="store_true",
+        default=False,
+        help="Create a default workspace when no users/groups are configured",
     )
 
     # config
@@ -415,6 +558,8 @@ Examples:
         cmd_setup(args)
     elif args.command == "run":
         cmd_run(args)
+    elif args.command == "launch":
+        cmd_launch(args)
     elif args.command == "config":
         if not args.config_command:
             config_parser.print_help()

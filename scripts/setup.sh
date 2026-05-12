@@ -135,7 +135,7 @@ echo "     bash ${SCRIPT_DIR}/setup-lemonade.sh --groups ${SCRIPT_DIR}/groups.ya
 echo ""
 echo "  3. In another terminal, start the VS Code sandboxes:"
 echo "     . ~/.venv/bin/activate"
-echo "     python ${REPO_DIR}/main.py --groups ${REPO_DIR}config/groups.yaml --external-ip <YOUR_IP> --lemonade kilo.json --vscode-settings ${SCRIPT_DIR}/vscode-settings.jsonc"
+echo "     python ${REPO_DIR}/main.py --groups ${REPO_DIR}config/groups.yaml --external-ip <YOUR_IP> --lemonade kilo.jsonc --vscode-settings ${SCRIPT_DIR}/vscode-settings.jsonc"
 echo ""
 if [ -n "$CAROOT" ]; then
     echo "[Setup] For client browsers: install the mkcert CA root from:"

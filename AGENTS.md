@@ -14,7 +14,7 @@ and optional local LLM inference via Lemonade Server.
 
 ```bash
 # One-time prerequisite installation (python3, nginx, docker, mkcert, openssl)
-bash ./setup.sh
+bash ./scripts/setup.sh
 
 # Lint
 pip run ruff check .
@@ -26,34 +26,34 @@ pip run ruff format .
 pip run pyright
 
 # Run: all groups from groups.yaml with nginx + SSL (default)
-python ./main.py --groups groups.yaml --external-ip 165.245.138.159
+python ./scripts/main.py --groups groups.yaml --external-ip 165.245.138.159
 
 # Run: single group
-python ./main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
 
 # Run: with secure per-user passwords
-python ./main.py --groups groups.yaml --secure --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --secure --external-ip 1.2.3.4
 
 # Run: with persistent workspace bind mounts
-python ./main.py --groups groups.yaml --workspace-dir /vs-code-remote
+python ./scripts/main.py --groups groups.yaml --workspace-dir /thon-workspace
 
 # Run: single instance without groups (like examples/vscode/main.py)
-python ./main.py
+python ./scripts/main.py
 
 # Run: direct HTTP without nginx
-python ./main.py --no-nginx
+python ./scripts/main.py --no-nginx
 
 # Cleanup all nginx configs
-python ./main.py --cleanup
+python ./scripts/main.py --cleanup
 
 # Build Docker image
 docker build -t waterpistol/thon:latest ./
 
 # Lemonade Server: full setup via shell (recommended — service manages its own lifecycle)
-bash ./setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4
+bash ./scripts/setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 
 # Lemonade Server: full setup without embedding model
-bash ./setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4 --no-embedding
+bash ./scripts/setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4 --no-embedding
 
 # Lemonade Server: full setup via Python wrapper (alternative)
 python ./lemonade_server.py run --groups groups.yaml --generate-keys --external-ip 1.2.3.4
@@ -71,11 +71,11 @@ sudo journalctl -u lemonade-server -f
 lemonade pull unsloth/gemma-4-31B-it-GGUF:Q8_K_XL
 lemonade config set llamacpp.backend=auto host=0.0.0.0
 
-# Run VS Code instances with Lemonade inference (injects kilo.json into each sandbox)
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+# Run VS Code instances with Lemonade inference (injects kilo.jsonc into each sandbox)
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc
 
 # AI Gateway: one-time install (APISIX, etcd, Redis)
-INSTALL_GATEWAY=true bash ./setup.sh
+INSTALL_GATEWAY=true bash ./scripts/setup.sh
 # or: bash ./scripts/setup-apisix.sh
 
 # AI Gateway: setup with per-consumer API keys and rate limiting
@@ -94,10 +94,10 @@ python ./scripts/apisix_gateway.py status
 python ./scripts/apisix_gateway.py cleanup
 
 # Run VS Code instances with AI Gateway (per-user rate limiting)
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
 
 # Run VS Code instances with AI Gateway (per-group shared API keys)
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
 ```
 
 ## Code Style
@@ -164,10 +164,10 @@ Use `print()` with prefixed labels: `[{group}/{username}]`, `[Nginx]`, `[SSL]`
 ### Key Classes
 - **`NginxConfigGenerator`**: generates **per-port individual** nginx config files in
   `/etc/nginx/sites-available/`, symlinked to `/etc/nginx/sites-enabled/`, named
-  `sandbox-vscode-remote-{port}`. Each config has its own server block.
+  `sandbox-thon-{port}`. Each config has its own server block.
   - `generate_port_config(port, cert_path, key_path, ca_cert_path)` — one file per port
   - `enable_config(config_path)` — symlink to sites-enabled
-  - `cleanup_all()` — remove all `sandbox-vscode-remote-*` configs and reload
+  - `cleanup_all()` — remove all `sandbox-thon-*` configs and reload
 - **`SSLCertificateGenerator`**: generates SSL certs via **mkcert** (preferred, CA-trusted)
   with **openssl** fallback. Single shared cert for all instances. Filename includes hash
   of IP so changing `--external-ip` triggers regeneration.
@@ -205,8 +205,8 @@ is correct. The browser sends the full endpoint path (e.g., `/51111/proxy/8448/`
 
 ### Persistent Workspaces
 
-With `--workspace-dir /vs-code-remote`, each user gets a host bind mount:
-- Host path: `/vs-code-remote/{group}/{username}`
+With `--workspace-dir /thon-workspace`, each user gets a host bind mount:
+- Host path: `/thon-workspace/{group}/{username}`
 - Container mount: `/workspace/{group}/{username}`
 - Implemented via SDK `Volume(name="workspace", host=Host(path=host_path), mount_path=workspace_path)`
 - Host directories are created with `os.makedirs()` before sandbox creation
@@ -263,7 +263,7 @@ Python process needed.
 **Two ways to set up:**
 1. **`setup-lemonade.sh`** (recommended) — Shell script that uses the `lemonade` CLI
    and `systemctl` directly. One command does everything: install, configure, generate
-   API keys, pull model, generate kilo.json.
+   API keys, pull model, generate kilo.jsonc.
 2. **`lemonade_server.py`** — Python wrapper with `LemonadeServerManager` class.
    Provides subcommands (`install`, `configure`, `start`, `stop`, `pull`, `run`, etc.)
    and programmatic access to the same operations. Useful for scripted automation.
@@ -365,20 +365,20 @@ Custom llama.cpp args (safe to override):
 When both are set, either key is accepted for regular endpoints; admin key is required for internal.
 
 **Kilo Code Integration:**
-1. `setup-lemonade.sh --groups groups.yaml --generate-keys` generates API keys and writes `kilo.json`
-2. `kilo.json` contains: provider name (`lemonade`), base URL (auto-detected), API key, model ID (`user.gemma-4-31b-it`), `experimental` flags, and `indexing` config for semantic code search
+1. `setup-lemonade.sh --groups groups.yaml --generate-keys` generates API keys and writes `kilo.jsonc`
+2. `kilo.jsonc` contains: provider name (`lemonade`), base URL (auto-detected), API key, model ID (`user.gemma-4-31b-it`), `experimental` flags, and `indexing` config for semantic code search
 3. Base URL resolution order: `--external-ip` > Docker bridge gateway > `localhost`
-4. `main.py --lemonade kilo.json` injects the config into each sandbox at `/workspace/.kilo/kilo.json`
+4. `main.py --lemonade kilo.jsonc` injects the config into each sandbox at `/workspace/.kilo/kilo.jsonc`
 5. Kilo Code extension in the sandbox reads the config and connects to the Lemonade server
 6. The `indexing` section configures semantic code search using the embedding model (`user.harrier-oss-v1-0.6b`)
 
 **Full Workflow:**
 ```bash
-# Terminal 1: Start Lemonade server with groups-based user count (generates kilo.json)
+# Terminal 1: Start Lemonade server with groups-based user count (generates kilo.jsonc)
 python lemonade_server.py run --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 
 # Terminal 2: Start VS Code sandboxes with Lemonade inference
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc
 ```
 
 ### AI Gateway (APISIX Rate Limiting & Per-Consumer Keys)
@@ -401,7 +401,7 @@ Redis-backed rate limiting ensures consistency across multiple gateway instances
 **Installation:**
 ```bash
 # Option 1: During initial setup
-INSTALL_GATEWAY=true bash ./setup.sh
+INSTALL_GATEWAY=true bash ./scripts/setup.sh
 
 # Option 2: Standalone install script
 bash ./scripts/setup-apisix.sh
@@ -430,23 +430,23 @@ python scripts/apisix_gateway.py status
 # Remove all consumers and routes
 python scripts/apisix_gateway.py cleanup
 
-# Generate kilo.json pointing to gateway
+# Generate kilo.jsonc pointing to gateway
 python scripts/apisix_gateway.py generate-kilo --username alice --api-key alice-key --external-ip 1.2.3.4
 ```
 
 **Integration with `main.py`:**
 ```bash
 # Run with gateway enabled — per-user (auto-creates consumers from groups.yaml)
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
 
 # Per-group: one consumer per group with shared API key
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
 
 # With Redis-backed rate limiting
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
 
 # Custom rate limits
-python main.py --groups groups.yaml --external-ip 1.2.3.4 \
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 \
   --gateway --gateway-rate-limit 1000 --gateway-time-window 120
 ```
 
@@ -454,7 +454,7 @@ When `--gateway` is enabled:
 1. Gateway consumers are created BEFORE sandbox instances
 2. Each consumer gets `key-auth` credential + `ai-rate-limiting` plugin config
 3. In per-group mode, all users in a group share the same API key; rate limit is `per_user_limit * num_users`
-4. A gateway-aware `kilo.json` is injected into each sandbox, pointing to the gateway
+4. A gateway-aware `kilo.jsonc` is injected into each sandbox, pointing to the gateway
    instead of directly to Lemonade
 5. Gateway cleanup runs in the `finally` block alongside nginx and sandbox cleanup
 
@@ -490,7 +490,7 @@ Each consumer gets:
 |----------|---------|-------------|
 | `GATEWAY_ENABLED` | `false` | Enable AI Gateway features in dashboard |
 | `GATEWAY_ADMIN_URL` | `http://127.0.0.1:9180` | APISIX Admin API URL |
-| `GATEWAY_ADMIN_KEY` | `edd1c9f034335f136f87ad84b625c8f1` | APISIX Admin API key |
+| `GATEWAY_ADMIN_KEY` | (auto-detected) | APISIX Admin API key (auto-detected from `/usr/local/apisix/conf/config.yaml` if not set) |
 | `GATEWAY_PROXY_PORT` | `9080` | APISIX proxy port |
 | `GATEWAY_REDIS_HOST` | (none) | Redis host for rate limiting |
 | `GATEWAY_REDIS_PORT` | `6379` | Redis port |
@@ -557,18 +557,18 @@ extensions making cross-site requests to github.com — cannot be fixed server-s
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Entry point; argparse CLI; groups loading; instance orchestration; persistent workspaces; Lemonade kilo.json injection |
+| `main.py` | Entry point; argparse CLI; groups loading; instance orchestration; persistent workspaces; Lemonade kilo.jsonc injection |
 | `scripts/setup.sh` | One-time install: python3, nginx, docker.io, mkcert, openssl |
 | `scripts/nginx_config.py` | `NginxConfigGenerator`; per-port individual configs in sites-available |
 | `scripts/ssl_cert.py` | `SSLCertificateGenerator`; mkcert primary with openssl fallback |
 | `scripts/generate-certs.py` | Legacy mkcert helper (preserved for local dev) |
-| `scripts/lemonade_server.py` | `LemonadeServerManager`; Python wrapper for install, configure, start/stop, pull/load models, generate kilo.json |
-| `scripts/setup-lemonade.sh` | All-in-one shell script: install, configure, generate API keys, pull model, generate kilo.json (recommended) |
+| `scripts/lemonade_server.py` | `LemonadeServerManager`; Python wrapper for install, configure, start/stop, pull/load models, generate kilo.jsonc |
+| `scripts/setup-lemonade.sh` | All-in-one shell script: install, configure, generate API keys, pull model, generate kilo.jsonc (recommended) |
 | `scripts/build.sh` | Build helper script |
 | `scripts/build-amd-mi300x-llama-server.sh` | Build llama.cpp from source for AMD MI300X (gfx942) with ROCm |
 | `scripts/prerequisite-script.sh` | Prerequisite installation |
 | `config/groups.yaml.example` | Groups and users configuration template |
-| `config/kilo.json.example` | Kilo Code config template for Lemonade OpenAI-compatible provider |
+| `config/kilo.jsonc.example` | Kilo Code config template for Lemonade OpenAI-compatible provider |
 | `config/vscode-settings.jsonc.example` | VS Code settings template injected into each sandbox's code-server |
 | `config/extensions.txt.example` | VS Code extensions list for Docker image |
 | `reference/kilo.config.schema.json` | Kilo config JSON schema |

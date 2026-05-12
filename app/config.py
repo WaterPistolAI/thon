@@ -128,6 +128,19 @@ class DatabaseConfig:
 
 
 @dataclass
+class LogConfig:
+    """Logging configuration."""
+
+    level: str = field(default_factory=lambda: os.getenv("THON_LOG_LEVEL", "INFO"))
+    format: str = field(
+        default_factory=lambda: os.getenv(
+            "THON_LOG_FORMAT",
+            "%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
+        )
+    )
+
+
+@dataclass
 class EventConfig:
     """Event (hackathon) identity settings."""
 
@@ -147,11 +160,7 @@ class GatewayConfig:
     admin_url: str = field(
         default_factory=lambda: os.getenv("GATEWAY_ADMIN_URL", "http://127.0.0.1:9180")
     )
-    admin_key: str = field(
-        default_factory=lambda: os.getenv(
-            "GATEWAY_ADMIN_KEY", "edd1c9f034335f136f87ad84b625c8f1"
-        )
-    )
+    admin_key: str = field(default_factory=lambda: os.getenv("GATEWAY_ADMIN_KEY", ""))
     proxy_port: int = field(
         default_factory=lambda: int(os.getenv("GATEWAY_PROXY_PORT", "9080"))
     )
@@ -164,11 +173,14 @@ class GatewayConfig:
     redis_password: Optional[str] = field(
         default_factory=lambda: os.getenv("GATEWAY_REDIS_PASSWORD")
     )
-    rate_limit_tokens: int = field(
-        default_factory=lambda: int(os.getenv("GATEWAY_RATE_LIMIT_TOKENS", "500"))
+    concurrency_limit: int = field(
+        default_factory=lambda: int(os.getenv("GATEWAY_CONCURRENCY_LIMIT", "1"))
     )
-    rate_limit_window: int = field(
-        default_factory=lambda: int(os.getenv("GATEWAY_RATE_LIMIT_WINDOW", "60"))
+    token_limit: int = field(
+        default_factory=lambda: int(os.getenv("GATEWAY_TOKEN_LIMIT", "0"))
+    )
+    token_window: int = field(
+        default_factory=lambda: int(os.getenv("GATEWAY_TOKEN_WINDOW", "60"))
     )
     gateway_mode: str = field(
         default_factory=lambda: os.getenv("GATEWAY_MODE", "per-user")
@@ -187,6 +199,7 @@ class AppConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     event: EventConfig = field(default_factory=EventConfig)
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
+    log: LogConfig = field(default_factory=LogConfig)
     groups_file: Optional[Path] = None
     workspace_dir: str = field(
         default_factory=lambda: os.getenv(

@@ -19,7 +19,7 @@ via Lemonade Server.
 - **Semantic Indexing**: Embedding model for Kilo Code's semantic code search
 - **AI Gateway**: Optional APISIX gateway with per-user or per-group rate limiting and API keys
 - **Authentication**: Local password for dashboard; OIDC/OAuth2 (GitHub, GitLab, LinkedIn) for REST API
-- **Config Files**: Store and manage groups YAML, kilo.json, and VS Code settings in the database
+- **Config Files**: Store and manage groups YAML, kilo.jsonc, and VS Code settings in the database
 - **Kilo Code Ready**: Auto-generated config with experimental flags and indexing for Kilo Code
 
 ## Video Guide
@@ -31,7 +31,7 @@ https://youtu.be/YptAQQf_4dg
 ### 1. One-time Setup
 
 ```bash
-bash ./setup.sh
+bash ./scripts/setup.sh
 ```
 
 Installs python3, nginx, docker.io, mkcert, and openssl.
@@ -46,10 +46,10 @@ docker build -t waterpistol/thon:latest ./
 
 ```bash
 # Interactive setup wizard (recommended)
-thon init
+python -m thon init
 
 # Or non-interactive (CI-friendly)
-thon init --non-interactive
+python -m thon init --non-interactive
 ```
 
 This creates a `thon.yaml` config file with all settings.
@@ -58,16 +58,16 @@ This creates a `thon.yaml` config file with all settings.
 
 ```bash
 # Install prerequisites and configure all components
-thon setup
+python -m thon setup
 
 # Start VS Code instances
-thon run
+python -m thon run
 ```
 
 Alternatively, use `main.py` directly:
 
 ```bash
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4
 ```
 
 Each user gets their own VS Code sandbox at `https://<ip>/<endpoint_path>/`.
@@ -149,7 +149,7 @@ or `thon.yaml`. When a sandbox is recreated, the same PVC volume is reattached.
 ## thon CLI Reference
 
 ```bash
-thon COMMAND [OPTIONS]
+python -m thon COMMAND [OPTIONS]
 ```
 
 | Command | Description |
@@ -169,20 +169,20 @@ thon COMMAND [OPTIONS]
 ### Examples
 
 ```bash
-thon init                          # Interactive setup wizard
-thon init --non-interactive        # CI-friendly defaults
-thon setup                         # Install + configure
-thon run                           # Start instances
-thon run --group alpha             # Start one group
-thon config validate               # Check config
-thon config env --output .env      # Export .env
-thon cleanup                       # Tear down
+python -m thon init                          # Interactive setup wizard
+python -m thon init --non-interactive        # CI-friendly defaults
+python -m thon setup                         # Install + configure
+python -m thon run                           # Start instances
+python -m thon run --group alpha             # Start one group
+python -m thon config validate               # Check config
+python -m thon config env --output .env      # Export .env
+python -m thon cleanup                       # Tear down
 ```
 
 ## main.py CLI Reference
 
 ```
-python main.py [OPTIONS]
+python ./scripts/main.py [OPTIONS]
 ```
 
 ### Core Options
@@ -207,7 +207,7 @@ python main.py [OPTIONS]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `--image IMAGE` | Docker image | `waterpistol/thon:latest` |
-| `--python-version VER` | Python version in sandbox | `3.11` |
+| `--python-version VER` | Python version in sandbox | `3.12` |
 
 ### Security
 
@@ -233,7 +233,7 @@ python main.py [OPTIONS]
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `--lemonade KILO_JSON` | kilo.json path for LLM config injection | (none) |
+| `--lemonade KILO_JSON` | kilo.jsonc path for LLM config injection | (none) |
 | `--vscode-settings JSON` | VS Code settings file to inject | (none) |
 
 ### AI Gateway
@@ -256,43 +256,43 @@ python main.py [OPTIONS]
 
 ```bash
 # All groups with nginx SSL (default)
-python main.py --groups groups.yaml --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4
 
 # Single group
-python main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --group alpha --external-ip 1.2.3.4
 
 # From database (uses PVC workspace volumes)
-python main.py --from-db --external-ip 1.2.3.4
+python ./scripts/main.py --from-db --external-ip 1.2.3.4
 
 # Per-user passwords
-python main.py --groups groups.yaml --secure --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --secure --external-ip 1.2.3.4
 
 # Persistent workspaces
-python main.py --groups groups.yaml --workspace-dir /vs-code-remote --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --workspace-dir /thon-workspace --external-ip 1.2.3.4
 
 # Direct HTTP (no nginx)
-python main.py --groups groups.yaml --no-nginx
+python ./scripts/main.py --groups groups.yaml --no-nginx
 
 # Single instance (no groups)
-python main.py
+python ./scripts/main.py
 
 # With Lemonade LLM inference
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc
 
 # With AI Gateway (per-user rate limiting)
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
 
 # With AI Gateway (per-group shared API keys)
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
 
 # With AI Gateway + Redis rate limiting
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
 
 # With custom VS Code settings
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --vscode-settings vscode-settings.jsonc
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --vscode-settings vscode-settings.jsonc
 
 # Cleanup nginx configs
-python main.py --cleanup
+python ./scripts/main.py --cleanup
 ```
 
 ## Dashboard
@@ -350,8 +350,8 @@ and embedding models for semantic code search.
 ### Setup
 
 ```bash
-# Full setup (install + configure + API keys + pull model + kilo.json)
-bash ./setup-lemonade.sh \
+# Full setup (install + configure + API keys + pull model + kilo.jsonc)
+bash ./scripts/setup-lemonade.sh \
     --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 ```
 
@@ -365,7 +365,7 @@ python ./lemonade_server.py run \
 ### Without Embedding Model
 
 ```bash
-bash ./setup-lemonade.sh --groups groups.yaml --generate-keys \
+bash ./scripts/setup-lemonade.sh --groups groups.yaml --generate-keys \
     --external-ip 1.2.3.4 --no-embedding
 ```
 
@@ -426,11 +426,11 @@ Lemonade-managed args (reserved, must NOT appear in `llamacpp_args`):
 | `--model MODEL` | HuggingFace checkpoint | `unsloth/gemma-4-31B-it-GGUF:Q8_K_XL` |
 | `--model-name NAME` | Short model name | `gemma-4-31b-it` |
 | `--mmproj FILE` | Vision mmproj filename | `mmproj-BF16.gguf` |
-| `--external-ip IP` | External IP for kilo.json | (auto-detect) |
+| `--external-ip IP` | External IP for kilo.jsonc | (auto-detect) |
 | `--generate-keys` | Generate API keys | `false` |
 | `--no-prefer-system` | Use bundled llama.cpp | (system preferred) |
 | `--llamacpp-bin PATH` | Path to system llama-server | `/usr/local/bin/llama-server` |
-| `--kilo-config PATH` | Output path for kilo.json | `./kilo.json` |
+| `--kilo-config PATH` | Output path for kilo.jsonc | `./kilo.jsonc` |
 | `--no-embedding` | Disable embedding model | `false` |
 | `--embedding-model MODEL` | Embedding model checkpoint | `SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16` |
 | `--embedding-model-name NAME` | Short name for embedding model | `harrier-oss-v1-0.6b` |
@@ -446,11 +446,11 @@ config uses `prefer_system: true` with `rocm_bin: /usr/local/bin/llama-server` b
 
 ### Kilo Code Integration
 
-1. `setup-lemonade.sh --generate-keys` creates API keys and writes `kilo.json`
-2. `kilo.json` contains: provider (`lemonade`), base URL, API key, model ID (`user.gemma-4-31b-it`),
+1. `setup-lemonade.sh --generate-keys` creates API keys and writes `kilo.jsonc`
+2. `kilo.jsonc` contains: provider (`lemonade`), base URL, API key, model ID (`user.gemma-4-31b-it`),
    `experimental` flags, and `indexing` config for semantic code search
 3. Base URL resolution: `--external-ip` > Docker bridge gateway > `localhost`
-4. `main.py --lemonade kilo.json` injects config into each sandbox at `/home/vscode/.config/kilo/config.json`
+4. `main.py --lemonade kilo.jsonc` injects config into each sandbox at `/home/vscode/.config/kilo/config.json`
 5. Kilo Code reads the config and connects to the Lemonade server
 
 ### Full Workflow
@@ -460,7 +460,7 @@ config uses `prefer_system: true` with `rocm_bin: /usr/local/bin/llama-server` b
 bash setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 
 # Terminal 2: Start VS Code sandboxes with Lemonade inference
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.json
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc
 ```
 
 ## AI Gateway (APISIX Rate Limiting)
@@ -480,7 +480,7 @@ for LLM endpoints. Creates two routes: `/v1/chat/completions` (ai-proxy-multi) a
 
 ```bash
 # Install APISIX (or use INSTALL_GATEWAY=true during initial setup)
-INSTALL_GATEWAY=true bash ./setup.sh
+INSTALL_GATEWAY=true bash ./scripts/setup.sh
 
 # Per-user mode
 python scripts/apisix_gateway.py setup --groups groups.yaml \
@@ -499,13 +499,13 @@ python scripts/apisix_gateway.py setup --groups groups.yaml \
 
 ```bash
 # Per-user: each user gets their own API key and rate limit
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway
 
 # Per-group: shared API key per group
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-per-group
 
 # With Redis-backed rate limiting
-python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
 ```
 
 ### Rate Limiting Modes
@@ -515,9 +515,9 @@ python main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-re
 | **Local** | (not set) | `local` | Per-gateway-instance counters |
 | **Redis** | `127.0.0.1` | `redis` | Shared across all gateway instances |
 
-When enabled, `main.py` generates a gateway-aware `kilo.json` that points to the
+When enabled, `main.py` generates a gateway-aware `kilo.jsonc` that points to the
 gateway instead of directly to Lemonade. In per-group mode, all users in the same
-group receive the same `kilo.json` with the shared group API key.
+group receive the same `kilo.jsonc` with the shared group API key.
 
 ## Security
 
@@ -717,7 +717,7 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 
 | File | Purpose |
 |------|---------|
-| `main.py` | Entry point; CLI; groups; sandbox orchestration; kilo.json injection |
+| `main.py` | Entry point; CLI; groups; sandbox orchestration; kilo.jsonc injection |
 | `scripts/setup.sh` | One-time host prerequisite installation |
 | `scripts/nginx_config.py` | Per-port nginx config generation |
 | `scripts/ssl_cert.py` | SSL certificate generation (mkcert/openssl) |
@@ -730,7 +730,7 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 
 | File | Purpose |
 |------|---------|
-| `thon/` | Unified `thon` CLI package (`thon init`, `thon setup`, `thon run`, `thon config`) |
+| `thon/` | Unified `thon` CLI package (`python -m thon init`, `python -m thon setup`, `python -m thon run`, `python -m thon config`) |
 
 ### Dashboard Application
 
@@ -759,6 +759,6 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 | File | Purpose |
 |------|---------|
 | `config/groups.yaml.example` | Groups and users configuration template |
-| `config/kilo.json.example` | Kilo Code config template |
+| `config/kilo.jsonc.example` | Kilo Code config template |
 | `config/vscode-settings.jsonc.example` | VS Code settings template |
 | `Dockerfile` | Sandbox image: python:3.12-slim + code-server |

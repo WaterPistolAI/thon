@@ -46,16 +46,23 @@ sudo systemctl enable etcd
 sudo systemctl start etcd
 
 echo "[APISIX] Starting Redis..."
-sudo systemctl enable redis
+sudo systemctl enable redis-server
 sudo systemctl start redis
 
 echo "[APISIX] Configuring APISIX admin key..."
 APISIX_CONFIG="/usr/local/apisix/conf/config.yaml"
 
 if [ -f "$APISIX_CONFIG" ]; then
-    ADMIN_KEY="${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}"
+    if grep -q "admin_key" "$APISIX_CONFIG" 2>/dev/null; then
+        EXISTING_KEY=$(grep -A3 'admin_key' "$APISIX_CONFIG" | grep 'key:' | head -1 | awk '{print $2}')
+        if [ -n "$EXISTING_KEY" ]; then
+            ADMIN_KEY="$EXISTING_KEY"
+            echo "[APISIX] Using existing admin key from config"
+        fi
+    fi
 
-    if ! grep -q "admin_key" "$APISIX_CONFIG" 2>/dev/null; then
+    if [ -z "${ADMIN_KEY:-}" ]; then
+        ADMIN_KEY="${APISIX_ADMIN_KEY:-$(openssl rand -hex 16)}"
         sudo bash -c "cat >> '$APISIX_CONFIG'" <<EOF
 
 deployment:
@@ -68,21 +75,20 @@ deployment:
       ip: 0.0.0.0
       port: 9180
 EOF
-        echo "[APISIX] Admin key configured"
-    else
-        echo "[APISIX] Admin key already configured"
+        echo "[APISIX] Admin key configured: ${ADMIN_KEY}"
     fi
 else
     echo "[APISIX] Warning: config.yaml not found at $APISIX_CONFIG"
 fi
 
 echo "[APISIX] Starting APISIX..."
-sudo apisix start
+sudo systemctl enable apisix 
+sudo systemctl start apisix 
 
 echo "[APISIX] Waiting for APISIX to be ready..."
 for i in $(seq 1 30); do
     if curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:9180/apisix/admin/routes" \
-        -H "X-API-KEY: ${APISIX_ADMIN_KEY:-edd1c9f034335f136f87ad84b625c8f1}" 2>/dev/null | grep -q "200"; then
+        -H "X-API-KEY: ${ADMIN_KEY}" 2>/dev/null | grep -q "200"; then
         echo "[APISIX] APISIX is ready"
         break
     fi
@@ -95,5 +101,5 @@ echo "[APISIX] Admin API: http://127.0.0.1:9180/apisix/admin"
 echo "[APISIX] Proxy: http://127.0.0.1:9080"
 echo ""
 echo "[APISIX] Next steps:"
-echo "  python ${SCRIPT_DIR}/apisix_gateway.py setup --groups ${SCRIPT_DIR}/../groups.yaml --lemonade-url http://127.0.0.1:13305"
+echo "  python ${SCRIPT_DIR}/apisix_gateway.py setup --groups ${SCRIPT_DIR}/groups.yaml --lemonade-url http://127.0.0.1:13305"
 echo ""

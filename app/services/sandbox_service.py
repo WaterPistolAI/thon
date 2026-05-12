@@ -21,15 +21,31 @@ import secrets
 from datetime import timedelta
 from typing import Optional
 
+import httpx
 from opensandbox import Sandbox, SandboxManager
 from opensandbox.config import ConnectionConfig
 from opensandbox.models.execd import RunCommandOpts
 from opensandbox.models.sandboxes import Host, PVC, Volume, SandboxFilter
 
 from app.config import AppConfig, SandboxConfig
-from app.db import find_user_by_group_and_name, get_groups, get_record, get_records, get_setting, mark_terminated, update_endpoint, upsert_record
+from app.nginx_service import NginxConfigGenerator
+from app.db import (
+    find_user_by_group_and_name,
+    get_groups,
+    get_record,
+    get_records,
+    get_setting,
+    mark_terminated,
+    update_endpoint,
+    upsert_record,
+)
 from app.exceptions import SandboxOperationError
 from app.models import InstanceInfo, InstanceState, UserInfo
+
+try:
+    from opensandbox.exceptions.sandbox import SandboxInternalException
+except ImportError:
+    SandboxInternalException = None
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +65,16 @@ class SandboxService:
         self._sandbox_cfg: SandboxConfig = config.sandbox
         self._manager: Optional[SandboxManager] = None
         self._closed = False
+        self._nginx: Optional[NginxConfigGenerator] = None
+
+    @property
+    def nginx(self) -> Optional[NginxConfigGenerator]:
+        if self._nginx is None and self._config.nginx.external_ip:
+            try:
+                self._nginx = NginxConfigGenerator()
+            except Exception as exc:
+                logger.debug("Nginx init failed: %s", exc)
+        return self._nginx
 
     async def _get_manager(self) -> SandboxManager:
         """Lazy-initialize and return the shared SandboxManager."""
@@ -56,7 +82,9 @@ class SandboxService:
             conn = ConnectionConfig(
                 domain=self._sandbox_cfg.domain,
                 api_key=self._sandbox_cfg.api_key,
-                request_timeout=timedelta(seconds=self._sandbox_cfg.request_timeout_seconds),
+                request_timeout=timedelta(
+                    seconds=self._sandbox_cfg.request_timeout_seconds
+                ),
             )
             self._manager = await SandboxManager.create(conn)
             self._closed = False
@@ -68,6 +96,71 @@ class SandboxService:
             await self._manager.close()
             self._manager = None
             self._closed = True
+
+    @staticmethod
+    def _is_sandbox_error(exc: BaseException) -> bool:
+        """Check if an exception indicates a sandbox server problem.
+
+        Covers connection failures, broken responses, Docker/image errors,
+        and any other server-side failure that means we cannot list sandboxes.
+        """
+        import json
+
+        if isinstance(exc, httpx.ConnectError):
+            return True
+        if SandboxInternalException is not None and isinstance(
+            exc, SandboxInternalException
+        ):
+            return True
+        if isinstance(exc, json.JSONDecodeError):
+            return True
+        msg = str(exc).lower()
+        return any(
+            kw in msg
+            for kw in (
+                "imagenotfound",
+                "no such image",
+                "connect",
+                "failed",
+                "500",
+                "internal server error",
+            )
+        )
+
+    def sync_nginx(self) -> list[int]:
+        """Regenerate nginx config from all active instance endpoints.
+
+        Returns the list of ports that were configured, or empty list
+        if nginx is not available.
+        """
+        ng = self.nginx
+        if ng is None:
+            return []
+        try:
+            records = get_records(db_path=self._config.database.path)
+            endpoints = [
+                r.endpoint
+                for r in records.values()
+                if r.endpoint and r.port and r.terminated_at is None
+            ]
+            ports: set[int] = set()
+            for ep in endpoints:
+                try:
+                    host_port = ep.split("/")[0]
+                    port_str = host_port.split(":")[1]
+                    ports.add(int(port_str))
+                except (IndexError, ValueError):
+                    continue
+            sorted_ports = sorted(ports)
+            ng.sync_from_endpoints(endpoints)
+            logger.info("Nginx synced: %d port(s) %s", len(sorted_ports), sorted_ports)
+            return sorted_ports
+        except Exception as exc:
+            logger.warning("Nginx sync failed: %s", exc)
+            return []
+
+    def _sync_nginx(self) -> None:
+        self.sync_nginx()
 
     # ── Fleet Operations ──────────────────────────────────────────────
 
@@ -81,17 +174,29 @@ class SandboxService:
         """List sandbox instances with optional filtering and pagination.
 
         Returns:
-            Tuple of (instances, total_items).
+            Tuple of (instances, total_items). Returns ([], 0) if the
+            sandbox server is unreachable.
         """
-        mgr = await self._get_manager()
-        state_strs = [s.value for s in states] if states else None
-        f = SandboxFilter(states=state_strs, metadata=metadata_filter, page=page, page_size=page_size)
-        result = await mgr.list_sandbox_infos(f)
+        try:
+            mgr = await self._get_manager()
+            state_strs = [s.value for s in states] if states else None
+            f = SandboxFilter(
+                states=state_strs,
+                metadata=metadata_filter,
+                page=page,
+                page_size=page_size,
+            )
+            result = await mgr.list_sandbox_infos(f)
+        except Exception as e:
+            logger.warning("Sandbox server error: %s", e)
+            return [], 0
 
         instances = []
         for info in result.sandbox_infos:
             meta = info.metadata or {}
-            image_str = info.image.image if hasattr(info.image, "image") else str(info.image)
+            image_str = (
+                info.image.image if hasattr(info.image, "image") else str(info.image)
+            )
             instances.append(
                 InstanceInfo(
                     id=info.id,
@@ -145,7 +250,9 @@ class SandboxService:
             for inst in instances:
                 if inst.id in endpoints:
                     inst.endpoint = endpoints[inst.id]
-                    update_endpoint(inst.id, endpoints[inst.id], db_path=self._config.database.path)
+                    update_endpoint(
+                        inst.id, endpoints[inst.id], db_path=self._config.database.path
+                    )
 
         for inst in instances:
             if inst.state == InstanceState.TERMINATED:
@@ -153,16 +260,22 @@ class SandboxService:
 
         for inst in instances:
             if inst.endpoint:
-                inst.public_url = self._build_public_url(inst.endpoint, fallback_ip=db_external_ip)
+                inst.public_url = self._build_public_url(
+                    inst.endpoint, fallback_ip=db_external_ip
+                )
 
-        return instances, result.pagination.total_items if result.pagination else len(instances)
+        return instances, result.pagination.total_items if result.pagination else len(
+            instances
+        )
 
     async def get_instance(self, sandbox_id: str) -> InstanceInfo:
         """Fetch details for a single sandbox instance."""
         mgr = await self._get_manager()
         info = await mgr.get_sandbox_info(sandbox_id)
         meta = info.metadata or {}
-        image_str = info.image.image if hasattr(info.image, "image") else str(info.image)
+        image_str = (
+            info.image.image if hasattr(info.image, "image") else str(info.image)
+        )
         user = UserInfo(
             group=meta.get("group", "default"),
             username=meta.get("username", "workspace"),
@@ -186,7 +299,9 @@ class SandboxService:
             state=InstanceState(info.status.state),
             port=port,
             endpoint=endpoint,
-            public_url=self._build_public_url(endpoint, fallback_ip=db_external_ip) if endpoint else None,
+            public_url=self._build_public_url(endpoint, fallback_ip=db_external_ip)
+            if endpoint
+            else None,
             password=password,
             image=image_str,
             created_at=info.created_at,
@@ -217,6 +332,7 @@ class SandboxService:
         try:
             await mgr.kill_sandbox(sandbox_id)
             mark_terminated(sandbox_id, db_path=self._config.database.path)
+            self._sync_nginx()
         except Exception as e:
             raise SandboxOperationError(f"Failed to kill {sandbox_id}: {e}") from e
 
@@ -257,23 +373,25 @@ class SandboxService:
         volumes: list[Volume] | None = None
 
         if workspace_volume and workspace_volume.startswith("thon-"):
+            safe_volume = workspace_volume.replace("/", "-")
             volumes = [
                 Volume(
                     name="workspace",
-                    pvc=PVC(claimName=workspace_volume),
+                    pvc=PVC(claimName=safe_volume),
                     mountPath="/workspace",
                 ),
             ]
             logger.info(
                 "Mounting PVC volume %s -> /workspace for %s",
-                workspace_volume, user.label,
+                workspace_volume,
+                user.label,
             )
         elif workspace_dir:
             host_path = os.path.join(workspace_dir, user.workspace)
             os.makedirs(host_path, exist_ok=True)
             volumes = [
                 Volume(
-                    name=f"workspace-{user.group}-{user.username}",
+                    name=f"workspace-{user.group}-{user.username}".replace("/", "-"),
                     host=Host(path=host_path),
                     mount_path="/workspace",
                 )
@@ -291,7 +409,9 @@ class SandboxService:
             connection_config=ConnectionConfig(
                 domain=self._sandbox_cfg.domain,
                 api_key=self._sandbox_cfg.api_key,
-                request_timeout=timedelta(seconds=self._sandbox_cfg.request_timeout_seconds),
+                request_timeout=timedelta(
+                    seconds=self._sandbox_cfg.request_timeout_seconds
+                ),
             ),
             env=env,
             timeout=timeout,
@@ -350,6 +470,8 @@ class SandboxService:
             db_path=self._config.database.path,
         )
 
+        self._sync_nginx()
+
         return InstanceInfo(
             id=sandbox_id,
             user=user,
@@ -388,7 +510,11 @@ class SandboxService:
             db_user = find_user_by_group_and_name(
                 group_id, rec.username, db_path=self._config.database.path
             )
-            if db_user and db_user.workspace_path and db_user.workspace_path.startswith("thon-"):
+            if (
+                db_user
+                and db_user.workspace_path
+                and db_user.workspace_path.startswith("thon-")
+            ):
                 workspace_volume = db_user.workspace_path
                 workspace_dir = None
         return await self.create_instance(
@@ -458,19 +584,27 @@ class SandboxService:
         conn = ConnectionConfig(
             domain=self._sandbox_cfg.domain,
             api_key=self._sandbox_cfg.api_key,
-            request_timeout=timedelta(seconds=self._sandbox_cfg.request_timeout_seconds),
+            request_timeout=timedelta(
+                seconds=self._sandbox_cfg.request_timeout_seconds
+            ),
         )
 
         async def _get(sid: str, port: int) -> tuple[str, str]:
             try:
-                sb = await Sandbox.connect(sid, connection_config=conn, skip_health_check=True)
+                sb = await Sandbox.connect(
+                    sid, connection_config=conn, skip_health_check=True
+                )
                 ep = await sb.get_endpoint(port)
                 return sid, ep.endpoint
             except Exception as exc:
-                logger.warning("Failed to resolve endpoint for %s port %s: %s", sid, port, exc)
+                logger.warning(
+                    "Failed to resolve endpoint for %s port %s: %s", sid, port, exc
+                )
                 return sid, ""
 
-        results = await asyncio.gather(*[_get(sid, port) for sid, port in sandbox_ports])
+        results = await asyncio.gather(
+            *[_get(sid, port) for sid, port in sandbox_ports]
+        )
         return {sid: ep for sid, ep in results if ep}
 
     @staticmethod
@@ -480,7 +614,9 @@ class SandboxService:
             return int(host_port_part.rsplit(":", 1)[1])
         return 80
 
-    def _build_public_url(self, endpoint_str: str, fallback_ip: Optional[str] = None) -> Optional[str]:
+    def _build_public_url(
+        self, endpoint_str: str, fallback_ip: Optional[str] = None
+    ) -> Optional[str]:
         """Build a public HTTPS URL from an internal endpoint string.
 
         Converts ``127.0.0.1:47887/proxy/8443`` → ``https://{external_ip}/47887/proxy/8443/``
@@ -492,5 +628,7 @@ class SandboxService:
         )
         if not ext_ip or not endpoint_str:
             return None
-        endpoint_path = endpoint_str.split(":", 1)[1] if ":" in endpoint_str else endpoint_str
+        endpoint_path = (
+            endpoint_str.split(":", 1)[1] if ":" in endpoint_str else endpoint_str
+        )
         return f"https://{ext_ip}/{endpoint_path}/"

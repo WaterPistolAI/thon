@@ -174,8 +174,8 @@ class SSLCertificateGenerator:
     def _cert_name(server_ip: Optional[str] = None) -> str:
         if server_ip:
             san_hash = hashlib.sha256(server_ip.encode()).hexdigest()[:8]
-            return f"vscode-remote-{san_hash}"
-        return "vscode-remote"
+            return f"thon-{san_hash}"
+        return "thon"
 
     def _cert_has_san(self, cert_path: Path, server_ip: str) -> bool:
         """Check if existing cert contains the requested IP in its SAN extension."""
@@ -332,7 +332,7 @@ distinguished_name = dn
 x509_extensions = v3_req
 
 [dn]
-CN = vscode-remote
+CN = thon
 
 [v3_req]
 subjectAltName = {san_str}
@@ -370,7 +370,7 @@ extendedKeyUsage = serverAuth, clientAuth
             _sudo_unlink(conf_file)
 
     def delete_certs(self) -> None:
-        for p in sorted(self.output_dir.glob("vscode-remote*")):
+        for p in sorted(self.output_dir.glob("thon*")):
             if p.suffix in (".pem", ".key", ".crt", ".conf"):
                 _sudo_unlink(p)
                 print(f"[SSL] Deleted: {p}")

@@ -17,6 +17,7 @@
 import logging
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
@@ -25,8 +26,38 @@ from app.exceptions import SandboxOperationError
 from app.models import InstanceInfo, InstanceState, UserInfo
 from app.services.sandbox_service import SandboxService, DEFAULT_PORT
 
+try:
+    from opensandbox.exceptions.sandbox import SandboxInternalException
+except ImportError:
+    SandboxInternalException = Exception
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/instances", tags=["instances"])
+
+
+def _sandbox_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail="Sandbox server unavailable — check SANDBOX_DOMAIN and ensure the daemon is running",
+    )
+
+
+def _is_sandbox_error(exc: BaseException) -> bool:
+    import json as _json
+
+    return isinstance(
+        exc, (httpx.ConnectError, _json.JSONDecodeError, SandboxInternalException)
+    ) or any(
+        kw in str(exc).lower()
+        for kw in (
+            "imagenotfound",
+            "no such image",
+            "connect",
+            "failed",
+            "500",
+            "internal server error",
+        )
+    )
 
 
 class CreateInstanceRequest(BaseModel):
@@ -63,6 +94,7 @@ class InstancesListResponse(BaseModel):
 
 def _get_service() -> SandboxService:
     from app.main import get_sandbox_service
+
     return get_sandbox_service()
 
 
@@ -74,11 +106,16 @@ async def list_instances(
 ) -> InstancesListResponse:
     """List all managed sandbox instances."""
     svc = _get_service()
-    instances, total = await svc.list_instances(
-        states=state,
-        page=page,
-        page_size=page_size,
-    )
+    try:
+        instances, total = await svc.list_instances(
+            states=state,
+            page=page,
+            page_size=page_size,
+        )
+    except Exception as e:
+        if _is_sandbox_error(e):
+            raise _sandbox_unavailable()
+        raise
     return InstancesListResponse(
         instances=instances,
         total=total,
@@ -88,13 +125,19 @@ async def list_instances(
 
 
 @router.post("/{instance_id}/register", response_model=InstanceInfo)
-async def register_instance(instance_id: str, req: RegisterInstanceRequest) -> InstanceInfo:
+async def register_instance(
+    instance_id: str, req: RegisterInstanceRequest
+) -> InstanceInfo:
     """Register or update user mapping for an existing instance."""
     svc = _get_service()
     try:
         inst = await svc.get_instance(instance_id)
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Instance {instance_id} not found: {e}")
+        if _is_sandbox_error(e):
+            raise _sandbox_unavailable()
+        raise HTTPException(
+            status_code=404, detail=f"Instance {instance_id} not found: {e}"
+        )
     upsert_record(
         sandbox_id=instance_id,
         group_name=req.group,
@@ -115,14 +158,18 @@ async def get_instance(instance_id: str) -> InstanceInfo:
     try:
         return await svc.get_instance(instance_id)
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Instance {instance_id} not found: {e}")
+        if _is_sandbox_error(e):
+            raise _sandbox_unavailable()
+        raise HTTPException(
+            status_code=404, detail=f"Instance {instance_id} not found: {e}"
+        )
 
 
 @router.post("", response_model=InstanceInfo, status_code=201)
 async def create_instance(req: CreateInstanceRequest) -> InstanceInfo:
     """Create a new VS Code sandbox instance."""
     svc = _get_service()
-    user =UserInfo(group=req.group, username=req.username)
+    user = UserInfo(group=req.group, username=req.username)
     try:
         return await svc.create_instance(
             user=user,
@@ -130,8 +177,8 @@ async def create_instance(req: CreateInstanceRequest) -> InstanceInfo:
             secure=req.secure,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
+        if _is_sandbox_error(e):
+            raise _sandbox_unavailable()
         raise HTTPException(status_code=500, detail=f"Failed to create instance: {e}")
 
 
@@ -142,7 +189,9 @@ async def pause_instance(instance_id: str) -> dict:
     try:
         await svc.pause_instance(instance_id)
         return {"status": "paused", "id": instance_id}
-    except SandboxOperationError as e:
+    except Exception as e:
+        if _is_sandbox_error(e):
+            raise _sandbox_unavailable()
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -152,7 +201,9 @@ async def resume_instance(instance_id: str) -> InstanceInfo:
     svc = _get_service()
     try:
         return await svc.resume_instance(instance_id)
-    except SandboxOperationError as e:
+    except Exception as e:
+        if _is_sandbox_error(e):
+            raise _sandbox_unavailable()
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -163,7 +214,9 @@ async def kill_instance(instance_id: str) -> dict:
     try:
         await svc.kill_instance(instance_id)
         return {"status": "terminated", "id": instance_id}
-    except SandboxOperationError as e:
+    except Exception as e:
+        if _is_sandbox_error(e):
+            raise _sandbox_unavailable()
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -173,7 +226,9 @@ async def recreate_instance(instance_id: str) -> InstanceInfo:
     svc = _get_service()
     try:
         return await svc.recreate_instance(instance_id)
-    except SandboxOperationError as e:
+    except Exception as e:
+        if _is_sandbox_error(e):
+            raise _sandbox_unavailable()
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -183,8 +238,14 @@ async def renew_instance(instance_id: str, req: RenewRequest = RenewRequest()) -
     svc = _get_service()
     try:
         await svc.renew_instance(instance_id, timeout_minutes=req.timeout_minutes)
-        return {"status": "renewed", "id": instance_id, "timeout_minutes": req.timeout_minutes}
-    except SandboxOperationError as e:
+        return {
+            "status": "renewed",
+            "id": instance_id,
+            "timeout_minutes": req.timeout_minutes,
+        }
+    except Exception as e:
+        if _is_sandbox_error(e):
+            raise _sandbox_unavailable()
         raise HTTPException(status_code=400, detail=str(e))
 
 
@@ -199,7 +260,9 @@ async def bulk_register(req: BulkRegisterRequest) -> dict:
         username = m.get("username", "workspace")
         port = m.get("port", DEFAULT_PORT)
         if not sid:
-            results.append({"id": sid, "status": "error", "error": "missing sandbox_id"})
+            results.append(
+                {"id": sid, "status": "error", "error": "missing sandbox_id"}
+            )
             continue
         upsert_record(
             sandbox_id=sid,
@@ -208,7 +271,9 @@ async def bulk_register(req: BulkRegisterRequest) -> dict:
             port=port,
             db_path=svc._config.database.path,
         )
-        results.append({"id": sid, "status": "registered", "label": f"{group}/{username}"})
+        results.append(
+            {"id": sid, "status": "registered", "label": f"{group}/{username}"}
+        )
     return {"results": results}
 
 

@@ -1,5 +1,9 @@
 [server]
-enableStaticServing = true
+ fileWatcherType = "auto"
+ enableStaticServing = true
+ 
+ [browser]
+ gatherUsageStats = false
 
 [[theme.fontFaces]]
 family = "SpaceGrotesk"

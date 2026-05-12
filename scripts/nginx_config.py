@@ -33,8 +33,8 @@ Usage:
     generator = NginxConfigGenerator()
     generator.generate_combined_config(
         ports=[55002, 47724],
-        cert_path="/etc/nginx/ssl/vscode-remote.crt",
-        key_path="/etc/nginx/ssl/vscode-remote.key",
+        cert_path="/etc/nginx/ssl/thon.crt",
+        key_path="/etc/nginx/ssl/thon.key",
     )
     generator.reload_nginx()
 """
@@ -140,7 +140,7 @@ COMBINED_CONFIG_TEMPLATE = """server {{
 {ca_location}{location_blocks}}}
 """
 
-CONFIG_NAME = "sandbox-vscode-remote"
+CONFIG_NAME = "sandbox-thon"
 
 
 class NginxConfigGenerator:

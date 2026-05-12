@@ -29,6 +29,7 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from app.env import load_env
 from app.config import AppConfig
 from app.db import GroupRecordWithUsers, UserRecord, get_setting, set_setting
 from app.exceptions import (
@@ -85,6 +86,7 @@ def _run_async(coro):
 
 def _get_config() -> AppConfig:
     if "app_config" not in st.session_state:
+        load_env()
         st.session_state.app_config = AppConfig.from_env()
     return st.session_state.app_config
 
@@ -158,9 +160,12 @@ def page_instances() -> None:
     with st.spinner("Loading instances..."):
         try:
             instances, total = _run_async(svc.list_instances())
-        except Exception as e:
-            st.error(f"Failed to load instances: {e}")
-            return
+        except Exception:
+            st.warning(
+                "Sandbox server is unavailable. "
+                "Ensure opensandbox-server is running on port 8080."
+            )
+            instances, total = [], 0
 
     if not instances:
         st.info("No instances found.")
@@ -955,9 +960,9 @@ def page_gateway() -> None:
     with c_rate:
         rate_limit = st.number_input(
             "Rate Limit (tokens)",
-            min_value=1,
+            min_value=0,
             max_value=100000,
-            value=cfg.gateway.rate_limit_tokens,
+            value=max(cfg.gateway.token_limit, 0),
             help="Token limit per consumer (per-user mode) or per-user within group (per-group mode)",
         )
     with c_window:
@@ -965,7 +970,7 @@ def page_gateway() -> None:
             "Time Window (sec)",
             min_value=1,
             max_value=86400,
-            value=cfg.gateway.rate_limit_window,
+            value=cfg.gateway.token_window,
             help="Rate limit time window in seconds",
         )
 
@@ -1005,8 +1010,8 @@ def page_gateway() -> None:
         set_setting("gateway_redis_port", str(redis_port), db_path=db_path)
         cfg.gateway.enabled = enabled
         cfg.gateway.gateway_mode = mode
-        cfg.gateway.rate_limit_tokens = rate_limit
-        cfg.gateway.rate_limit_window = time_window
+        cfg.gateway.token_limit = rate_limit
+        cfg.gateway.token_window = time_window
         cfg.gateway.redis_host = redis_host or None
         cfg.gateway.redis_port = redis_port
         st.session_state.pop("apisix_service", None)
@@ -1040,7 +1045,7 @@ def page_gateway() -> None:
     s5.metric("Mode", mode_label)
 
     if not status.installed:
-        st.info("APISIX is not installed. Run: `INSTALL_GATEWAY=true bash ./setup.sh`")
+        st.info("APISIX is not installed. Run: `INSTALL_GATEWAY=true bash ./scripts/setup.sh`")
         return
 
     if not status.running:
@@ -1193,7 +1198,7 @@ def _config_files_section(db_path: str) -> None:
 
     labels = {
         "config_groups_yaml": "Groups YAML",
-        "config_kilo_json": "Kilo Code Config (kilo.json)",
+        "config_kilo_json": "Kilo Code Config (kilo.jsonc)",
         "config_vscode_settings": "VS Code Settings",
     }
     descriptions = {

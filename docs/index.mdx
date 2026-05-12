@@ -21,7 +21,7 @@ via Lemonade Server.
 - **Semantic Indexing**: Embedding model for Kilo Code's semantic code search
 - **AI Gateway**: Optional APISIX gateway with per-user or per-group rate limiting and API keys
 - **Authentication**: Local password for dashboard; OIDC/OAuth2 (GitHub, GitLab, LinkedIn) for REST API
-- **Config Files**: Store and manage groups YAML, kilo.json, and VS Code settings in the database
+- **Config Files**: Store and manage groups YAML, kilo.jsonc, and VS Code settings in the database
 - **Kilo Code Ready**: Auto-generated config with experimental flags and indexing for Kilo Code
 
 ## Quick Start
@@ -30,7 +30,7 @@ via Lemonade Server.
 
 ```bash
 # One-time host setup
-bash ./setup.sh
+bash ./scripts/setup.sh
 ```
 
 Installs: python3, nginx, docker.io, mkcert, openssl
@@ -45,10 +45,10 @@ docker build -t waterpistol/thon:latest ./
 
 ```bash
 # Interactive setup wizard (recommended)
-thon init
+python -m thon init
 
 # Or non-interactive (CI-friendly)
-thon init --non-interactive
+python -m thon init --non-interactive
 ```
 
 This creates a `thon.yaml` config file with all settings.
@@ -57,16 +57,16 @@ This creates a `thon.yaml` config file with all settings.
 
 ```bash
 # Install prerequisites and configure all components
-thon setup
+python -m thon setup
 
 # Start VS Code instances
-thon run
+python -m thon run
 ```
 
 Alternatively, use `main.py` directly:
 
 ```bash
-python ./main.py --groups groups.yaml --external-ip 1.2.3.4
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4
 ```
 
 Each user gets their own VS Code sandbox at `https://<ip>/<endpoint_path>/`.
