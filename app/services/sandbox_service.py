@@ -108,17 +108,40 @@ class SandboxService:
         msg = str(exc).lower()
         return "connect" in msg and "failed" in msg
 
-    def _sync_nginx(self) -> None:
-        """Regenerate nginx config from all active instance endpoints."""
+    def sync_nginx(self) -> list[int]:
+        """Regenerate nginx config from all active instance endpoints.
+
+        Returns the list of ports that were configured, or empty list
+        if nginx is not available.
+        """
         ng = self.nginx
         if ng is None:
-            return
+            return []
         try:
             records = get_records(db_path=self._config.database.path)
-            endpoints = [r.endpoint for r in records if r.endpoint and r.port]
+            endpoints = [
+                r.endpoint
+                for r in records.values()
+                if r.endpoint and r.port and r.terminated_at is None
+            ]
+            ports: set[int] = set()
+            for ep in endpoints:
+                try:
+                    host_port = ep.split("/")[0]
+                    port_str = host_port.split(":")[1]
+                    ports.add(int(port_str))
+                except (IndexError, ValueError):
+                    continue
+            sorted_ports = sorted(ports)
             ng.sync_from_endpoints(endpoints)
+            logger.info("Nginx synced: %d port(s) %s", len(sorted_ports), sorted_ports)
+            return sorted_ports
         except Exception as exc:
-            logger.debug("Nginx sync failed: %s", exc)
+            logger.warning("Nginx sync failed: %s", exc)
+            return []
+
+    def _sync_nginx(self) -> None:
+        self.sync_nginx()
 
     # ── Fleet Operations ──────────────────────────────────────────────
 

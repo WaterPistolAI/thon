@@ -243,3 +243,14 @@ class GatewaySetupRequest(BaseModel):
     rate_limit: int = 500
     time_window: int = 60
     mode: GatewayMode = GatewayMode.PER_USER
+
+
+@dataclass
+class NginxStatus:
+    """Status snapshot of the nginx reverse proxy."""
+
+    available: bool = False
+    external_ip: str = ""
+    ssl_configured: bool = False
+    ports: list[int] = field(default_factory=list)
+    config_path: str = ""

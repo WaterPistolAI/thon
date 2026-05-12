@@ -149,6 +149,18 @@ def _log_startup_diagnostics(cfg: AppConfig) -> None:
 
     if cfg.nginx.external_ip:
         logger.info("  External IP: %s", cfg.nginx.external_ip)
+        try:
+            from app.api.routes.nginx import _get_nginx_status
+
+            ns = _get_nginx_status(get_sandbox_service())
+            logger.info(
+                "  Nginx: available=%s ssl=%s ports=%s",
+                ns.available,
+                ns.ssl_configured,
+                ns.ports or "none",
+            )
+        except Exception as exc:
+            logger.debug("Nginx diagnostics failed: %s", exc)
     if cfg.auth.enabled:
         logger.info("  Auth: enabled")
 
@@ -216,6 +228,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     from app.api.routes.groups import router as groups_router
     from app.api.routes.instances import router as instances_router
     from app.api.routes.lemonade import router as lemonade_router
+    from app.api.routes.nginx import router as nginx_router
 
     app.include_router(auth_router)
     app.include_router(config_files_router)
@@ -223,6 +236,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(groups_router)
     app.include_router(instances_router)
     app.include_router(lemonade_router)
+    app.include_router(nginx_router)
 
     @app.get("/")
     async def index():
