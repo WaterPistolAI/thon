@@ -132,13 +132,32 @@ python3 -m venv ~/.venv
 . ~/.venv/bin/activate
 pip install opensandbox opensandbox-cli
 
+echo "[Setup] Initializing OpenSandbox server configuration..."
+opensandbox-server init-config ~/.sandbox.toml --example docker
+
+SANDBOX_API_KEY="$(openssl rand -hex 24)"
+if command -v python3 &>/dev/null; then
+    SANDBOX_API_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
+fi
+python3 -c "
+import configparser
+cfg = configparser.ConfigParser()
+cfg.read('~/.sandbox.toml')
+if 'server' not in cfg:
+    cfg['server'] = {}
+cfg['server']['api_key'] = '${SANDBOX_API_KEY}'
+with open('~/.sandbox.toml', 'w') as f:
+    cfg.write(f)
+" 2>/dev/null || sed -i "s/^api_key = \"\"/api_key = \"${SANDBOX_API_KEY}\"/" ~/.sandbox.toml 2>/dev/null || true
+
+echo "[Setup] Generated sandbox API key: ${SANDBOX_API_KEY}"
+
 echo ""
 echo "[Setup] Prerequisites installed successfully."
 echo "[Setup] SSL certs will be generated at: ${SSL_DIR}"
 echo ""
 echo "[Setup] Next steps:"
-echo "  1. Start the OpenSandbox server:"
-echo "     . ~/.venv/bin/activate"
+echo "  1. Start the OpenSandbox server (with Python environment already activated):"
 echo "     opensandbox-server"
 echo ""
 echo "  2. In another terminal, start the Lemonade inference server:"
