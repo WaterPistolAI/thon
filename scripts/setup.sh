@@ -110,6 +110,20 @@ REPO_DIR="${SCRIPT_DIR}/.."
 #     REPO_DIR=~/OpenSandbox
 # fi
 
+echo "[Setup] Adding user to docker group..."
+if ! groups "$USER" | grep -q '\bdocker\b'; then
+    sudo usermod -aG docker "$USER"
+    echo "[Setup] Added $USER to docker group."
+    echo "[Setup] Activating docker group for current session..."
+    exec sg docker "$0 $*" 2>/dev/null || {
+        echo "[Setup] Could not auto-activate docker group."
+        echo "[Setup] Run 'newgrp docker' or log out/in, then re-run this script."
+        exit 1
+    }
+else
+    echo "[Setup] User $USER is already in the docker group."
+fi
+
 echo "[Setup] Building Docker image..."
 docker build -t waterpistol/thon:latest -f "${REPO_DIR}/Dockerfile" "${REPO_DIR}"
 
@@ -117,9 +131,6 @@ echo "[Setup] Installing OpenSandbox server and CLI..."
 python3 -m venv ~/.venv
 . ~/.venv/bin/activate
 pip install opensandbox opensandbox-cli
-
-echo "[Setup] Adding user to docker group..."
-sudo usermod -aG docker "$USER"
 
 echo ""
 echo "[Setup] Prerequisites installed successfully."
@@ -142,5 +153,4 @@ if [ -n "$CAROOT" ]; then
     echo "  ${CAROOT}/rootCA.pem"
     echo ""
 fi
-echo "[Setup] Note: You may need to log out and back in for the docker group to take effect,"
-echo "        or run: newgrp docker"
+echo "[Setup] Note: If docker commands fail in new shells, run 'newgrp docker' or log out/in."
