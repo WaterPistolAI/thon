@@ -289,7 +289,10 @@ async def _print_logs(label: str, execution) -> None:
 
 
 async def _inject_kilo_config(
-    user: UserInfo, sandbox: "Sandbox", config_content: str
+    user: UserInfo,
+    sandbox: "Sandbox",
+    config_content: str,
+    langfuse_enabled: bool = False,
 ) -> None:
     if "PLACEHOLDER" in config_content:
         print(
@@ -309,6 +312,16 @@ async def _inject_kilo_config(
     write_cmd = f"echo {encoded} | base64 -d > {kilo_dir}/config.json"
     await sandbox.commands.run(write_cmd)
     print(f"[{user.label}] Injected kilo config -> {kilo_dir}/config.json")
+
+    if langfuse_enabled:
+        install_cmd = "npm install -g opencode-plugin-langfuse 2>&1"
+        result = await sandbox.commands.run(install_cmd)
+        if result.exit_code == 0:
+            print(f"[{user.label}] Installed opencode-plugin-langfuse")
+        else:
+            print(
+                f"[{user.label}] Warning: Failed to install opencode-plugin-langfuse"
+            )
 
 
 async def _inject_vscode_settings(
@@ -339,9 +352,21 @@ async def create_instance(
     vscode_settings_content: Optional[str] = None,
     gateway_api_key: Optional[str] = None,
     gateway_external_ip: Optional[str] = None,
+    langfuse_enabled: bool = False,
     db_user: Optional[object] = None,
 ) -> SandboxInstance:
     env = {"PYTHON_VERSION": python_version}
+
+    if langfuse_enabled:
+        langfuse_public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+        langfuse_secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
+        langfuse_base_url = os.getenv("LANGFUSE_BASEURL", "https://cloud.langfuse.com")
+        if langfuse_public_key:
+            env["LANGFUSE_PUBLIC_KEY"] = langfuse_public_key
+        if langfuse_secret_key:
+            env["LANGFUSE_SECRET_KEY"] = langfuse_secret_key
+        if langfuse_base_url:
+            env["LANGFUSE_BASEURL"] = langfuse_base_url
 
     volumes: list[Volume] | None = None
     if (
@@ -427,7 +452,9 @@ async def create_instance(
         await sandbox.commands.run("chown -R vscode:vscode /workspace")
 
     if lemonade_config_content:
-        await _inject_kilo_config(user, sandbox, lemonade_config_content)
+        await _inject_kilo_config(
+            user, sandbox, lemonade_config_content, langfuse_enabled=langfuse_enabled
+        )
 
     if vscode_settings_content:
         await _inject_vscode_settings(user, sandbox, vscode_settings_content)
@@ -441,7 +468,9 @@ async def create_instance(
             api_key=gateway_api_key,
             enable_embedding=True,
         )
-        await _inject_kilo_config(user, sandbox, kilo_content)
+        await _inject_kilo_config(
+            user, sandbox, kilo_content, langfuse_enabled=langfuse_enabled
+        )
 
     if secure and password:
         config_dir = "/home/vscode/.config/code-server"
@@ -523,6 +552,17 @@ async def run_from_config(
         db_path=os.getenv("THON_DB_PATH"),
     )
 
+    langfuse_enabled = thon_cfg.langfuse.enabled or bool(
+        os.getenv("LANGFUSE_PUBLIC_KEY")
+    )
+    if langfuse_enabled:
+        if thon_cfg.langfuse.public_key:
+            os.environ.setdefault("LANGFUSE_PUBLIC_KEY", thon_cfg.langfuse.public_key)
+        if thon_cfg.langfuse.secret_key:
+            os.environ.setdefault("LANGFUSE_SECRET_KEY", thon_cfg.langfuse.secret_key)
+        if thon_cfg.langfuse.base_url:
+            os.environ.setdefault("LANGFUSE_BASEURL", thon_cfg.langfuse.base_url)
+
     user_tuples = thon_cfg.get_users(group_filter)
     users = [UserInfo(group=g, username=u) for g, u in user_tuples]
     if not users:
@@ -575,6 +615,11 @@ async def run_from_config(
         print(f"  AI Gateway: enabled ({limits_str})")
         if thon_cfg.gateway.redis_host:
             print(f"  Gateway Redis: {thon_cfg.gateway.redis_host}")
+    if langfuse_enabled:
+        langfuse_url = thon_cfg.langfuse.base_url or os.getenv(
+            "LANGFUSE_BASEURL", "https://cloud.langfuse.com"
+        )
+        print(f"  Langfuse: enabled ({langfuse_url})")
     if group_filter:
         print(f"  Group filter: {group_filter}")
     print()
@@ -720,6 +765,7 @@ async def run_from_config(
                     vscode_settings_content=vscode_settings_content,
                     gateway_api_key=gw_api_key,
                     gateway_external_ip=external_ip,
+                    langfuse_enabled=langfuse_enabled,
                     db_user=db_user,
                 )
             )
@@ -809,6 +855,8 @@ async def run_from_config(
                 print(f"      Password: {inst.password}")
             if lemonade_path:
                 print("      Kilo Code: /home/vscode/.config/kilo/config.json")
+            if langfuse_enabled:
+                print("      Langfuse: enabled (opencode-plugin-langfuse)")
             if gateway_consumers:
                 for gc in gateway_consumers:
                     if gc["user"].label == inst.user.label:
@@ -1080,6 +1128,30 @@ Examples:
         default=60,
         help="Token limit time window in seconds (default: 60)",
     )
+    parser.add_argument(
+        "--langfuse",
+        action="store_true",
+        default=False,
+        help="Enable Langfuse observability (injects LANGFUSE_* env vars and opencode-plugin-langfuse into sandboxes)",
+    )
+    parser.add_argument(
+        "--langfuse-public-key",
+        type=str,
+        default=None,
+        help="Langfuse public key (or set LANGFUSE_PUBLIC_KEY env var)",
+    )
+    parser.add_argument(
+        "--langfuse-secret-key",
+        type=str,
+        default=None,
+        help="Langfuse secret key (or set LANGFUSE_SECRET_KEY env var)",
+    )
+    parser.add_argument(
+        "--langfuse-base-url",
+        type=str,
+        default=None,
+        help="Langfuse base URL (default: https://cloud.langfuse.com, or set LANGFUSE_BASEURL env var)",
+    )
 
     args = parser.parse_args()
 
@@ -1203,6 +1275,15 @@ Examples:
         db_path=db_path_env,
     )
 
+    langfuse_enabled = args.langfuse or bool(os.getenv("LANGFUSE_PUBLIC_KEY"))
+    if langfuse_enabled:
+        if args.langfuse_public_key:
+            os.environ.setdefault("LANGFUSE_PUBLIC_KEY", args.langfuse_public_key)
+        if args.langfuse_secret_key:
+            os.environ.setdefault("LANGFUSE_SECRET_KEY", args.langfuse_secret_key)
+        if args.langfuse_base_url:
+            os.environ.setdefault("LANGFUSE_BASEURL", args.langfuse_base_url)
+
     total = len(users)
     port_range = f"{args.port} - {args.port + total - 1}"
 
@@ -1236,6 +1317,9 @@ Examples:
         print(f"  AI Gateway: enabled ({limits_str})")
         if args.gateway_redis_host:
             print(f"  Gateway Redis: {args.gateway_redis_host}")
+    if langfuse_enabled:
+        langfuse_url = os.getenv("LANGFUSE_BASEURL", "https://cloud.langfuse.com")
+        print(f"  Langfuse: enabled ({langfuse_url})")
     if args.groups:
         print(f"  Groups file: {args.groups}")
         if args.group:
@@ -1389,6 +1473,7 @@ Examples:
                     vscode_settings_content=vscode_settings_content,
                     gateway_api_key=gateway_api_key,
                     gateway_external_ip=external_ip,
+                    langfuse_enabled=langfuse_enabled,
                     db_user=db_user,
                 )
             )
@@ -1478,6 +1563,8 @@ Examples:
                 print(f"      Password: {inst.password}")
             if lemonade_config_content:
                 print("      Kilo Code: /home/vscode/.config/kilo/config.json")
+            if langfuse_enabled:
+                print("      Langfuse: enabled (opencode-plugin-langfuse)")
             if gateway_consumers:
                 for gc in gateway_consumers:
                     if gc["user"].label == inst.user.label:

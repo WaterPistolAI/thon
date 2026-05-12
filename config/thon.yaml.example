@@ -82,6 +82,16 @@ gateway:
   rate_limit: 500
   time_window: 60
 
+# ── Langfuse Observability ─────────────────────────────────────
+# Enable LLM observability tracing via opencode-plugin-langfuse.
+# Requires LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY env vars,
+# or set them below. The base_url defaults to cloud.langfuse.com.
+langfuse:
+  enabled: false
+  public_key: ""
+  secret_key: ""
+  base_url: "https://cloud.langfuse.com"
+
 # ── Dashboard ─────────────────────────────────────────────────
 dashboard:
   host: "0.0.0.0"

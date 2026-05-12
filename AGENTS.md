@@ -499,6 +499,84 @@ Each consumer gets:
 | `GATEWAY_RATE_LIMIT_WINDOW` | `60` | Rate limit time window in seconds |
 | `GATEWAY_MODE` | `per-user` | Consumer mode: `per-user` or `per-group` |
 
+### Langfuse Observability (LLM Tracing)
+
+Langfuse integration adds automatic LLM observability to Kilo Code via the
+`opencode-plugin-langfuse` package. It captures OpenTelemetry spans for sessions,
+messages, tool calls, costs, and performance, sending them to your Langfuse dashboard.
+
+**Setup:**
+
+1. Sign up at [cloud.langfuse.com](https://cloud.langfuse.com) (or self-host)
+2. Get your API keys from the project settings
+3. Enable via CLI flag or `thon.yaml`
+
+**CLI Usage:**
+
+```bash
+# Enable Langfuse with env vars
+export LANGFUSE_PUBLIC_KEY="pk-lf-..."
+export LANGFUSE_SECRET_KEY="sk-lf-..."
+export LANGFUSE_BASEURL="https://cloud.langfuse.com"  # optional, defaults to cloud
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --langfuse
+
+# Or pass keys as CLI flags
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 \
+  --langfuse \
+  --langfuse-public-key "pk-lf-..." \
+  --langfuse-secret-key "sk-lf-..." \
+  --langfuse-base-url "https://cloud.langfuse.com"
+
+# With Lemonade + Langfuse
+bash ./scripts/setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4 --langfuse
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc --langfuse
+
+# With AI Gateway + Langfuse
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --langfuse
+```
+
+**thon.yaml Configuration:**
+
+```yaml
+langfuse:
+  enabled: true
+  public_key: "pk-lf-..."
+  secret_key: "sk-lf-..."
+  base_url: "https://cloud.langfuse.com"  # optional, defaults to cloud
+```
+
+**What happens when Langfuse is enabled:**
+
+1. `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASEURL` are injected as
+   environment variables into each sandbox container
+2. `"plugin": ["opencode-plugin-langfuse"]` is added to the generated `kilo.jsonc`
+3. `experimental.openTelemetry` is set to `true` in the kilo config (already in skeleton)
+4. `opencode-plugin-langfuse` npm package is installed globally in the container
+5. All LLM traces are automatically sent to your Langfuse dashboard
+
+**Environment Variables (Langfuse):**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LANGFUSE_ENABLED` | `false` | Enable Langfuse observability |
+| `LANGFUSE_PUBLIC_KEY` | (none) | Langfuse public key (required for tracing) |
+| `LANGFUSE_SECRET_KEY` | (none) | Langfuse secret key (required for tracing) |
+| `LANGFUSE_BASEURL` | `https://cloud.langfuse.com` | Langfuse API base URL (self-hosted or cloud) |
+
+**kilo.jsonc Plugin Configuration:**
+
+When `langfuse.enabled` is true or `--langfuse` is passed, the generated `kilo.jsonc`
+includes:
+
+```jsonc
+{
+  "experimental": {
+    "openTelemetry": true  // required for plugin to work
+  },
+  "plugin": ["opencode-plugin-langfuse"]
+}
+```
+
 ## Guardrails
 
 ### Must Always
@@ -550,6 +628,9 @@ extensions making cross-site requests to github.com — cannot be fixed server-s
 - `PYTHON_VERSION` — Python version in sandbox (default: `3.11`)
 - `LEMONADE_API_KEY` — Lemonade server API key for regular endpoints
 - `LEMONADE_ADMIN_API_KEY` — Lemonade server admin key (elevated access)
+- `LANGFUSE_PUBLIC_KEY` — Langfuse public key for LLM observability
+- `LANGFUSE_SECRET_KEY` — Langfuse secret key for LLM observability
+- `LANGFUSE_BASEURL` — Langfuse API base URL (default: `https://cloud.langfuse.com`)
 
 ## File Map
 

@@ -76,6 +76,7 @@ def generate_kilo_config(
     embedding_base_url: Optional[str] = None,
     embedding_api_key: Optional[str] = None,
     embedding_model: Optional[str] = None,
+    langfuse_enabled: bool = False,
     skeleton_path: Optional[str | Path] = None,
 ) -> dict:
     """Generate a kilo.jsonc config dict for the given deployment mode.
@@ -93,6 +94,7 @@ def generate_kilo_config(
         embedding_base_url: Separate URL for embedding API (defaults to base_url).
         embedding_api_key: Separate API key for embedding (defaults to api_key).
         embedding_model: Embedding model name (e.g. ``user.harrier-oss-v1-0.6b``).
+        langfuse_enabled: Enable Langfuse observability plugin (adds ``plugin`` field).
         skeleton_path: Path to kilo.jsonc.skeleton for base overrides.
 
     Returns:
@@ -151,6 +153,9 @@ def generate_kilo_config(
     if embedding_model:
         generated["indexing"]["openai-compatible"]["model"] = embedding_model
 
+    if langfuse_enabled:
+        generated["plugin"] = ["opencode-plugin-langfuse"]
+
     skeleton = _load_skeleton(skeleton_path)
     return _deep_merge(skeleton, generated)
 
@@ -167,6 +172,9 @@ def generate_kilo_config_for_user(
 
     After generating the config dict, substitutes ``$THON_USERNAME``,
     ``$THON_USER_EMAIL``, and ``$WORKSPACE`` with user-specific values.
+
+    Accepts all keyword arguments of :func:`generate_kilo_config`, including
+    ``langfuse_enabled``.
     """
     config = generate_kilo_config(mode=mode, base_url=base_url, api_key=api_key, **kwargs)
     content = json.dumps(config, indent=2)

@@ -30,6 +30,7 @@ EMBEDDING_MODEL="${LEMONADE_EMBEDDING_MODEL:-SuperPauly/harrier-oss-v1-0.6b-gguf
 EMBEDDING_MODEL_NAME="${LEMONADE_EMBEDDING_MODEL_NAME:-harrier-oss-v1-0.6b}"
 EXTERNAL_IP="${LEMONADE_EXTERNAL_IP:-}"
 GENERATE_KEYS="${LEMONADE_GENERATE_KEYS:-false}"
+LANGFUSE_ENABLED="${LEMONADE_LANGFUSE:-false}"
 THON_DIR="${HOME}/.thon"
 KILO_CONFIG_OUTPUT="${LEMONADE_KILO_CONFIG:-${THON_DIR}/kilo.jsonc}"
 GROUPS_FILE=""
@@ -72,6 +73,7 @@ Options:
   --no-prefer-system    Use bundled llama.cpp instead of system-installed
   --llamacpp-bin PATH   Path to system llama-server binary (default: builtin)
   --kilo-config PATH    Output path for kilo.jsonc (default: ${KILO_CONFIG_OUTPUT})
+  --langfuse            Enable Langfuse observability in kilo.jsonc (adds opencode-plugin-langfuse)
   -h, --help            Show this help
 
 Environment variables (override defaults):
@@ -79,7 +81,8 @@ Environment variables (override defaults):
   LEMONADE_MODEL, LEMONADE_MODEL_NAME, LEMONADE_EXTERNAL_IP,
   LEMONADE_GENERATE_KEYS, LEMONADE_NUM_USERS, LEMONADE_KILO_CONFIG,
   LEMONADE_PREFER_SYSTEM, LEMONADE_LLMACPP_BIN, LEMONADE_MMPROJ,
-  LEMONADE_EMBEDDING, LEMONADE_EMBEDDING_MODEL, LEMONADE_EMBEDDING_MODEL_NAME
+  LEMONADE_EMBEDDING, LEMONADE_EMBEDDING_MODEL, LEMONADE_EMBEDDING_MODEL_NAME,
+  LEMONADE_LANGFUSE
 
 Examples:
   # Full setup with groups.yaml for user count
@@ -114,6 +117,7 @@ while [[ $# -gt 0 ]]; do
         --no-prefer-system)    PREFER_SYSTEM="false"; shift ;;
         --llamacpp-bin)        LLAMACPP_BIN="$2"; shift 2 ;;
         --kilo-config)         KILO_CONFIG_OUTPUT="$2"; shift 2 ;;
+        --langfuse)            LANGFUSE_ENABLED="true"; shift ;;
         -h|--help)             usage; exit 0 ;;
         *)                     echo "Unknown option: $1"; usage; exit 1 ;;
     esac
@@ -309,6 +313,9 @@ if [[ -n "${ADMIN_KEY}" ]]; then
     KILO_ARGS+=(--admin-api-key "${ADMIN_KEY}")
 elif [[ -n "${API_KEY}" ]]; then
     KILO_ARGS+=(--api-key "${API_KEY}")
+fi
+if [[ "${LANGFUSE_ENABLED}" == "true" ]]; then
+    KILO_ARGS+=(--langfuse)
 fi
 python3 "${LEMONADE_PY}" generate-kilo-config "${KILO_ARGS[@]}"
 

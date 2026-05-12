@@ -111,6 +111,15 @@ class LemonadeSettings(BaseModel):
     )
 
 
+class LangfuseSettings(BaseModel):
+    """Langfuse observability integration for Kilo Code."""
+
+    enabled: bool = False
+    public_key: str = ""
+    secret_key: str = ""
+    base_url: str = "https://cloud.langfuse.com"
+
+
 class KiloSettings(BaseModel):
     """Kilo Code extension settings injected into sandboxes."""
 
@@ -178,6 +187,7 @@ class ThonConfig(BaseModel):
     lemonade: LemonadeSettings = Field(default_factory=LemonadeSettings)
     kilo: KiloSettings = Field(default_factory=KiloSettings)
     gateway: GatewaySettings = Field(default_factory=GatewaySettings)
+    langfuse: LangfuseSettings = Field(default_factory=LangfuseSettings)
     dashboard: DashboardSettings = Field(default_factory=DashboardSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
 
@@ -276,6 +286,15 @@ class ThonConfig(BaseModel):
             env["GATEWAY_TOKEN_WINDOW"] = str(self.gateway.token_window)
         if self.gateway.mode:
             env["GATEWAY_MODE"] = self.gateway.mode
+
+        if self.langfuse.enabled:
+            env["LANGFUSE_ENABLED"] = "true"
+        if self.langfuse.public_key:
+            env["LANGFUSE_PUBLIC_KEY"] = self.langfuse.public_key
+        if self.langfuse.secret_key:
+            env["LANGFUSE_SECRET_KEY"] = self.langfuse.secret_key
+        if self.langfuse.base_url and self.langfuse.base_url != "https://cloud.langfuse.com":
+            env["LANGFUSE_BASEURL"] = self.langfuse.base_url
 
         return env
 

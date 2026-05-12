@@ -716,6 +716,7 @@ class LemonadeServerManager:
         skeleton_path: Optional[Path] = None,
         chat_models: Optional[list[dict]] = None,
         default_model: Optional[str] = None,
+        langfuse_enabled: bool = False,
     ) -> Path:
         """Generate a kilo.jsonc config for Kilo Code pointing at this Lemonade server.
 
@@ -733,6 +734,7 @@ class LemonadeServerManager:
             skeleton_path: Path to a kilo.jsonc.skeleton file with user overrides.
             chat_models: Additional model options [{name, checkpoint, context, output}].
             default_model: Override for the top-level model field.
+            langfuse_enabled: Enable Langfuse observability plugin in the config.
 
         Returns:
             Path to the generated kilo.jsonc file.
@@ -771,6 +773,7 @@ class LemonadeServerManager:
             embedding_model=f"user.{embedding_model_name}"
             if embedding_model_name
             else None,
+            langfuse_enabled=langfuse_enabled,
             skeleton_path=skeleton_path,
         )
 
@@ -788,6 +791,8 @@ class LemonadeServerManager:
             print(f"[Lemonade]   Embedding: user.{embedding_model_name}")
         if auth_key != "none":
             print(f"[Lemonade]   API Key:   {auth_key}")
+        if langfuse_enabled:
+            print("[Lemonade]   Langfuse:  enabled (opencode-plugin-langfuse)")
         return target
 
     def _get_ctx_size(self) -> int:
@@ -1378,6 +1383,12 @@ Examples:
         default=None,
         help="Path to kilo.jsonc.skeleton with user overrides (deep-merged into generated config)",
     )
+    generate_kilo_parser.add_argument(
+        "--langfuse",
+        action="store_true",
+        default=False,
+        help="Enable Langfuse observability plugin (adds opencode-plugin-langfuse to kilo.jsonc)",
+    )
 
     subparsers.add_parser("cleanup", help="Stop server and clean up")
 
@@ -1485,6 +1496,7 @@ Examples:
             output_path=Path(args.output),
             embedding_model_name=emb_name,
             skeleton_path=Path(args.kilo_skeleton) if args.kilo_skeleton else None,
+            langfuse_enabled=getattr(args, "langfuse", False),
         )
     elif args.command == "cleanup":
         manager.cleanup()
