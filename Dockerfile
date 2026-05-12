@@ -21,8 +21,8 @@
 #   - For HTTPS, mount certificates and use: code-server --cert /certs/server.pem --cert-key /certs/server-key.pem
 #   - mkcert certificates can be generated on host and mounted into container
 
-# Use the official Ubuntu 24.04 LTS base image
-FROM ubuntu:24.04
+# Use the official Ubuntu 26.04 LTS base image
+FROM ubuntu:26.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
@@ -60,7 +60,7 @@ RUN apt update && apt install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Dotnet
-RUN wget https://packages.microsoft.com/config/ubuntu/24.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
+RUN wget https://packages.microsoft.com/config/ubuntu/26.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
 RUN dpkg -i packages-microsoft-prod.deb
 RUN apt update
 
