@@ -83,10 +83,13 @@ class LemonadeSettings(BaseModel):
     model: str = "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL"
     model_name: str = "gemma-4-31b-it"
     mmproj: str = "mmproj-BF16.gguf"
+    ctx_size_per_user: int = 262144
     embedding_model: str = (
         "SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16"
     )
     embedding_model_name: str = "harrier-oss-v1-0.6b"
+    embedding_ctx_size_per_user: int = 32768
+    embedding_dimensions: int = 0
     llamacpp_backend: str = "auto"
     prefer_system: bool = True
     llamacpp_bin: str = "builtin"
@@ -135,6 +138,21 @@ class KiloSettings(BaseModel):
         return THON_DIR / "kilo.jsonc"
 
 
+class ModelConcurrency(BaseModel):
+    """Per-model concurrency and route configuration for the AI Gateway."""
+
+    model: str = ""
+    route_uri: str = ""
+    concurrency_limit: int = 1
+
+    @property
+    def prefixed_model(self) -> str:
+        """Return the model name with 'user.' prefix for Lemonade/APISIX."""
+        if self.model.startswith("user."):
+            return self.model
+        return f"user.{self.model}"
+
+
 class GatewaySettings(BaseModel):
     """APISIX AI Gateway settings for concurrency control and per-consumer keys."""
 
@@ -146,6 +164,7 @@ class GatewaySettings(BaseModel):
     concurrency_limit: int = 1
     token_limit: int = 0
     token_window: int = 60
+    model_concurrency: list[ModelConcurrency] = Field(default_factory=list)
 
 
 class DashboardSettings(BaseModel):

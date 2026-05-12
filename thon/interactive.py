@@ -31,6 +31,7 @@ from thon.config import (
     GatewaySettings,
     KiloSettings,
     LemonadeSettings,
+    ModelConcurrency,
     NginxSettings,
     SandboxSettings,
     ThonConfig,
@@ -237,11 +238,29 @@ def run_interactive(
             lemonade.model_name = _prompt(
                 "Short model name", default=lemonade.model_name
             )
+            lemonade.ctx_size_per_user = int(
+                _prompt(
+                    "Context length per user for chat model",
+                    default=str(lemonade.ctx_size_per_user),
+                )
+            )
             lemonade.embedding_model = _prompt(
                 "Embedding model checkpoint", default=lemonade.embedding_model
             )
             lemonade.embedding_model_name = _prompt(
                 "Embedding model short name", default=lemonade.embedding_model_name
+            )
+            lemonade.embedding_ctx_size_per_user = int(
+                _prompt(
+                    "Context length per user for embedding model",
+                    default=str(lemonade.embedding_ctx_size_per_user),
+                )
+            )
+            lemonade.embedding_dimensions = int(
+                _prompt(
+                    "Embedding model dimensions (0 = auto-detect)",
+                    default=str(lemonade.embedding_dimensions),
+                )
             )
             lemonade.llamacpp_backend = _prompt(
                 "llama.cpp backend",
@@ -311,6 +330,35 @@ def run_interactive(
             )
             if _yes_no("Use Redis for distributed rate limiting?", default=False):
                 gateway.redis_host = _prompt("Redis host", default="127.0.0.1")
+
+            if _yes_no("Configure per-model concurrency limits?", default=False):
+                while True:
+                    mc_model = _prompt(
+                        "Model short name (e.g. gemma-4-31b-it)",
+                        default=lemonade.model_name if lemonade.enabled else "",
+                        allow_empty=True,
+                    )
+                    if not mc_model:
+                        break
+                    mc_uri = _prompt(
+                        "Route URI for this model",
+                        default="/v1/chat/completions",
+                    )
+                    mc_concurrency = int(
+                        _prompt(
+                            "Max concurrent requests per consumer for this model",
+                            default=str(gateway.concurrency_limit),
+                        )
+                    )
+                    gateway.model_concurrency.append(
+                        ModelConcurrency(
+                            model=mc_model,
+                            route_uri=mc_uri,
+                            concurrency_limit=mc_concurrency,
+                        )
+                    )
+                    if not _yes_no("Add another model route?", default=False):
+                        break
 
     # ── Dashboard ────────────────────────────────────────────
     _section("Dashboard")

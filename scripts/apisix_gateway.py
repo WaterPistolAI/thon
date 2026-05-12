@@ -72,6 +72,14 @@ class ConsumerConfig:
 
 
 @dataclass
+class ModelRouteConfig:
+    model: str
+    route_uri: str
+    concurrency_limit: int = CONCURRENCY_LIMIT_DEFAULT
+    route_id_suffix: str = ""
+
+
+@dataclass
 class GatewayStatus:
     running: bool = False
     admin_url: str = ""
@@ -315,55 +323,84 @@ class ApisixGatewayManager:
         lemonade_model: str = "user.gemma-4-31b-it",
         lemonade_instance_name: str = LEMONADE_INSTANCE_NAME,
         uri: str = "/v1/chat/completions",
+        route_id: Optional[str] = None,
+        concurrency_limit: int = 0,
     ) -> dict:
         effective_key = lemonade_api_key or self._lemonade_api_key
         auth_header: dict = {}
         if effective_key:
             auth_header["Authorization"] = f"Bearer {effective_key}"
-        route_data: dict = {
-            "uri": uri,
-            "methods": ["POST"],
-            "plugins": {
-                "key-auth": {},
-                "ai-proxy-multi": {
-                    "instances": [
-                        {
-                            "name": lemonade_instance_name,
-                            "provider": "openai-compatible",
-                            "weight": 100,
-                            "override": {
-                                "endpoint": lemonade_url,
-                            },
-                            "auth": {
-                                "header": auth_header,
-                            },
-                            "options": {
-                                "model": lemonade_model,
-                            },
-                        }
-                    ]
-                },
+
+        plugins: dict = {
+            "key-auth": {},
+            "ai-proxy-multi": {
+                "instances": [
+                    {
+                        "name": lemonade_instance_name,
+                        "provider": "openai-compatible",
+                        "weight": 100,
+                        "override": {
+                            "endpoint": lemonade_url,
+                        },
+                        "auth": {
+                            "header": auth_header,
+                        },
+                        "options": {
+                            "model": lemonade_model,
+                        },
+                    }
+                ]
             },
         }
 
+        if concurrency_limit > 0:
+            limit_conn_config: dict = {
+                "conn": concurrency_limit,
+                "burst": 0,
+                "default_conn_delay": 0.1,
+                "key_type": "var",
+                "key": "consumer_name",
+                "rejected_code": 429,
+                "rejected_msg": f"Concurrency limit ({concurrency_limit}) exceeded for {lemonade_model}. Please wait for your current request to complete.",
+            }
+            if self._redis_host:
+                limit_conn_config["policy"] = "redis"
+                limit_conn_config["redis_host"] = self._redis_host
+                limit_conn_config["redis_port"] = self._redis_port
+                if self._redis_password:
+                    limit_conn_config["redis_password"] = self._redis_password
+            else:
+                limit_conn_config["policy"] = "local"
+            plugins["limit-conn"] = limit_conn_config
+
+        route_data: dict = {
+            "uri": uri,
+            "methods": ["POST"],
+            "plugins": plugins,
+        }
+
+        resolved_route_id = route_id or APISIX_ROUTE_ID
         result = self._request(
-            f"/routes/{APISIX_ROUTE_ID}", method="PUT", data=route_data
+            f"/routes/{resolved_route_id}", method="PUT", data=route_data
         )
-        print(f"[Gateway] Created AI route: {uri} -> {lemonade_url}")
+        limits_desc = f", concurrency={concurrency_limit}" if concurrency_limit > 0 else ""
+        print(f"[Gateway] Created AI route: {uri} -> {lemonade_url} (model={lemonade_model}{limits_desc})")
         return result
 
-    def delete_ai_route(self) -> None:
+    def delete_ai_route(self, route_id: Optional[str] = None) -> None:
+        resolved_id = route_id or APISIX_ROUTE_ID
         try:
-            self._request(f"/routes/{APISIX_ROUTE_ID}", method="DELETE")
-            print(f"[Gateway] Deleted AI route: {APISIX_ROUTE_ID}")
+            self._request(f"/routes/{resolved_id}", method="DELETE")
+            print(f"[Gateway] Deleted AI route: {resolved_id}")
         except RuntimeError as e:
-            print(f"[Gateway] Warning: Could not delete route: {e}")
+            print(f"[Gateway] Warning: Could not delete route {resolved_id}: {e}")
 
     def create_embedding_route(
         self,
         lemonade_url: str,
         lemonade_api_key: Optional[str] = None,
         lemonade_embedding_model: str = "user.harrier-oss-v1-0.6b",
+        concurrency_limit: int = 0,
     ) -> dict:
         """Create an APISIX route for /v1/embeddings with key-auth and rate limiting.
 
@@ -374,6 +411,7 @@ class ApisixGatewayManager:
             lemonade_url: Upstream Lemonade server URL.
             lemonade_api_key: API key for Lemonade authentication.
             lemonade_embedding_model: Default embedding model name.
+            concurrency_limit: Max concurrent embedding requests per consumer (0=no limit).
 
         Returns:
             APISIX Admin API response dict.
@@ -394,6 +432,26 @@ class ApisixGatewayManager:
                 },
             }
 
+        if concurrency_limit > 0:
+            limit_conn_config: dict = {
+                "conn": concurrency_limit,
+                "burst": 0,
+                "default_conn_delay": 0.1,
+                "key_type": "var",
+                "key": "consumer_name",
+                "rejected_code": 429,
+                "rejected_msg": f"Concurrency limit ({concurrency_limit}) exceeded for {lemonade_embedding_model}. Please wait.",
+            }
+            if self._redis_host:
+                limit_conn_config["policy"] = "redis"
+                limit_conn_config["redis_host"] = self._redis_host
+                limit_conn_config["redis_port"] = self._redis_port
+                if self._redis_password:
+                    limit_conn_config["redis_password"] = self._redis_password
+            else:
+                limit_conn_config["policy"] = "local"
+            plugins["limit-conn"] = limit_conn_config
+
         route_data: dict = {
             "uri": "/v1/embeddings",
             "methods": ["POST"],
@@ -409,7 +467,8 @@ class ApisixGatewayManager:
         result = self._request(
             f"/routes/{APISIX_EMBEDDING_ROUTE_ID}", method="PUT", data=route_data
         )
-        print(f"[Gateway] Created embedding route: /v1/embeddings -> {lemonade_url}")
+        limits_desc = f", concurrency={concurrency_limit}" if concurrency_limit > 0 else ""
+        print(f"[Gateway] Created embedding route: /v1/embeddings -> {lemonade_url} (model={lemonade_embedding_model}{limits_desc})")
         return result
 
     def delete_embedding_route(self) -> None:
@@ -431,7 +490,16 @@ class ApisixGatewayManager:
                         f"[Gateway] Warning: Could not delete consumer {username}: {e}"
                     )
 
-        self.delete_ai_route()
+        try:
+            result = self._request("/routes")
+            if isinstance(result, dict) and "list" in result:
+                for item in result["list"]:
+                    route_id = item.get("key", "")
+                    if route_id.startswith("ai-gateway-"):
+                        self.delete_ai_route(route_id)
+        except RuntimeError:
+            self.delete_ai_route()
+
         self.delete_embedding_route()
         print("[Gateway] Cleanup complete")
 
@@ -444,19 +512,49 @@ class ApisixGatewayManager:
         lemonade_embedding_model: str = "user.harrier-oss-v1-0.6b",
         route_uri: str = "/v1/chat/completions",
         enable_embedding: bool = True,
+        model_routes: Optional[list[ModelRouteConfig]] = None,
     ) -> list[ConsumerConfig]:
-        self.create_ai_route(
-            lemonade_url=lemonade_url,
-            lemonade_api_key=lemonade_api_key,
-            lemonade_model=lemonade_model,
-            uri=route_uri,
-        )
+        if model_routes:
+            for mr in model_routes:
+                route_id = f"ai-gateway-{mr.route_id_suffix}" if mr.route_id_suffix else APISIX_ROUTE_ID
+                self.create_ai_route(
+                    lemonade_url=lemonade_url,
+                    lemonade_api_key=lemonade_api_key,
+                    lemonade_model=mr.model,
+                    uri=mr.route_uri,
+                    route_id=route_id,
+                    concurrency_limit=mr.concurrency_limit,
+                )
+        else:
+            self.create_ai_route(
+                lemonade_url=lemonade_url,
+                lemonade_api_key=lemonade_api_key,
+                lemonade_model=lemonade_model,
+                uri=route_uri,
+            )
 
-        if enable_embedding:
+        if enable_embedding and not any(
+            mr.route_uri == "/v1/embeddings" for mr in (model_routes or [])
+        ):
+            embedding_concurrency = 0
+            if model_routes:
+                emb_short = lemonade_embedding_model.removeprefix("user.")
+                emb_route = next(
+                    (
+                        mr
+                        for mr in model_routes
+                        if mr.model == lemonade_embedding_model
+                        or mr.model == emb_short
+                    ),
+                    None,
+                )
+                if emb_route:
+                    embedding_concurrency = emb_route.concurrency_limit
             self.create_embedding_route(
                 lemonade_url=lemonade_url,
                 lemonade_api_key=lemonade_api_key,
                 lemonade_embedding_model=lemonade_embedding_model,
+                concurrency_limit=embedding_concurrency,
             )
 
         created: list[ConsumerConfig] = []
@@ -636,6 +734,17 @@ Examples:
         default=False,
         help="Disable embedding route creation",
     )
+    setup_parser.add_argument(
+        "--model-route",
+        type=str,
+        action="append",
+        default=None,
+        help=(
+            "Per-model route with concurrency. Format: short_name:route_uri:concurrency "
+            "(e.g. 'gemma-4-31b-it:/v1/chat/completions:1'). "
+            "'user.' prefix is added automatically. May be specified multiple times."
+        ),
+    )
 
     consumer_parser = subparsers.add_parser(
         "create-consumer", help="Create a single consumer"
@@ -812,6 +921,35 @@ Examples:
         print(
             f"[Gateway] Setting up AI gateway ({mode_label}) with {len(users)} consumer(s)..."
         )
+
+        model_routes: Optional[list[ModelRouteConfig]] = None
+        if args.model_route:
+            model_routes = []
+            for spec in args.model_route:
+                parts = spec.split(":")
+                if len(parts) < 3:
+                    print(f"[Gateway] Warning: Ignoring invalid --model-route '{spec}' (expected short_name:uri:concurrency)")
+                    continue
+                short_name = parts[0]
+                route_uri = parts[1]
+                try:
+                    concurrency = int(parts[2])
+                except ValueError:
+                    print(f"[Gateway] Warning: Invalid concurrency in --model-route '{spec}'")
+                    continue
+                prefixed_model = f"user.{short_name}" if not short_name.startswith("user.") else short_name
+                suffix = short_name.replace(".", "-")
+                if route_uri == "/v1/embeddings":
+                    suffix = f"embedding-{suffix}"
+                model_routes.append(
+                    ModelRouteConfig(
+                        model=prefixed_model,
+                        route_uri=route_uri,
+                        concurrency_limit=concurrency,
+                        route_id_suffix=suffix,
+                    )
+                )
+
         created = mgr.setup_gateway(
             lemonade_url=args.lemonade_url,
             users=users,
@@ -819,6 +957,7 @@ Examples:
             lemonade_model=args.lemonade_model,
             lemonade_embedding_model=args.embedding_model,
             enable_embedding=not args.no_embedding,
+            model_routes=model_routes,
         )
 
         print("\n" + "=" * 70)

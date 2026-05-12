@@ -22,6 +22,9 @@ PORT="${LEMONADE_PORT:-13305}"
 HOST="${LEMONADE_HOST:-0.0.0.0}"
 BACKEND="${LEMONADE_BACKEND:-auto}"
 CTX_SIZE="${LEMONADE_CTX_SIZE:-262144}"
+CTX_SIZE_PER_USER="${LEMONADE_CTX_SIZE_PER_USER:-262144}"
+EMBEDDING_CTX_SIZE_PER_USER="${LEMONADE_EMBEDDING_CTX_SIZE_PER_USER:-32768}"
+EMBEDDING_DIMENSIONS="${LEMONADE_EMBEDDING_DIMENSIONS:-0}"
 MODEL="${LEMONADE_MODEL:-unsloth/gemma-4-31B-it-GGUF:Q8_K_XL}"
 MODEL_NAME="${LEMONADE_MODEL_NAME:-gemma-4-31b-it}"
 MMPROJ="${LEMONADE_MMPROJ:-mmproj-BF16.gguf}"
@@ -61,6 +64,9 @@ Options:
   --host HOST           Bind address (default: ${HOST})
   --backend BACKEND     llama.cpp backend: auto, vulkan, cpu (default: ${BACKEND})
   --ctx-size SIZE       Per-user context size (default: ${CTX_SIZE})
+  --ctx-size-per-user SIZE  Context length per user for chat model recipe (default: ${CTX_SIZE_PER_USER})
+  --embedding-ctx-size-per-user SIZE  Context length per user for embedding model recipe (default: ${EMBEDDING_CTX_SIZE_PER_USER})
+  --embedding-dimensions DIM  Embedding model dimensions, 0=auto (default: ${EMBEDDING_DIMENSIONS})
   --model MODEL         HuggingFace checkpoint (default: ${MODEL})
   --model-name NAME     Short model name for user_models.json (default: ${MODEL_NAME})
   --mmproj FILE         Multimodal projection model filename (default: ${MMPROJ})
@@ -105,6 +111,9 @@ while [[ $# -gt 0 ]]; do
         --host)                HOST="$2"; shift 2 ;;
         --backend)             BACKEND="$2"; shift 2 ;;
         --ctx-size)            CTX_SIZE="$2"; shift 2 ;;
+        --ctx-size-per-user)   CTX_SIZE_PER_USER="$2"; shift 2 ;;
+        --embedding-ctx-size-per-user) EMBEDDING_CTX_SIZE_PER_USER="$2"; shift 2 ;;
+        --embedding-dimensions) EMBEDDING_DIMENSIONS="$2"; shift 2 ;;
         --model)               MODEL="$2"; shift 2 ;;
         --model-name)          MODEL_NAME="$2"; shift 2 ;;
         --mmproj)              MMPROJ="$2"; shift 2 ;;
@@ -194,6 +203,8 @@ python3 "${LEMONADE_PY}" write-model-configs \
     --num-users "${NUM_USERS}" \
     --llamacpp-backend "${BACKEND}" \
     --mmproj "${MMPROJ}" \
+    --ctx-size-per-user "${CTX_SIZE_PER_USER}" \
+    --embedding-ctx-size-per-user "${EMBEDDING_CTX_SIZE_PER_USER}" \
     ${EMBEDDING_FLAG}
 LEMONADE_USER="$(systemctl show lemonade-server -p User --value 2>/dev/null || echo lemonade)"
 sudo chown -R "${LEMONADE_USER}:${LEMONADE_USER}" "${CONFIG_DIR}"
@@ -350,6 +361,9 @@ echo "  Embedding name: ${PREFIXED_EMB_NAME}"
 fi
 echo "  Parallel users: ${NUM_USERS}"
 echo "  Total ctx-size: ${TOTAL_CTX} (${PER_USER_CTX} x ${NUM_USERS})"
+echo "  Chat ctx/user:  ${CTX_SIZE_PER_USER}"
+echo "  Emb ctx/user:   ${EMBEDDING_CTX_SIZE_PER_USER}"
+echo "  Emb dimensions: ${EMBEDDING_DIMENSIONS}"
 if [[ -n "${API_KEY}" ]]; then
     echo "  API Key:        ${API_KEY}"
 fi

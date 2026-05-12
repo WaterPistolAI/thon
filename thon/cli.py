@@ -174,6 +174,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 "--llamacpp-backend",
                 config.lemonade.llamacpp_backend,
                 "--skip-install",
+                "--ctx-size-per-user",
+                str(config.lemonade.ctx_size_per_user),
+                "--embedding-ctx-size-per-user",
+                str(config.lemonade.embedding_ctx_size_per_user),
             ]
             if config.lemonade.generate_keys:
                 cmd.append("--generate-keys")
@@ -232,6 +236,11 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 cmd.extend(["--external-ip", config.external_ip])
             if config.gateway.mode == "per-group":
                 cmd.append("--per-group")
+
+            for mc in config.gateway.model_concurrency:
+                cmd.append(
+                    f"--model-route={mc.model}:{mc.route_uri}:{mc.concurrency_limit}"
+                )
 
             if config.groups:
                 groups_yaml = PROJECT_ROOT / "groups.yaml"

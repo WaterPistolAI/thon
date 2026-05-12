@@ -550,6 +550,7 @@ class LemonadeServerManager:
         num_users: int = 1,
         llamacpp_backend: str = "auto",
         mmproj: Optional[str] = None,
+        per_user_ctx: int = PER_USER_CTX,
     ) -> None:
         """Write user_models.json, server_models.json, and recipe_options.json.
 
@@ -559,6 +560,7 @@ class LemonadeServerManager:
             num_users: Number of parallel users; scales ctx-size and -np.
             llamacpp_backend: llama.cpp backend (auto, vulkan, cpu).
             mmproj: Multimodal projection model filename (e.g. "mmproj-BF16.gguf").
+            per_user_ctx: Context size per user; total = per_user_ctx * num_users.
         """
         user_models_path = self.config_dir / "user_models.json"
         server_models_path = self.config_dir / "server_models.json"
@@ -603,7 +605,7 @@ class LemonadeServerManager:
         _sudo_write_json(server_models_path, server_models)
         print(f"[Lemonade] server_models.json updated with {model_name}")
 
-        total_ctx = PER_USER_CTX * num_users
+        total_ctx = per_user_ctx * num_users
         llamacpp_args = (
             f"-b 8192 -ub 8192 "
             f"-to 3600 "
@@ -617,6 +619,7 @@ class LemonadeServerManager:
 
         existing_options = _sudo_read_json(recipe_options_path) or {}
 
+        prefixed_name = f"user.{model_name}"
         prefixed_auto_name = f"user.{auto_name}"
         if (
             prefixed_auto_name in existing_options
@@ -627,7 +630,6 @@ class LemonadeServerManager:
                 f"[Lemonade] Removed auto-generated recipe options: {prefixed_auto_name}"
             )
 
-        prefixed_name = f"user.{model_name}"
         existing_options[prefixed_name] = {
             "ctx_size": total_ctx,
             "llamacpp_backend": llamacpp_backend,
@@ -636,7 +638,7 @@ class LemonadeServerManager:
         _sudo_write_json(recipe_options_path, existing_options)
         print(f"[Lemonade] recipe_options.json updated for {prefixed_name}")
         print(
-            f"[Lemonade]   ctx-size: {total_ctx} ({PER_USER_CTX} x {num_users} users)"
+            f"[Lemonade]   ctx-size: {total_ctx} ({per_user_ctx} x {num_users} users)"
         )
         print(f"[Lemonade]   -np: {num_users}")
         print(f"[Lemonade]   llamacpp_args: {llamacpp_args}")
@@ -647,6 +649,7 @@ class LemonadeServerManager:
         model_name: str = DEFAULT_EMBEDDING_MODEL_NAME,
         num_users: int = 1,
         llamacpp_backend: str = "auto",
+        per_user_ctx: int = EMBEDDING_PER_USER_CTX,
     ) -> None:
         """Write embedding model entries into user_models.json and recipe_options.json.
 
@@ -655,6 +658,7 @@ class LemonadeServerManager:
             model_name: Short model name for config keys.
             num_users: Number of parallel users; scales ctx-size and -np.
             llamacpp_backend: llama.cpp backend (auto, vulkan, cpu).
+            per_user_ctx: Context size per user; total = per_user_ctx * num_users.
         """
         user_models_path = self.config_dir / "user_models.json"
         server_models_path = self.config_dir / "server_models.json"
@@ -680,7 +684,7 @@ class LemonadeServerManager:
             f"[Lemonade] server_models.json updated with embedding model {model_name}"
         )
 
-        total_ctx = EMBEDDING_PER_USER_CTX * num_users
+        total_ctx = per_user_ctx * num_users
         llamacpp_args = (
             f"-b 8192 -ub 8192 "
             f"-to 3600 "
@@ -701,7 +705,7 @@ class LemonadeServerManager:
         _sudo_write_json(recipe_options_path, existing_options)
         print(f"[Lemonade] recipe_options.json updated for embedding {prefixed_name}")
         print(
-            f"[Lemonade]   ctx-size: {total_ctx} ({EMBEDDING_PER_USER_CTX} x {num_users} users)"
+            f"[Lemonade]   ctx-size: {total_ctx} ({per_user_ctx} x {num_users} users)"
         )
         print(f"[Lemonade]   -np: {num_users}")
         print(f"[Lemonade]   llamacpp_args: {llamacpp_args}")
@@ -866,6 +870,8 @@ async def cmd_run(
     embedding: bool = True,
     embedding_model: str = DEFAULT_EMBEDDING_MODEL,
     embedding_model_name: str = DEFAULT_EMBEDDING_MODEL_NAME,
+    ctx_size_per_user: int = PER_USER_CTX,
+    embedding_ctx_size_per_user: int = EMBEDDING_PER_USER_CTX,
 ) -> None:
     if groups_file:
         num_users = load_user_count(groups_file, group_filter)
@@ -876,7 +882,7 @@ async def cmd_run(
     elif num_users < 1:
         num_users = 1
 
-    total_ctx = PER_USER_CTX * num_users
+    total_ctx = ctx_size_per_user * num_users
 
     if embedding and max_loaded_models < 2:
         max_loaded_models = 2
@@ -895,6 +901,7 @@ async def cmd_run(
         num_users=num_users,
         llamacpp_backend=llamacpp_backend,
         mmproj=mmproj,
+        per_user_ctx=ctx_size_per_user,
     )
 
     if embedding:
@@ -903,6 +910,7 @@ async def cmd_run(
             model_name=embedding_model_name,
             num_users=num_users,
             llamacpp_backend=llamacpp_backend,
+            per_user_ctx=embedding_ctx_size_per_user,
         )
 
     manager.configure(
@@ -1248,6 +1256,18 @@ Examples:
         default=DEFAULT_EMBEDDING_MODEL_NAME,
         help=f"Short name for embedding model (default: {DEFAULT_EMBEDDING_MODEL_NAME})",
     )
+    run_parser.add_argument(
+        "--ctx-size-per-user",
+        type=int,
+        default=PER_USER_CTX,
+        help=f"Context size per user for chat model; total = value * num_users (default: {PER_USER_CTX})",
+    )
+    run_parser.add_argument(
+        "--embedding-ctx-size-per-user",
+        type=int,
+        default=EMBEDDING_PER_USER_CTX,
+        help=f"Context size per user for embedding model; total = value * num_users (default: {EMBEDDING_PER_USER_CTX})",
+    )
 
     count_users_parser = subparsers.add_parser(
         "count-users",
@@ -1323,6 +1343,18 @@ Examples:
         type=str,
         default=DEFAULT_EMBEDDING_MODEL_NAME,
         help=f"Short name for embedding model (default: {DEFAULT_EMBEDDING_MODEL_NAME})",
+    )
+    write_model_configs_parser.add_argument(
+        "--ctx-size-per-user",
+        type=int,
+        default=PER_USER_CTX,
+        help=f"Context size per user for chat model (default: {PER_USER_CTX})",
+    )
+    write_model_configs_parser.add_argument(
+        "--embedding-ctx-size-per-user",
+        type=int,
+        default=EMBEDDING_PER_USER_CTX,
+        help=f"Context size per user for embedding model (default: {EMBEDDING_PER_USER_CTX})",
     )
 
     generate_kilo_parser = subparsers.add_parser(
@@ -1463,6 +1495,8 @@ Examples:
                 embedding=args.embedding,
                 embedding_model=args.embedding_model,
                 embedding_model_name=args.embedding_model_name,
+                ctx_size_per_user=args.ctx_size_per_user,
+                embedding_ctx_size_per_user=args.embedding_ctx_size_per_user,
             )
         )
     elif args.command == "count-users":
@@ -1475,6 +1509,7 @@ Examples:
             num_users=args.num_users,
             llamacpp_backend=args.llamacpp_backend,
             mmproj=args.mmproj,
+            per_user_ctx=args.ctx_size_per_user,
         )
         if args.embedding:
             manager.write_embedding_model_configs(
@@ -1482,6 +1517,7 @@ Examples:
                 model_name=args.embedding_model_name,
                 num_users=args.num_users,
                 llamacpp_backend=args.llamacpp_backend,
+                per_user_ctx=args.embedding_ctx_size_per_user,
             )
     elif args.command == "generate-kilo-config":
         mgr = LemonadeServerManager(
