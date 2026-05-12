@@ -14,13 +14,12 @@ and optional local LLM inference via Lemonade Server.
 
 ```bash
 # One-time prerequisite installation (python3, nginx, docker, mkcert, openssl)
+# This also creates ~/.venv, installs opensandbox, and auto-generates
+# ~/.sandbox.toml with a random API key (no manual init-config needed).
 bash ./scripts/setup.sh
 
 # Activate the venv created by setup.sh (required for opensandbox CLI/server)
 . ~/.venv/bin/activate
-
-# Initialize OpenSandbox server configuration (one-time, after venv activation)
-opensandbox-server init-config ~/.sandbox.toml --example docker
 
 # Lint
 pip run ruff check .
