@@ -152,7 +152,7 @@ def generate_kilo_config(
     if small_model:
         generated["small_model"] = small_model
     if embedding_model:
-        generated["indexing"]["openai-compatible"]["model"] = embedding_model
+        generated["indexing"]["model"] = embedding_model
     if embedding_dimension > 0:
         generated["indexing"]["dimension"] = embedding_dimension
 
