@@ -68,7 +68,6 @@ def generate_kilo_config(
     base_url: str,
     api_key: str,
     model_name: str = "user.gemma-4-31b-it",
-    model_checkpoint: str = "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL",
     model_context: int = 262144,
     model_output: int = 4096,
     chat_models: Optional[list[dict]] = None,
@@ -77,6 +76,7 @@ def generate_kilo_config(
     embedding_base_url: Optional[str] = None,
     embedding_api_key: Optional[str] = None,
     embedding_model: Optional[str] = None,
+    embedding_dimension: int = 1024,
     langfuse_enabled: bool = False,
     skeleton_path: Optional[str | Path] = None,
 ) -> dict:
@@ -87,10 +87,9 @@ def generate_kilo_config(
         base_url: Chat completions base URL (Lemonade or APISIX gateway).
         api_key: API key for the chat endpoint.
         model_name: Short model ID (e.g. ``user.gemma-4-31b-it``).
-        model_checkpoint: HuggingFace checkpoint for display.
         model_context: Context window limit.
         model_output: Max output tokens.
-        chat_models: Additional model options ``[{name, checkpoint, context, output}]``.
+        chat_models: Additional model options ``[{name, context, output}]``.
         default_model: Override for the top-level ``model`` field (e.g. ``lemonade/user.gemma-4-31b-it``).
         small_model: Small model for agentic tool calling (e.g. ``lemonade/user.gemma-4-E2B-it``).
         embedding_base_url: Separate URL for embedding API (defaults to base_url).
@@ -107,7 +106,6 @@ def generate_kilo_config(
 
     models_entry: dict[str, dict] = {
         model_name: {
-            "name": model_checkpoint,
             "limit": {
                 "context": model_context,
                 "output": model_output,
@@ -119,7 +117,6 @@ def generate_kilo_config(
             m_name = m.get("name", "")
             if m_name and m_name not in models_entry:
                 models_entry[m_name] = {
-                    "name": m.get("checkpoint", ""),
                     "limit": {
                         "context": m.get("context", 262144),
                         "output": m.get("output", 4096),
@@ -156,6 +153,8 @@ def generate_kilo_config(
         generated["small_model"] = small_model
     if embedding_model:
         generated["indexing"]["openai-compatible"]["model"] = embedding_model
+    if embedding_dimension > 0:
+        generated["indexing"]["dimension"] = embedding_dimension
 
     if langfuse_enabled:
         generated["plugin"] = ["opencode-plugin-langfuse"]

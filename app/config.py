@@ -206,6 +206,12 @@ class AppConfig:
             "THON_WORKSPACE_DIR", str(Path.home() / ".thon" / "workspace")
         )
     )
+    kilo_config_path: str = field(
+        default_factory=lambda: os.getenv("THON_KILO_CONFIG", "")
+    )
+    vscode_settings_path: str = field(
+        default_factory=lambda: os.getenv("THON_VSCODE_SETTINGS", "")
+    )
 
     @classmethod
     def from_env(cls, groups_file: Optional[str] = None) -> "AppConfig":

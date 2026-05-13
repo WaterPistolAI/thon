@@ -772,7 +772,6 @@ class LemonadeServerManager:
             base_url=base_url,
             api_key=auth_key,
             model_name=prefixed_model_name,
-            model_checkpoint=model,
             model_context=self._get_ctx_size(),
             chat_models=chat_models,
             default_model=default_model or "",
@@ -780,6 +779,7 @@ class LemonadeServerManager:
             embedding_model=f"user.{embedding_model_name}"
             if embedding_model_name
             else None,
+            embedding_dimension=1024,
             langfuse_enabled=langfuse_enabled,
             skeleton_path=skeleton_path,
         )

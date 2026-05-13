@@ -15,10 +15,12 @@
 """Sandbox service wrapping sandbox SDK SandboxManager for fleet operations."""
 
 import asyncio
+import base64
 import logging
 import os
 import secrets
 from datetime import timedelta
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -156,6 +158,77 @@ class SandboxService:
         if "ImageNotFound" in tb_name or "docker.errors" in tb_module:
             return True
         return False
+
+    async def _inject_kilo_config(self, sandbox: Sandbox) -> None:
+        """Inject kilo.jsonc into the sandbox if configured."""
+        kilo_path = self._resolve_path(self._config.kilo_config_path)
+        if not kilo_path:
+            return
+        if not kilo_path.is_file():
+            logger.warning("Kilo config not found: %s", kilo_path)
+            return
+        content = kilo_path.read_text()
+        if "PLACEHOLDER" in content:
+            logger.warning("Kilo config contains PLACEHOLDER, skipping injection")
+            return
+        encoded = base64.b64encode(content.encode()).decode()
+        kilo_dir = "/home/vscode/.config/kilo"
+        await sandbox.commands.run(f"mkdir -p {kilo_dir}")
+        await sandbox.commands.run(
+            f"echo {encoded} | base64 -d > {kilo_dir}/config.json"
+        )
+        logger.info("Injected kilo config -> %s/config.json", kilo_dir)
+
+    async def _inject_vscode_settings(self, sandbox: Sandbox) -> None:
+        """Inject VS Code settings into the sandbox if configured."""
+        settings_path = self._resolve_path(self._config.vscode_settings_path)
+        if not settings_path:
+            return
+        if not settings_path.is_file():
+            logger.warning("VS Code settings not found: %s", settings_path)
+            return
+        content = settings_path.read_text()
+        encoded = base64.b64encode(content.encode()).decode()
+        settings_dir = "/home/vscode/.local/share/code-server/User"
+        await sandbox.commands.run(f"mkdir -p {settings_dir}")
+        await sandbox.commands.run(
+            f"echo {encoded} | base64 -d > {settings_dir}/settings.json"
+        )
+        logger.info("Injected VS Code settings -> %s/settings.json", settings_dir)
+
+    @staticmethod
+    def _resolve_path(path_str: str) -> Optional[Path]:
+        """Resolve a config path relative to CWD or ~/.thon/.
+
+        Falls back to ``<path>.example`` if the exact file is not found.
+        """
+        if not path_str:
+            return None
+        p = Path(path_str)
+        if p.is_absolute():
+            return p if p.is_file() else None
+        for base in (Path.cwd(), Path.home() / ".thon"):
+            resolved = base / p
+            if resolved.is_file():
+                return resolved
+            example = resolved.parent / f"{resolved.name}.example"
+            if example.is_file():
+                return example
+        return p
+
+    def _build_env(self) -> dict[str, str]:
+        """Build environment variables for sandbox creation."""
+        env: dict[str, str] = {"PYTHON_VERSION": "3.12"}
+        langfuse_public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+        langfuse_secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
+        langfuse_base_url = os.getenv("LANGFUSE_BASEURL", "")
+        if langfuse_public_key:
+            env["LANGFUSE_PUBLIC_KEY"] = langfuse_public_key
+        if langfuse_secret_key:
+            env["LANGFUSE_SECRET_KEY"] = langfuse_secret_key
+        if langfuse_base_url:
+            env["LANGFUSE_BASEURL"] = langfuse_base_url
+        return env
 
     def sync_nginx(self) -> list[int]:
         """Regenerate nginx config from all active instance endpoints.
@@ -426,7 +499,7 @@ class SandboxService:
                     f"User {user.label} already has instance {db_user.sandbox_id}"
                 )
 
-        env = {"PYTHON_VERSION": "3.12"}
+        env = self._build_env()
         volumes: list[Volume] | None = None
 
         if workspace_volume and workspace_volume.startswith("thon-"):
@@ -513,6 +586,9 @@ class SandboxService:
             code_server_cmd,
             opts=RunCommandOpts(background=True),
         )
+
+        await self._inject_kilo_config(sandbox)
+        await self._inject_vscode_settings(sandbox)
 
         sandbox_id = sandbox.id if hasattr(sandbox, "id") else ""
 

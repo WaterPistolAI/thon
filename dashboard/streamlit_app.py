@@ -390,8 +390,32 @@ def _create_instance_dialog() -> None:
 
     with _dialog_container("Create Instance"):
         st.subheader("Create Instance")
-        group = st.text_input("Group", value="default")
-        username = st.text_input("Username", value="workspace")
+
+        groups_svc = _get_groups_service()
+        try:
+            groups = groups_svc.list_groups()
+        except Exception:
+            groups = []
+
+        if not groups:
+            st.warning("No groups found. Create a group with users first.")
+            if st.button("Cancel", key="cancel_create_instance"):
+                st.session_state.show_create_instance = False
+                st.rerun()
+            return
+
+        group_options = {g.name: g for g in groups}
+        group_name = st.selectbox("Group", options=list(group_options.keys()))
+
+        users = get_users(group_options[group_name].id, db_path=groups_svc._db_path)
+        if not users:
+            st.warning(f"No users in group '{group_name}'. Add users first.")
+            if st.button("Cancel", key="cancel_create_instance"):
+                st.session_state.show_create_instance = False
+                st.rerun()
+            return
+
+        username = st.selectbox("User", options=[u.username for u in users])
         port = st.number_input("Port", min_value=1024, max_value=65535, value=8443)
         secure = st.checkbox("Enable password authentication")
 
@@ -399,12 +423,12 @@ def _create_instance_dialog() -> None:
         with c1:
             if st.button("Create", type="primary"):
                 svc = _get_sandbox_service()
-                user = UserInfo(group=group, username=username)
+                user = UserInfo(group=group_name, username=username)
                 try:
                     _run_async(
                         svc.create_instance(user=user, port=int(port), secure=secure)
                     )
-                    st.success(f"Instance created: {group}/{username}")
+                    st.success(f"Instance created: {group_name}/{username}")
                     st.session_state.show_create_instance = False
                     st.rerun()
                 except Exception as e:

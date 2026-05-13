@@ -362,6 +362,11 @@ class ThonConfig(BaseModel):
         ):
             env["LANGFUSE_BASEURL"] = self.langfuse.base_url
 
+        if self.kilo.config_file:
+            env["THON_KILO_CONFIG"] = self.kilo.config_file
+        if self.vscode.settings_file:
+            env["THON_VSCODE_SETTINGS"] = self.vscode.settings_file
+
         return env
 
     def to_env_file(self, path: str | Path) -> Path:
