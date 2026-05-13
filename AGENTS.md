@@ -556,7 +556,7 @@ langfuse:
    environment variables into each sandbox container
 2. `"plugin": ["opencode-plugin-langfuse"]` is added to the generated `kilo.jsonc`
 3. `experimental.openTelemetry` is set to `true` in the kilo config (already in skeleton)
-4. `opencode-plugin-langfuse` npm package is installed globally in the container
+4. `opencode-plugin-langfuse` npm package is preinstalled globally in the Docker image
 5. All LLM traces are automatically sent to your Langfuse dashboard
 
 **Environment Variables (Langfuse):**

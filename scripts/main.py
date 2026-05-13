@@ -292,7 +292,6 @@ async def _inject_kilo_config(
     user: UserInfo,
     sandbox: "Sandbox",
     config_content: str,
-    langfuse_enabled: bool = False,
 ) -> None:
     if "PLACEHOLDER" in config_content:
         print(
@@ -312,16 +311,6 @@ async def _inject_kilo_config(
     write_cmd = f"echo {encoded} | base64 -d > {kilo_dir}/config.json"
     await sandbox.commands.run(write_cmd)
     print(f"[{user.label}] Injected kilo config -> {kilo_dir}/config.json")
-
-    if langfuse_enabled:
-        install_cmd = "npm install -g opencode-plugin-langfuse 2>&1"
-        result = await sandbox.commands.run(install_cmd)
-        if result.exit_code == 0:
-            print(f"[{user.label}] Installed opencode-plugin-langfuse")
-        else:
-            print(
-                f"[{user.label}] Warning: Failed to install opencode-plugin-langfuse"
-            )
 
 
 async def _inject_vscode_settings(
@@ -453,7 +442,7 @@ async def create_instance(
 
     if lemonade_config_content:
         await _inject_kilo_config(
-            user, sandbox, lemonade_config_content, langfuse_enabled=langfuse_enabled
+            user, sandbox, lemonade_config_content
         )
 
     if vscode_settings_content:
@@ -469,7 +458,7 @@ async def create_instance(
             enable_embedding=True,
         )
         await _inject_kilo_config(
-            user, sandbox, kilo_content, langfuse_enabled=langfuse_enabled
+            user, sandbox, kilo_content
         )
 
     if secure and password:

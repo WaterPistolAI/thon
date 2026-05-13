@@ -64,7 +64,7 @@ RUN wget https://packages.microsoft.com/config/ubuntu/26.04/packages-microsoft-p
 RUN dpkg -i packages-microsoft-prod.deb
 RUN apt update
 
-RUN npm install -g pnpm npx
+RUN npm install -g pnpm npx opencode-plugin-langfuse
 # Install code-server
 RUN curl -fsSL https://code-server.dev/install.sh | sh \
     && code-server --version
