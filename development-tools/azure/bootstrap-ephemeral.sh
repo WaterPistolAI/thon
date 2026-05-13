@@ -7,17 +7,28 @@ CONTAINERD_CONFIG="/etc/containerd/config.toml"
 LEMONADE_SERVICE="/etc/systemd/system/lemonade.service"
 
 echo "Step 1: Identifying NVMe Disk..."
-# Find first NVMe with no partitions and no mountpoint
-TARGET_DISK=$(lsblk -dnox NAME,MOUNTPOINT,TYPE | awk '$2=="" && $3=="disk" {print "/dev/"$1}' | grep nvme | head -n 1)
+
+# Improved discovery: 
+# 1. List all nvme disks (type 'disk', not 'part')
+# 2. Filter for those with NO mountpoint and NO children (partitions)
+TARGET_DISK=$(lsblk -dnox NAME,MOUNTPOINT,PKNAME,TYPE | awk '$2=="" && $4=="disk" {print "/dev/"$1}' | grep nvme | head -n 1)
+
+# Fallback: if the above is too strict, find the largest unmounted NVMe
+if [ -z "$TARGET_DISK" ]; then
+    TARGET_DISK=$(lsblk -dnox NAME,MOUNTPOINT,TYPE,SIZE | grep "disk" | grep "nvme" | awk '$2=="" {print "/dev/"$1}' | head -n 1)
+fi
 
 if [ -z "$TARGET_DISK" ]; then
     echo "No unmounted NVMe disk found. Checking if already mounted..."
-    if ! mountpoint -q "$MOUNT_POINT"; then
+    if mountpoint -q "$MOUNT_POINT"; then
+        echo "Disk is already mounted at $MOUNT_POINT."
+    else
         echo "Error: No disk found and $MOUNT_POINT is not mounted."
         exit 1
     fi
 else
     echo "Found disk: $TARGET_DISK. Preparing filesystem..."
+    # The rest of your formatting/mounting logic follows...
     if ! blkid "$TARGET_DISK" > /dev/null 2>&1; then
         mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 "$TARGET_DISK"
     fi
