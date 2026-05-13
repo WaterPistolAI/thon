@@ -13,7 +13,14 @@ This setup automates the discovery, formatting, and mounting of Azure ephemeral 
 
 ## 🚀 Installation
 
-### 1. Create the Bootstrap Script
+### 1. Create the Mount Point and Bootstrap Script
+
+Create the mountpoint at `/scratch-data`:
+
+```bash
+sudo mkdir /scratch-data
+
+```
 
 Create the script at `/usr/local/bin/bootstrap-ephemeral.sh`:
 
@@ -22,7 +29,7 @@ sudo cp bootstrap-ephemeral.sh /usr/local/bin/bootstrap-ephemeral.sh
 
 ```
 
-**Make it executable:**
+**Make the scritpt executable:**
 
 ```bash
 sudo chmod +x /usr/local/bin/bootstrap-ephemeral.sh

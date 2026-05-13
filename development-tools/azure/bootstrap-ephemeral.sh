@@ -4,31 +4,32 @@ set -e
 # --- CONFIGURATION ---
 MOUNT_POINT="/scratch-data"
 CONTAINERD_CONFIG="/etc/containerd/config.toml"
-LEMONADE_SERVICE="/etc/systemd/system/lemonade.service"
+LEMONADE_SERVICE="/usr/lib/systemd/system/lemond.service"
 
 echo "Step 1: Identifying NVMe Disk..."
 
-# Improved discovery: 
-# 1. List all nvme disks (type 'disk', not 'part')
-# 2. Filter for those with NO mountpoint and NO children (partitions)
-TARGET_DISK=$(lsblk -dnox NAME,MOUNTPOINT,PKNAME,TYPE | awk '$2=="" && $4=="disk" {print "/dev/"$1}' | grep nvme | head -n 1)
+# 1. Look for NVMe disks that have NO partitions
+# Empty MOUNTPOINT fields cause awk field-shifting with whitespace-delimited lsblk output,
+# so we query disk names and partition checks separately.
+TARGET_DISK=""
+for disk in $(lsblk -ndo NAME,TYPE | awk '$2=="disk" && $1 ~ /nvme/ {print $1}'); do
+    if ! lsblk -nlo TYPE "/dev/$disk" 2>/dev/null | grep -q "part"; then
+        TARGET_DISK="/dev/$disk"
+        break
+    fi
+done
 
-# Fallback: if the above is too strict, find the largest unmounted NVMe
+# Validation and Fallback
 if [ -z "$TARGET_DISK" ]; then
-    TARGET_DISK=$(lsblk -dnox NAME,MOUNTPOINT,TYPE,SIZE | grep "disk" | grep "nvme" | awk '$2=="" {print "/dev/"$1}' | head -n 1)
-fi
-
-if [ -z "$TARGET_DISK" ]; then
-    echo "No unmounted NVMe disk found. Checking if already mounted..."
     if mountpoint -q "$MOUNT_POINT"; then
         echo "Disk is already mounted at $MOUNT_POINT."
     else
-        echo "Error: No disk found and $MOUNT_POINT is not mounted."
+        echo "Error: Could not find an unpartitioned, unmounted NVMe disk."
         exit 1
     fi
 else
-    echo "Found disk: $TARGET_DISK. Preparing filesystem..."
-    # The rest of your formatting/mounting logic follows...
+    echo "Found raw ephemeral disk: $TARGET_DISK"
+    # Proceed with mkfs and mount...
     if ! blkid "$TARGET_DISK" > /dev/null 2>&1; then
         mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 "$TARGET_DISK"
     fi
