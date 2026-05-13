@@ -133,22 +133,24 @@ python3 -m venv ~/.venv
 pip install opensandbox opensandbox-cli
 
 echo "[Setup] Initializing OpenSandbox server configuration..."
-opensandbox-server init-config ~/.sandbox.toml --example docker
+opensandbox-server init-config "$HOME/.sandbox.toml" --example docker
 
 SANDBOX_API_KEY="$(openssl rand -hex 24)"
 if command -v python3 &>/dev/null; then
     SANDBOX_API_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')"
 fi
-python3 -c "
-import configparser
-cfg = configparser.ConfigParser()
-cfg.read('~/.sandbox.toml')
-if 'server' not in cfg:
-    cfg['server'] = {}
-cfg['server']['api_key'] = '${SANDBOX_API_KEY}'
-with open('~/.sandbox.toml', 'w') as f:
-    cfg.write(f)
-" 2>/dev/null || sed -i "s/^api_key = \"\"/api_key = \"${SANDBOX_API_KEY}\"/" ~/.sandbox.toml 2>/dev/null || true
+
+# Write API key to ~/.sandbox.toml (handles commented, empty, or missing api_key)
+if [ -f "$HOME/.sandbox.toml" ]; then
+    # Uncomment the api_key line and set the generated key
+    sed -i "s/^# api_key = .*/api_key = \"${SANDBOX_API_KEY}\"/" "$HOME/.sandbox.toml"
+    # If api_key is uncommented but empty, update it
+    sed -i "s/^api_key = \"\"/api_key = \"${SANDBOX_API_KEY}\"/" "$HOME/.sandbox.toml"
+    # If still no api_key line, add one after [server]
+    if ! grep -q "^api_key = " "$HOME/.sandbox.toml"; then
+        sed -i "/^\[server\]/a api_key = \"${SANDBOX_API_KEY}\"" "$HOME/.sandbox.toml"
+    fi
+fi
 
 echo "[Setup] Generated sandbox API key: ${SANDBOX_API_KEY}"
 

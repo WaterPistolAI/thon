@@ -773,7 +773,7 @@ class LemonadeServerManager:
             model_checkpoint=model,
             model_context=self._get_ctx_size(),
             chat_models=chat_models,
-            default_model=default_model,
+            default_model=default_model or "",
             embedding_model=f"user.{embedding_model_name}"
             if embedding_model_name
             else None,
@@ -872,6 +872,7 @@ async def cmd_run(
     embedding_model_name: str = DEFAULT_EMBEDDING_MODEL_NAME,
     ctx_size_per_user: int = PER_USER_CTX,
     embedding_ctx_size_per_user: int = EMBEDDING_PER_USER_CTX,
+    additional_models: Optional[list[dict]] = None,
 ) -> None:
     if groups_file:
         num_users = load_user_count(groups_file, group_filter)
@@ -903,6 +904,22 @@ async def cmd_run(
         mmproj=mmproj,
         per_user_ctx=ctx_size_per_user,
     )
+
+    if additional_models:
+        for extra in additional_models:
+            extra_name = extra.get("name", "")
+            extra_checkpoint = extra.get("checkpoint", "")
+            extra_mmproj = extra.get("mmproj")
+            extra_ctx = extra.get("context", ctx_size_per_user)
+            if extra_name and extra_checkpoint:
+                manager.write_model_configs(
+                    model=extra_checkpoint,
+                    model_name=extra_name,
+                    num_users=num_users,
+                    llamacpp_backend=llamacpp_backend,
+                    mmproj=extra_mmproj,
+                    per_user_ctx=extra_ctx,
+                )
 
     if embedding:
         manager.write_embedding_model_configs(
@@ -936,6 +953,14 @@ async def cmd_run(
     prefixed_model = f"user.{model_name}"
     manager.pull_model(prefixed_model, checkpoint=model)
 
+    if additional_models:
+        for extra in additional_models:
+            extra_name = extra.get("name", "")
+            extra_checkpoint = extra.get("checkpoint", "")
+            if extra_name and extra_checkpoint:
+                manager.pull_model(f"user.{extra_name}", checkpoint=extra_checkpoint)
+
+    prefixed_emb = ""
     if embedding:
         prefixed_emb = f"user.{embedding_model_name}"
         manager.pull_model(prefixed_emb, checkpoint=embedding_model)
@@ -943,7 +968,7 @@ async def cmd_run(
     await asyncio.sleep(2)
     manager.load_model(prefixed_model)
 
-    if embedding:
+    if embedding and prefixed_emb:
         await asyncio.sleep(2)
         manager.load_model(prefixed_emb)
 
@@ -951,6 +976,17 @@ async def cmd_run(
 
     if generate_keys or kilo_config:
         output = Path(kilo_config) if kilo_config else DEFAULT_KILO_OUTPUT
+        chat_models_list = None
+        if additional_models:
+            chat_models_list = [
+                {
+                    "name": f"user.{m.get('name', '')}",
+                    "checkpoint": m.get("checkpoint", ""),
+                    "context": m.get("context", PER_USER_CTX),
+                    "output": 4096,
+                }
+                for m in additional_models
+            ]
         manager.generate_kilo_config(
             model=model,
             model_name=model_name,
@@ -958,10 +994,49 @@ async def cmd_run(
             output_path=output,
             embedding_model_name=embedding_model_name if embedding else None,
             skeleton_path=Path(kilo_skeleton) if kilo_skeleton else None,
+            chat_models=chat_models_list,
+            default_model=f"lemonade/user.{model_name}",
         )
 
     print("[Lemonade] Setup complete. Server is running as a systemd service.")
     print("[Lemonade] Use 'sudo systemctl status lemond' to check status.")
+
+
+def _parse_additional_models(specs: Optional[list[str]]) -> Optional[list[dict]]:
+    """Parse --additional-model specs into dicts for cmd_run.
+
+    Format: ``name:checkpoint[:context]``
+
+    HuggingFace checkpoints contain colons (e.g. ``unsloth/model-GGUF:Q8_K_XL``),
+    so we parse from both ends: first colon separates name, then check if the
+    last colon-separated field is an integer for context.  Everything in between
+    is the checkpoint.
+    """
+    if not specs:
+        return None
+    models = []
+    for spec in specs:
+        first_colon = spec.find(":")
+        if first_colon < 1:
+            print(
+                f"[Lemonade] Warning: Ignoring invalid --additional-model '{spec}' "
+                f"(expected name:checkpoint[:context])"
+            )
+            continue
+        name = spec[:first_colon]
+        rest = spec[first_colon + 1 :]
+        ctx = PER_USER_CTX
+        checkpoint = rest
+        last_colon = rest.rfind(":")
+        if last_colon > 0:
+            maybe_ctx = rest[last_colon + 1 :]
+            try:
+                ctx = int(maybe_ctx)
+                checkpoint = rest[:last_colon]
+            except ValueError:
+                pass
+        models.append({"name": name, "checkpoint": checkpoint, "context": ctx})
+    return models if models else None
 
 
 def main() -> None:
@@ -1268,6 +1343,18 @@ Examples:
         default=EMBEDDING_PER_USER_CTX,
         help=f"Context size per user for embedding model; total = value * num_users (default: {EMBEDDING_PER_USER_CTX})",
     )
+    run_parser.add_argument(
+        "--additional-model",
+        type=str,
+        action="append",
+        default=None,
+        help=(
+            "Additional chat model to register and pull. "
+            "Format: name:checkpoint[:context] "
+            "(e.g. 'glm-4-flash:unsloth/GLM-4.7-Flash-GGUF:GLM-4.7-Flash-UD-TQ1_0.gguf:131072'). "
+            "May be specified multiple times."
+        ),
+    )
 
     count_users_parser = subparsers.add_parser(
         "count-users",
@@ -1497,6 +1584,7 @@ Examples:
                 embedding_model_name=args.embedding_model_name,
                 ctx_size_per_user=args.ctx_size_per_user,
                 embedding_ctx_size_per_user=args.embedding_ctx_size_per_user,
+                additional_models=_parse_additional_models(args.additional_model),
             )
         )
     elif args.command == "count-users":

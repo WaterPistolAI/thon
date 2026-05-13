@@ -113,6 +113,21 @@ class LemonadeSettings(BaseModel):
         ]
     )
 
+    def effective_chat_models(self) -> list[ModelOption]:
+        """Return chat models with the primary model guaranteed first.
+
+        If the primary ``model_name`` / ``model`` pair is not already in
+        ``chat_models``, it is prepended.  Duplicate names (matched by
+        ``name`` field) that conflict with the primary model are removed.
+        """
+        primary = ModelOption(
+            name=self.model_name,
+            checkpoint=self.model,
+            context=self.ctx_size_per_user,
+        )
+        extras = [m for m in self.chat_models if m.name != self.model_name]
+        return [primary] + extras
+
 
 class LangfuseSettings(BaseModel):
     """Langfuse observability integration for Kilo Code."""
@@ -139,11 +154,18 @@ class KiloSettings(BaseModel):
 
 
 class ModelConcurrency(BaseModel):
-    """Per-model concurrency and route configuration for the AI Gateway."""
+    """Per-model rate limiting configuration for the AI Gateway.
+
+    When ``rate_limit_scope`` is ``per-model``, each model gets its own
+    concurrency and token limits.  Models are registered as instances in
+    ``ai-proxy-multi`` and matched by name in ``ai-rate-limiting.instances``.
+    """
 
     model: str = ""
-    route_uri: str = ""
     concurrency_limit: int = 1
+    token_limit: int = 0
+    token_window: int = 60
+    priority: int = 0
 
     @property
     def prefixed_model(self) -> str:
@@ -152,12 +174,29 @@ class ModelConcurrency(BaseModel):
             return self.model
         return f"user.{self.model}"
 
+    @property
+    def instance_name(self) -> str:
+        """Return the APISIX instance name for this model.
+
+        Instance names must match between ``ai-proxy-multi.instances[].name``
+        and ``ai-rate-limiting.instances[].name``.
+        """
+        short = self.model.removeprefix("user.")
+        return f"{short}-instance"
+
 
 class GatewaySettings(BaseModel):
-    """APISIX AI Gateway settings for concurrency control and per-consumer keys."""
+    """APISIX AI Gateway settings for concurrency control and per-consumer keys.
+
+    ``rate_limit_scope`` controls whether limits are uniform across all models
+    (``per-user``) or different per model (``per-model``).  When ``per-model``,
+    the ``model_concurrency`` list provides per-model limits that are applied
+    via ``ai-rate-limiting.instances`` on a single route with ``ai-proxy-multi``.
+    """
 
     enabled: bool = False
     mode: str = "per-user"
+    rate_limit_scope: str = "per-user"
     admin_key: str = ""
     redis_host: str = ""
     redis_port: int = 6379
@@ -305,6 +344,11 @@ class ThonConfig(BaseModel):
             env["GATEWAY_TOKEN_WINDOW"] = str(self.gateway.token_window)
         if self.gateway.mode:
             env["GATEWAY_MODE"] = self.gateway.mode
+        if (
+            self.gateway.rate_limit_scope
+            and self.gateway.rate_limit_scope != "per-user"
+        ):
+            env["GATEWAY_RATE_LIMIT_SCOPE"] = self.gateway.rate_limit_scope
 
         if self.langfuse.enabled:
             env["LANGFUSE_ENABLED"] = "true"
@@ -312,7 +356,10 @@ class ThonConfig(BaseModel):
             env["LANGFUSE_PUBLIC_KEY"] = self.langfuse.public_key
         if self.langfuse.secret_key:
             env["LANGFUSE_SECRET_KEY"] = self.langfuse.secret_key
-        if self.langfuse.base_url and self.langfuse.base_url != "https://cloud.langfuse.com":
+        if (
+            self.langfuse.base_url
+            and self.langfuse.base_url != "https://cloud.langfuse.com"
+        ):
             env["LANGFUSE_BASEURL"] = self.langfuse.base_url
 
         return env

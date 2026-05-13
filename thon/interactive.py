@@ -21,6 +21,7 @@ validates choices, and writes a thon.yaml config file.
 from __future__ import annotations
 
 import subprocess
+import tomllib
 from pathlib import Path
 from typing import Optional
 
@@ -111,6 +112,97 @@ def _detect_external_ip() -> Optional[str]:
     return None
 
 
+def _read_sandbox_toml() -> dict[str, str]:
+    """Read ~/.sandbox.toml and return relevant sandbox server settings.
+
+    Returns a dict with keys: ``domain``, ``api_key``.  Missing values
+    default to empty strings so callers can fall back gracefully.
+    """
+    toml_path = Path.home() / ".sandbox.toml"
+    result: dict[str, str] = {"domain": "", "api_key": ""}
+    if not toml_path.is_file():
+        return result
+    try:
+        with open(toml_path, "rb") as f:
+            data = tomllib.load(f)
+    except Exception:
+        return result
+    server = data.get("server", {})
+    if not isinstance(server, dict):
+        return result
+    host = server.get("host", "")
+    port = server.get("port", "")
+    if host and port:
+        result["domain"] = f"{host}:{port}"
+    elif host:
+        result["domain"] = host
+    api_key = server.get("api_key", "")
+    if isinstance(api_key, str) and api_key:
+        result["api_key"] = api_key
+    return result
+
+
+def _detect_apisix_admin_key() -> str:
+    """Read the APISIX admin key from /usr/local/apisix/conf/config.yaml."""
+    import re
+
+    config_path = Path("/usr/local/apisix/conf/config.yaml")
+    if not config_path.is_file():
+        return ""
+    try:
+        content = config_path.read_text()
+        key_match = re.search(
+            r"^\s*key:\s*['\"]?(\S+?)['\"]?\s*$", content, re.MULTILINE
+        )
+        if key_match and key_match.group(1):
+            return key_match.group(1)
+    except Exception:
+        pass
+    return ""
+
+
+def _detect_lemonade_keys() -> dict[str, str]:
+    """Read Lemonade API keys from systemd override files.
+
+    Returns a dict with keys: ``api_key``, ``admin_api_key``.
+    """
+    import re
+
+    result: dict[str, str] = {"api_key": "", "admin_api_key": ""}
+    for service_name in ("lemonade-server", "lemond"):
+        override_path = Path(
+            f"/etc/systemd/system/{service_name}.service.d/override.conf"
+        )
+        if not override_path.is_file():
+            continue
+        try:
+            content = override_path.read_text()
+            api_match = re.search(r'LEMONADE_API_KEY="?([^"\s]+)"?', content)
+            admin_match = re.search(r'LEMONADE_ADMIN_API_KEY="?([^"\s]+)"?', content)
+            if api_match:
+                result["api_key"] = api_match.group(1)
+            if admin_match:
+                result["admin_api_key"] = admin_match.group(1)
+            if result["api_key"] or result["admin_api_key"]:
+                return result
+        except Exception:
+            continue
+    return result
+
+
+def _is_installed(package: str) -> bool:
+    """Check if a dpkg package is installed."""
+    try:
+        result = subprocess.run(
+            ["dpkg", "-s", package],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def _section(title: str) -> None:
     print(f"\n{'─' * 60}")
     print(f"  {title}")
@@ -191,10 +283,27 @@ def run_interactive(
 
     # ── Sandbox ──────────────────────────────────────────────
     _section("Sandbox")
+    sandbox_toml = _read_sandbox_toml()
     sandbox = SandboxSettings()
+    if sandbox_toml["domain"]:
+        sandbox.domain = sandbox_toml["domain"]
+        _info(f"Read domain from ~/.sandbox.toml: {sandbox.domain}")
+    if sandbox_toml["api_key"]:
+        sandbox.api_key = sandbox_toml["api_key"]
+        _info("Read API key from ~/.sandbox.toml")
     if not non_interactive:
         sandbox.domain = _prompt("Sandbox server domain", default=sandbox.domain)
-        sandbox.api_key = _prompt("Sandbox API key (leave empty if none)", default="")
+        if sandbox.api_key:
+            _info("API key loaded from ~/.sandbox.toml (press Enter to keep)")
+            raw_key = _prompt(
+                "Sandbox API key (leave empty to keep current)", default=""
+            )
+            if raw_key:
+                sandbox.api_key = raw_key
+        else:
+            sandbox.api_key = _prompt(
+                "Sandbox API key (leave empty if none)", default=""
+            )
         sandbox.image = _prompt("Docker image", default=sandbox.image)
         sandbox.starting_port = int(
             _prompt("Starting port", default=str(sandbox.starting_port))
@@ -244,8 +353,21 @@ def run_interactive(
     # ── Lemonade ─────────────────────────────────────────────
     _section("Lemonade Server (Local LLM Inference)")
     lemonade = LemonadeSettings()
+    lemonade_installed = _is_installed("lemonade-server")
+    if lemonade_installed:
+        _info("Lemonade server is installed")
+    lemonade_keys = _detect_lemonade_keys()
+    if lemonade_keys["api_key"]:
+        lemonade.api_key = lemonade_keys["api_key"]
+        _info("Read API key from Lemonade systemd override")
+    if lemonade_keys["admin_api_key"]:
+        lemonade.admin_api_key = lemonade_keys["admin_api_key"]
+        _info("Read admin API key from Lemonade systemd override")
     if not non_interactive:
-        lemonade.enabled = _yes_no("Enable Lemonade inference server?", default=True)
+        lemonade.enabled = _yes_no(
+            "Enable Lemonade inference server?",
+            default=lemonade_installed,
+        )
         if lemonade.enabled:
             lemonade.host = _prompt("Bind address", default=lemonade.host)
             lemonade.port = int(_prompt("Port", default=str(lemonade.port)))
@@ -284,9 +406,20 @@ def run_interactive(
                 default=lemonade.llamacpp_backend,
                 choices=["auto", "vulkan", "cpu"],
             )
-            lemonade.generate_keys = _yes_no(
-                "Generate API keys automatically?", default=True
-            )
+            if lemonade.api_key:
+                _info("API key already loaded from systemd (press Enter to keep)")
+                if not _yes_no("Regenerate API keys?", default=False):
+                    lemonade.generate_keys = False
+                else:
+                    lemonade.generate_keys = True
+            else:
+                lemonade.generate_keys = _yes_no(
+                    "Generate API keys automatically?", default=True
+                )
+    else:
+        if lemonade_installed:
+            lemonade.enabled = True
+            lemonade.generate_keys = not bool(lemonade.api_key)
 
     # ── Kilo Code ────────────────────────────────────────────
     _section("Kilo Code")
@@ -317,9 +450,17 @@ def run_interactive(
     # ── AI Gateway ───────────────────────────────────────────
     _section("AI Gateway (APISIX Rate Limiting)")
     gateway = GatewaySettings()
+    apisix_installed = _is_installed("apisix")
+    detected_admin_key = _detect_apisix_admin_key()
+    if apisix_installed:
+        _info("APISIX is installed")
+    if detected_admin_key:
+        gateway.admin_key = detected_admin_key
+        _info("Read admin key from APISIX config")
     if not non_interactive:
         gateway.enabled = _yes_no(
-            "Enable APISIX AI Gateway with rate limiting?", default=False
+            "Enable APISIX AI Gateway with rate limiting?",
+            default=apisix_installed,
         )
         if gateway.enabled:
             gateway.mode = _prompt(
@@ -327,55 +468,122 @@ def run_interactive(
                 default=gateway.mode,
                 choices=["per-user", "per-group"],
             )
-            gateway.concurrency_limit = int(
-                _prompt(
-                    "Max concurrent requests per consumer",
-                    default=str(gateway.concurrency_limit),
-                )
+            gateway.rate_limit_scope = _prompt(
+                "Rate limit scope",
+                default=gateway.rate_limit_scope,
+                choices=["per-user", "per-model"],
             )
-            gateway.token_limit = int(
-                _prompt(
-                    "Token limit per consumer (0 = no limit)",
-                    default=str(gateway.token_limit),
+
+            if gateway.rate_limit_scope == "per-model":
+                _info(
+                    "Per-model rate limiting uses ai-proxy-multi with per-instance "
+                    "ai-rate-limiting on a single route. Models are selected by "
+                    "priority — when a model hits its limit, traffic falls back to "
+                    "the next model."
                 )
-            )
-            gateway.token_window = int(
-                _prompt(
-                    "Token limit time window (seconds)",
-                    default=str(gateway.token_window),
+                models = lemonade.effective_chat_models() if lemonade.enabled else []
+                if models:
+                    _info(
+                        f"Chat models from Lemonade config: "
+                        f"{', '.join(m.name for m in models)}"
+                    )
+                    for i, m in enumerate(models):
+                        default_priority = len(models) - i
+                        _info(f"  [{i + 1}] {m.name} ({m.checkpoint})")
+                        mc = ModelConcurrency(
+                            model=m.name,
+                            priority=int(
+                                _prompt(
+                                    f"Priority for {m.name} (higher = tried first)",
+                                    default=str(default_priority),
+                                )
+                            ),
+                        )
+                        mc.concurrency_limit = int(
+                            _prompt(
+                                f"Max concurrent requests for {m.name}",
+                                default=str(gateway.concurrency_limit),
+                            )
+                        )
+                        mc.token_limit = int(
+                            _prompt(
+                                f"Token limit for {m.name} (0 = no limit)",
+                                default=str(gateway.token_limit),
+                            )
+                        )
+                        mc.token_window = int(
+                            _prompt(
+                                f"Token limit time window for {m.name} (seconds)",
+                                default=str(gateway.token_window),
+                            )
+                        )
+                        gateway.model_concurrency.append(mc)
+                else:
+                    _info(
+                        "No chat models configured — add models in Lemonade section first"
+                    )
+                    while True:
+                        mc_model = _prompt(
+                            "Model short name (e.g. gemma-4-31b-it)",
+                            allow_empty=True,
+                        )
+                        if not mc_model:
+                            break
+                        mc = ModelConcurrency(
+                            model=mc_model,
+                            priority=int(
+                                _prompt(
+                                    f"Priority for {mc_model} (higher = tried first)",
+                                    default="1",
+                                )
+                            ),
+                        )
+                        mc.concurrency_limit = int(
+                            _prompt(
+                                f"Max concurrent requests for {mc_model}",
+                                default=str(gateway.concurrency_limit),
+                            )
+                        )
+                        mc.token_limit = int(
+                            _prompt(
+                                f"Token limit for {mc_model} (0 = no limit)",
+                                default=str(gateway.token_limit),
+                            )
+                        )
+                        mc.token_window = int(
+                            _prompt(
+                                f"Token limit time window for {mc_model} (seconds)",
+                                default=str(gateway.token_window),
+                            )
+                        )
+                        gateway.model_concurrency.append(mc)
+                        if not _yes_no("Add another model?", default=False):
+                            break
+            else:
+                gateway.concurrency_limit = int(
+                    _prompt(
+                        "Max concurrent requests per consumer",
+                        default=str(gateway.concurrency_limit),
+                    )
                 )
-            )
+                gateway.token_limit = int(
+                    _prompt(
+                        "Token limit per consumer (0 = no limit)",
+                        default=str(gateway.token_limit),
+                    )
+                )
+                gateway.token_window = int(
+                    _prompt(
+                        "Token limit time window (seconds)",
+                        default=str(gateway.token_window),
+                    )
+                )
+
             if _yes_no("Use Redis for distributed rate limiting?", default=False):
                 gateway.redis_host = _prompt("Redis host", default="127.0.0.1")
-
-            if _yes_no("Configure per-model concurrency limits?", default=False):
-                while True:
-                    mc_model = _prompt(
-                        "Model short name (e.g. gemma-4-31b-it)",
-                        default=lemonade.model_name if lemonade.enabled else "",
-                        allow_empty=True,
-                    )
-                    if not mc_model:
-                        break
-                    mc_uri = _prompt(
-                        "Route URI for this model",
-                        default="/v1/chat/completions",
-                    )
-                    mc_concurrency = int(
-                        _prompt(
-                            "Max concurrent requests per consumer for this model",
-                            default=str(gateway.concurrency_limit),
-                        )
-                    )
-                    gateway.model_concurrency.append(
-                        ModelConcurrency(
-                            model=mc_model,
-                            route_uri=mc_uri,
-                            concurrency_limit=mc_concurrency,
-                        )
-                    )
-                    if not _yes_no("Add another model route?", default=False):
-                        break
+    else:
+        if apisix_installed and detected_admin_key:
+            gateway.enabled = True
 
     # ── Dashboard ────────────────────────────────────────────
     _section("Dashboard")

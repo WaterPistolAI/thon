@@ -54,10 +54,15 @@ APISIX_CONFIG="/usr/local/apisix/conf/config.yaml"
 
 if [ -f "$APISIX_CONFIG" ]; then
     if grep -q "admin_key" "$APISIX_CONFIG" 2>/dev/null; then
-        EXISTING_KEY=$(grep -A3 'admin_key' "$APISIX_CONFIG" | grep 'key:' | head -1 | awk '{print $2}')
+        EXISTING_KEY=$(grep -A3 'admin_key' "$APISIX_CONFIG" | grep 'key:' | head -1 | awk '{print $2}' | tr -d "'" | tr -d '"')
         if [ -n "$EXISTING_KEY" ]; then
             ADMIN_KEY="$EXISTING_KEY"
             echo "[APISIX] Using existing admin key from config"
+        else
+            ADMIN_KEY="${APISIX_ADMIN_KEY:-$(openssl rand -hex 16)}"
+            sudo sed -i "s/key: ''/key: ${ADMIN_KEY}/" "$APISIX_CONFIG" 2>/dev/null \
+                || sudo sed -i "s/key:$/key: ${ADMIN_KEY}/" "$APISIX_CONFIG" 2>/dev/null
+            echo "[APISIX] Updated empty admin key in config: ${ADMIN_KEY}"
         fi
     fi
 

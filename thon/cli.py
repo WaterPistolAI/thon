@@ -12,17 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""THON CLI — unified entry point for interactive setup, config, and instance management.
+"""THON CLI — unified entry point for install, config, and instance management.
 
-Usage:
-    thon init                  # Interactive guided setup wizard
-    thon setup                 # Install prerequisites + configure from thon.yaml
-    thon run                   # Start the API server (default, no users required)
-    thon launch                # Launch VS Code instances from thon.yaml (legacy batch mode)
-    thon config show           # Display current config
-    thon config env            # Export config as .env file
-    thon config validate       # Validate thon.yaml
-    thon cleanup               # Tear down all resources
+Workflow:
+    thon install    # System packages + ~/.sandbox.toml (run once)
+    thon init       # Interactive config wizard → thon.yaml
+    thon setup      # Apply thon.yaml to services (Lemonade, APISIX, .env)
+    thon run        # Start the API server
+    thon launch     # Launch VS Code instances (batch mode)
 """
 
 from __future__ import annotations
@@ -42,53 +39,46 @@ sys.path.insert(0, str(PROJECT_ROOT))  # noqa: E402
 from thon.config import DEFAULT_CONFIG_PATH, THON_DIR, ThonConfig  # noqa: E402
 
 
-def _sync_lemonade_keys(config: ThonConfig) -> None:
-    """Read API keys from lemonade systemd override and write into config + .env."""
-    override_path = Path("/etc/systemd/system/lemond.service.d/override.conf")
-    if not override_path.is_file():
-        override_path = Path(
-            "/etc/systemd/system/lemonade-server.service.d/override.conf"
+def _ensure_apisix_running() -> None:
+    """Ensure APISIX and its dependencies (etcd, redis) are running."""
+    for svc in ["etcd", "redis-server"]:
+        result = subprocess.run(
+            ["systemctl", "is-active", "--quiet", svc], capture_output=True
         )
-    if not override_path.is_file():
-        return
+        if result.returncode != 0:
+            print(f"  Starting {svc}...")
+            subprocess.run(["sudo", "systemctl", "start", svc], check=False)
 
-    import re
+    result = subprocess.run(
+        ["systemctl", "is-active", "--quiet", "apisix"], capture_output=True
+    )
+    if result.returncode != 0:
+        print("  Starting APISIX...")
+        subprocess.run(["sudo", "systemctl", "reset-failed", "apisix"], check=False)
+        subprocess.run(["sudo", "systemctl", "start", "apisix"], check=False)
+        import time
 
-    content = override_path.read_text()
-    api_match = re.search(r'LEMONADE_API_KEY="?([^"\s]+)"?', content)
-    admin_match = re.search(r'LEMONADE_ADMIN_API_KEY="?([^"\s]+)"?', content)
-
-    if api_match:
-        config.lemonade.api_key = api_match.group(1)
-    if admin_match:
-        config.lemonade.admin_api_key = admin_match.group(1)
-
-    if api_match or admin_match:
-        env_path = PROJECT_ROOT / ".env"
-        if env_path.is_file():
-            lines = env_path.read_text().splitlines()
-            updated: list[str] = []
-            found_api = False
-            found_admin = False
-            for line in lines:
-                if line.startswith("LEMONADE_API_KEY="):
-                    updated.append(f"LEMONADE_API_KEY={config.lemonade.api_key}")
-                    found_api = True
-                elif line.startswith("LEMONADE_ADMIN_API_KEY="):
-                    updated.append(
-                        f"LEMONADE_ADMIN_API_KEY={config.lemonade.admin_api_key}"
-                    )
-                    found_admin = True
-                else:
-                    updated.append(line)
-            if not found_api and config.lemonade.api_key:
-                updated.append(f"LEMONADE_API_KEY={config.lemonade.api_key}")
-            if not found_admin and config.lemonade.admin_api_key:
-                updated.append(
-                    f"LEMONADE_ADMIN_API_KEY={config.lemonade.admin_api_key}"
-                )
-            env_path.write_text("\n".join(updated) + "\n")
-        print("  Synced Lemonade API keys to .env")
+        for _ in range(15):
+            probe = subprocess.run(
+                [
+                    "curl",
+                    "-s",
+                    "-o",
+                    "/dev/null",
+                    "-w",
+                    "%{http_code}",
+                    "http://127.0.0.1:9180/apisix/admin/routes",
+                    "-H",
+                    "X-API-KEY: probe",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            if probe.stdout.strip() in ("200", "401"):
+                print("  APISIX is ready")
+                return
+            time.sleep(1)
+        print("  Warning: APISIX did not become ready within 15s")
 
 
 def _load_config(path: Optional[str] = None) -> ThonConfig:
@@ -106,6 +96,17 @@ def _load_config(path: Optional[str] = None) -> ThonConfig:
     return ThonConfig.from_yaml(p)
 
 
+def cmd_install(args: argparse.Namespace) -> None:
+    from thon.install import run_install
+
+    run_install(
+        non_interactive=getattr(args, "non_interactive", False),
+        install_apisix_flag=getattr(args, "with_apisix", None),
+        install_lemonade_flag=getattr(args, "with_lemonade", None),
+        ssl_dir=getattr(args, "ssl_dir", "/etc/nginx/ssl"),
+    )
+
+
 def cmd_init(args: argparse.Namespace) -> None:
     from thon.interactive import run_interactive
 
@@ -119,34 +120,29 @@ def cmd_setup(args: argparse.Namespace) -> None:
     config = _load_config(args.config)
     config.apply_env()
 
+    print()
     print("=" * 60)
-    print("  THON Setup — installing prerequisites and configuring")
+    print("  THON Setup — configuring services from thon.yaml")
     print("=" * 60)
     print()
 
-    # 1. System prerequisites
-    print("[1/6] System prerequisites...")
-    setup_sh = PROJECT_ROOT / "scripts" / "setup.sh"
-    if setup_sh.is_file():
-        env = os.environ.copy()
-        if config.gateway.enabled:
-            env["INSTALL_GATEWAY"] = "true"
-        subprocess.run(["bash", str(setup_sh)], env=env, check=False)
-    else:
-        print("  Skipping (setup.sh not found)")
+    step = 0
+    total = 4
 
-    # 2. Nginx SSL directory
+    # 1. SSL directory
+    step += 1
     if config.nginx.enabled:
-        print("\n[2/6] SSL directory...")
+        print(f"\n[{step}/{total}] SSL directory...")
         ssl_dir = config.nginx.ssl_dir
         os.makedirs(ssl_dir, exist_ok=True)
         print(f"  SSL dir: {ssl_dir}")
     else:
-        print("\n[2/6] SSL — skipped (nginx disabled)")
+        print(f"\n[{step}/{total}] SSL — skipped (nginx disabled)")
 
-    # 3. Lemonade server
+    # 2. Lemonade server
+    step += 1
     if config.lemonade.enabled:
-        print("\n[3/6] Lemonade server...")
+        print(f"\n[{step}/{total}] Lemonade server...")
         lemonade_py = PROJECT_ROOT / "scripts" / "lemonade_server.py"
         if lemonade_py.is_file():
             num_users = config.total_users()
@@ -197,17 +193,30 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 if skeleton_path.is_file():
                     cmd.extend(["--kilo-skeleton", str(skeleton_path)])
 
+            chat_models = config.lemonade.effective_chat_models()
+            extras = chat_models[1:] if len(chat_models) > 1 else []
+            if extras:
+                for m in extras:
+                    cmd.append("--additional-model")
+                    cmd.append(f"{m.name}:{m.checkpoint}:{m.context}")
+
             print(f"  Running: {' '.join(cmd)}")
             subprocess.run(cmd, check=False)
 
             if config.lemonade.generate_keys and not config.lemonade.api_key:
                 _sync_lemonade_keys(config)
         else:
-            print("\n[3/6] Lemonade — skipped (disabled)")
+            print("  Skipping (lemonade_server.py not found)")
+    else:
+        print(f"\n[{step}/{total}] Lemonade — skipped (disabled)")
 
-    # 4. AI Gateway
+    # 3. AI Gateway
+    step += 1
     if config.gateway.enabled:
-        print("\n[4/6] AI Gateway...")
+        print(f"\n[{step}/{total}] AI Gateway...")
+
+        _ensure_apisix_running()
+
         apisix_py = PROJECT_ROOT / "scripts" / "apisix_gateway.py"
         if apisix_py.is_file():
             lemonade_host = config.lemonade.host
@@ -221,12 +230,6 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 "setup",
                 "--lemonade-url",
                 lemonade_url,
-                "--concurrency-limit",
-                str(config.gateway.concurrency_limit),
-                "--token-limit",
-                str(config.gateway.token_limit),
-                "--token-window",
-                str(config.gateway.token_window),
             ]
             if config.gateway.admin_key:
                 cmd.extend(["--admin-key", config.gateway.admin_key])
@@ -237,9 +240,33 @@ def cmd_setup(args: argparse.Namespace) -> None:
             if config.gateway.mode == "per-group":
                 cmd.append("--per-group")
 
-            for mc in config.gateway.model_concurrency:
-                cmd.append(
-                    f"--model-route={mc.model}:{mc.route_uri}:{mc.concurrency_limit}"
+            if config.lemonade.api_key:
+                cmd.extend(["--lemonade-api-key", config.lemonade.api_key])
+
+            lemonade_model = f"user.{config.lemonade.model_name}"
+            cmd.extend(["--lemonade-model", lemonade_model])
+
+            lemonade_embedding = f"user.{config.lemonade.embedding_model_name}"
+            cmd.extend(["--embedding-model", lemonade_embedding])
+
+            if (
+                config.gateway.rate_limit_scope == "per-model"
+                and config.gateway.model_concurrency
+            ):
+                for mc in config.gateway.model_concurrency:
+                    cmd.append(
+                        f"--model-instance={mc.model}:{mc.priority}:{0}:{mc.concurrency_limit}:{mc.token_limit}:{mc.token_window}"
+                    )
+            else:
+                cmd.extend(
+                    [
+                        "--concurrency-limit",
+                        str(config.gateway.concurrency_limit),
+                        "--token-limit",
+                        str(config.gateway.token_limit),
+                        "--token-window",
+                        str(config.gateway.token_window),
+                    ]
                 )
 
             if config.groups:
@@ -248,20 +275,28 @@ def cmd_setup(args: argparse.Namespace) -> None:
                     cmd.extend(["--groups", str(groups_yaml)])
 
             print(f"  Running: {' '.join(cmd)}")
-            subprocess.run(cmd, check=False)
+            result = subprocess.run(cmd, check=False)
+            if result.returncode != 0:
+                print(
+                    "  Warning: APISIX gateway setup failed. "
+                    "Ensure APISIX is installed (thon install --with-apisix) "
+                    "and the admin key is configured."
+                )
         else:
             print("  Skipping (apisix_gateway.py not found)")
     else:
-        print("\n[4/6] AI Gateway — skipped (disabled)")
+        print(f"\n[{step}/{total}] AI Gateway — skipped (disabled)")
 
-    # 5. Generate .env
-    print("\n[5/6] Generating .env file...")
+    # 4. Generate .env
+    step += 1
+    print(f"\n[{step}/{total}] Generating .env file...")
     env_path = PROJECT_ROOT / ".env"
     config.to_env_file(env_path)
     print(f"  Written: {env_path}")
 
-    # 6. Summary
-    print("\n[6/6] Setup complete!")
+    # Summary
+    print()
+    print("  Setup complete!")
     print()
     print("  Configuration summary:")
     print(f"    External IP:  {config.external_ip or '(auto-detect)'}")
@@ -274,6 +309,55 @@ def cmd_setup(args: argparse.Namespace) -> None:
     print()
     print("  Run `python -m thon run` to start the API server.")
     print("  Run `python -m thon launch` to launch VS Code instances.")
+
+
+def _sync_lemonade_keys(config: ThonConfig) -> None:
+    """Read API keys from lemonade systemd override and write into config + .env."""
+    import re
+
+    for service_name in ("lemonade-server", "lemond"):
+        override_path = Path(
+            f"/etc/systemd/system/{service_name}.service.d/override.conf"
+        )
+        if not override_path.is_file():
+            continue
+
+        content = override_path.read_text()
+        api_match = re.search(r'LEMONADE_API_KEY="?([^"\s]+)"?', content)
+        admin_match = re.search(r'LEMONADE_ADMIN_API_KEY="?([^"\s]+)"?', content)
+
+        if api_match:
+            config.lemonade.api_key = api_match.group(1)
+        if admin_match:
+            config.lemonade.admin_api_key = admin_match.group(1)
+
+        if api_match or admin_match:
+            env_path = PROJECT_ROOT / ".env"
+            if env_path.is_file():
+                lines = env_path.read_text().splitlines()
+                updated: list[str] = []
+                found_api = False
+                found_admin = False
+                for line in lines:
+                    if line.startswith("LEMONADE_API_KEY="):
+                        updated.append(f"LEMONADE_API_KEY={config.lemonade.api_key}")
+                        found_api = True
+                    elif line.startswith("LEMONADE_ADMIN_API_KEY="):
+                        updated.append(
+                            f"LEMONADE_ADMIN_API_KEY={config.lemonade.admin_api_key}"
+                        )
+                        found_admin = True
+                    else:
+                        updated.append(line)
+                if not found_api and config.lemonade.api_key:
+                    updated.append(f"LEMONADE_API_KEY={config.lemonade.api_key}")
+                if not found_admin and config.lemonade.admin_api_key:
+                    updated.append(
+                        f"LEMONADE_ADMIN_API_KEY={config.lemonade.admin_api_key}"
+                    )
+                env_path.write_text("\n".join(updated) + "\n")
+            print("  Synced Lemonade API keys to .env")
+            return
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -399,31 +483,6 @@ def cmd_cleanup(args: argparse.Namespace) -> None:
     print("Cleanup complete.")
 
 
-def _write_temp_groups(config: ThonConfig) -> None:
-    """Write groups from config to a temp YAML for scripts/main.py."""
-    import yaml
-
-    data = {"groups": {name: {"users": users} for name, users in config.groups.items()}}
-    THON_DIR.mkdir(parents=True, exist_ok=True)
-    target = THON_DIR / "groups.yaml"
-    target.write_text(yaml.dump(data, default_flow_style=False))
-    print(f"  Wrote groups to {target}")
-
-
-def _resolve_path(path_str: str) -> Path:
-    """Resolve a path relative to PROJECT_ROOT or ~/.thon/ if not absolute."""
-    p = Path(path_str)
-    if p.is_absolute():
-        return p
-    resolved = PROJECT_ROOT / p
-    if resolved.exists():
-        return resolved
-    thon_resolved = THON_DIR / p
-    if thon_resolved.exists():
-        return thon_resolved
-    return p
-
-
 def _validate_config(config: ThonConfig) -> list[str]:
     """Return a list of validation error messages."""
     errors: list[str] = []
@@ -466,6 +525,20 @@ def _validate_config(config: ThonConfig) -> list[str]:
     return errors
 
 
+def _resolve_path(path_str: str) -> Path:
+    """Resolve a path relative to PROJECT_ROOT or ~/.thon/ if not absolute."""
+    p = Path(path_str)
+    if p.is_absolute():
+        return p
+    resolved = PROJECT_ROOT / p
+    if resolved.exists():
+        return resolved
+    thon_resolved = THON_DIR / p
+    if thon_resolved.exists():
+        return thon_resolved
+    return p
+
+
 def _yes_no(label: str, default: bool = False) -> bool:
     d = "Y/n" if default else "y/N"
     raw = input(f"  {label} [{d}]: ").strip().lower()
@@ -481,16 +554,17 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  thon init                    Interactive setup wizard
-  thon init --non-interactive  Generate config with defaults
-  thon setup                   Install prerequisites + configure
-  thon run                     Start the API server (default)
-  thon run --log-level DEBUG   Start with debug logging
-  thon launch                  Launch VS Code instances (batch mode)
-  thon config show             Display current config
-  thon config env              Export config as .env file
-  thon config validate         Validate thon.yaml
-  thon cleanup                 Tear down all resources
+  thon install                  Install system prerequisites
+  thon install --with-apisix    Install with APISIX AI Gateway
+  thon init                     Interactive config wizard
+  thon init --non-interactive   Generate config with defaults
+  thon setup                    Configure services from thon.yaml
+  thon run                      Start the API server
+  thon launch                   Launch VS Code instances (batch mode)
+  thon config show              Display current config
+  thon config env               Export config as .env file
+  thon config validate          Validate thon.yaml
+  thon cleanup                  Tear down all resources
         """,
     )
     parser.add_argument(
@@ -502,8 +576,37 @@ Examples:
 
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
+    # install
+    install_parser = subparsers.add_parser(
+        "install", help="Install system prerequisites (run once)"
+    )
+    install_parser.add_argument(
+        "--non-interactive",
+        action="store_true",
+        default=False,
+        help="Install all optional components without prompting",
+    )
+    install_parser.add_argument(
+        "--with-apisix",
+        action="store_true",
+        default=None,
+        help="Install APISIX AI Gateway packages",
+    )
+    install_parser.add_argument(
+        "--with-lemonade",
+        action="store_true",
+        default=None,
+        help="Install Lemonade server packages",
+    )
+    install_parser.add_argument(
+        "--ssl-dir",
+        type=str,
+        default="/etc/nginx/ssl",
+        help="SSL certificate directory (default: /etc/nginx/ssl)",
+    )
+
     # init
-    init_parser = subparsers.add_parser("init", help="Interactive setup wizard")
+    init_parser = subparsers.add_parser("init", help="Interactive config wizard")
     init_parser.add_argument(
         "--non-interactive",
         action="store_true",
@@ -513,7 +616,7 @@ Examples:
 
     # setup
     subparsers.add_parser(
-        "setup", help="Install prerequisites and configure from thon.yaml"
+        "setup", help="Configure services from thon.yaml (run after init)"
     )
 
     # run
@@ -561,7 +664,9 @@ Examples:
         parser.print_help()
         sys.exit(1)
 
-    if args.command == "init":
+    if args.command == "install":
+        cmd_install(args)
+    elif args.command == "init":
         cmd_init(args)
     elif args.command == "setup":
         cmd_setup(args)

@@ -69,6 +69,25 @@ class ConsumerConfig:
     concurrency_limit: int = CONCURRENCY_LIMIT_DEFAULT
     token_limit: int = TOKEN_LIMIT_DEFAULT
     token_window: int = TOKEN_WINDOW_DEFAULT
+    per_model_token_limits: Optional[list[dict]] = None
+
+
+@dataclass
+class ModelInstanceConfig:
+    """Per-model instance configuration for ai-proxy-multi + ai-rate-limiting.
+
+    Each model is registered as a named instance in ``ai-proxy-multi``.
+    The instance name must match between ``ai-proxy-multi.instances[].name``
+    and ``ai-rate-limiting.instances[].name`` for per-model rate limiting.
+    """
+
+    model: str
+    instance_name: str
+    priority: int = 0
+    weight: int = 0
+    concurrency_limit: int = CONCURRENCY_LIMIT_DEFAULT
+    token_limit: int = TOKEN_LIMIT_DEFAULT
+    token_window: int = TOKEN_WINDOW_DEFAULT
 
 
 @dataclass
@@ -225,6 +244,7 @@ class ApisixGatewayManager:
         token_limit: int = TOKEN_LIMIT_DEFAULT,
         token_window: int = TOKEN_WINDOW_DEFAULT,
         lemonade_instance_name: str = LEMONADE_INSTANCE_NAME,
+        per_model_token_limits: Optional[list[dict]] = None,
     ) -> ConsumerConfig:
         api_key = api_key or secrets.token_urlsafe(24)
         safe_username = username.replace("/", "-").replace(" ", "_")
@@ -253,17 +273,21 @@ class ApisixGatewayManager:
                 limit_conn_config["policy"] = "local"
             plugins["limit-conn"] = limit_conn_config
 
-        if token_limit > 0:
+        effective_model_limits = per_model_token_limits
+        if not effective_model_limits and token_limit > 0:
+            effective_model_limits = [
+                {
+                    "name": lemonade_instance_name,
+                    "limit": token_limit,
+                    "time_window": token_window,
+                }
+            ]
+
+        if effective_model_limits:
             rate_limit_config: dict = {
                 "policy": "redis" if self._redis_host else "local",
                 "limit_strategy": "total_tokens",
-                "instances": [
-                    {
-                        "name": lemonade_instance_name,
-                        "limit": token_limit,
-                        "time_window": token_window,
-                    }
-                ],
+                "instances": effective_model_limits,
                 "rejected_code": 429,
             }
             if self._redis_host:
@@ -283,8 +307,11 @@ class ApisixGatewayManager:
         limits_desc = []
         if concurrency_limit > 0:
             limits_desc.append(f"concurrency={concurrency_limit}")
-        if token_limit > 0:
-            limits_desc.append(f"tokens={token_limit}/{token_window}s")
+        if effective_model_limits:
+            for ml in effective_model_limits:
+                limits_desc.append(
+                    f"{ml['name']}: tokens={ml['limit']}/{ml['time_window']}s"
+                )
         limits_str = ", ".join(limits_desc) if limits_desc else "no limits"
         print(f"[Gateway] Created consumer: {safe_username} ({limits_str})")
 
@@ -294,6 +321,7 @@ class ApisixGatewayManager:
             concurrency_limit=concurrency_limit,
             token_limit=token_limit,
             token_window=token_window,
+            per_model_token_limits=per_model_token_limits,
         )
 
     def delete_consumer(self, username: str) -> None:
@@ -325,13 +353,128 @@ class ApisixGatewayManager:
         uri: str = "/v1/chat/completions",
         route_id: Optional[str] = None,
         concurrency_limit: int = 0,
+        model_instances: Optional[list[ModelInstanceConfig]] = None,
+        fallback_strategy: Optional[list[str]] = None,
     ) -> dict:
+        """Create an APISIX route for LLM chat completions.
+
+        Two modes of operation:
+
+        **Multi-model** (``model_instances`` provided):
+          Creates a single route with ``ai-proxy-multi`` containing one named
+          instance per model.  ``ai-rate-limiting`` uses per-instance token
+          limits.  Models are tried in priority order; when a model hits its
+          rate limit, traffic falls back to the next model.
+
+        **Single-model** (no ``model_instances``):
+          Creates a route with a single ``ai-proxy-multi`` instance pointing
+          to the specified Lemonade model.  Uses the legacy
+          ``lemonade_instance_name`` and ``concurrency_limit`` parameters.
+
+        Args:
+            lemonade_url: Upstream Lemonade server URL.
+            lemonade_api_key: API key for Lemonade authentication.
+            lemonade_model: Default model name (single-model mode only).
+            lemonade_instance_name: Instance name (single-model mode only).
+            uri: Route URI pattern.
+            route_id: APISIX route ID.
+            concurrency_limit: Max concurrent requests (single-model mode only).
+            model_instances: Per-model instance configs (multi-model mode).
+            fallback_strategy: Fallback strategy for ai-proxy-multi.
+                Defaults to ``["rate_limiting"]`` when model_instances are provided.
+
+        Returns:
+            APISIX Admin API response dict.
+        """
         effective_key = lemonade_api_key or self._lemonade_api_key
         auth_header: dict = {}
         if effective_key:
             auth_header["Authorization"] = f"Bearer {effective_key}"
 
-        plugins: dict = {
+        if model_instances:
+            instances = []
+            rate_limit_instances = []
+
+            sorted_instances = sorted(model_instances, key=lambda m: -m.priority)
+
+            for mi in sorted_instances:
+                instances.append(
+                    {
+                        "name": mi.instance_name,
+                        "provider": "openai-compatible",
+                        "priority": mi.priority,
+                        "weight": mi.weight,
+                        "override": {
+                            "endpoint": lemonade_url,
+                        },
+                        "auth": {
+                            "header": auth_header,
+                        },
+                        "options": {
+                            "model": mi.model,
+                        },
+                    }
+                )
+
+                if mi.token_limit > 0:
+                    rate_limit_instances.append(
+                        {
+                            "name": mi.instance_name,
+                            "limit": mi.token_limit,
+                            "time_window": mi.token_window,
+                        }
+                    )
+
+            effective_fallback = fallback_strategy or ["rate_limiting"]
+
+            plugins: dict = {
+                "key-auth": {},
+                "ai-proxy-multi": {
+                    "instances": instances,
+                    "fallback_strategy": effective_fallback,
+                },
+            }
+
+            if rate_limit_instances:
+                route_rate_limit: dict = {
+                    "limit_strategy": "total_tokens",
+                    "instances": rate_limit_instances,
+                    "rejected_code": 429,
+                }
+                if self._redis_host:
+                    route_rate_limit["policy"] = "redis"
+                    route_rate_limit["redis_host"] = self._redis_host
+                    route_rate_limit["redis_port"] = self._redis_port
+                    if self._redis_password:
+                        route_rate_limit["redis_password"] = self._redis_password
+                else:
+                    route_rate_limit["policy"] = "local"
+                plugins["ai-rate-limiting"] = route_rate_limit
+
+            route_data: dict = {
+                "uri": uri,
+                "methods": ["POST"],
+                "plugins": plugins,
+            }
+
+            resolved_route_id = route_id or APISIX_ROUTE_ID
+            result = self._request(
+                f"/routes/{resolved_route_id}", method="PUT", data=route_data
+            )
+
+            model_names = [mi.model for mi in sorted_instances]
+            limits_desc = ", ".join(
+                f"{mi.instance_name}: {mi.token_limit}/{mi.token_window}s"
+                for mi in sorted_instances
+                if mi.token_limit > 0
+            )
+            print(
+                f"[Gateway] Created multi-model AI route: {uri} -> {lemonade_url} "
+                f"(models={model_names}, limits=[{limits_desc}])"
+            )
+            return result
+
+        plugins = {
             "key-auth": {},
             "ai-proxy-multi": {
                 "instances": [
@@ -373,7 +516,7 @@ class ApisixGatewayManager:
                 limit_conn_config["policy"] = "local"
             plugins["limit-conn"] = limit_conn_config
 
-        route_data: dict = {
+        route_data = {
             "uri": uri,
             "methods": ["POST"],
             "plugins": plugins,
@@ -383,8 +526,12 @@ class ApisixGatewayManager:
         result = self._request(
             f"/routes/{resolved_route_id}", method="PUT", data=route_data
         )
-        limits_desc = f", concurrency={concurrency_limit}" if concurrency_limit > 0 else ""
-        print(f"[Gateway] Created AI route: {uri} -> {lemonade_url} (model={lemonade_model}{limits_desc})")
+        limits_desc = (
+            f", concurrency={concurrency_limit}" if concurrency_limit > 0 else ""
+        )
+        print(
+            f"[Gateway] Created AI route: {uri} -> {lemonade_url} (model={lemonade_model}{limits_desc})"
+        )
         return result
 
     def delete_ai_route(self, route_id: Optional[str] = None) -> None:
@@ -467,8 +614,12 @@ class ApisixGatewayManager:
         result = self._request(
             f"/routes/{APISIX_EMBEDDING_ROUTE_ID}", method="PUT", data=route_data
         )
-        limits_desc = f", concurrency={concurrency_limit}" if concurrency_limit > 0 else ""
-        print(f"[Gateway] Created embedding route: /v1/embeddings -> {lemonade_url} (model={lemonade_embedding_model}{limits_desc})")
+        limits_desc = (
+            f", concurrency={concurrency_limit}" if concurrency_limit > 0 else ""
+        )
+        print(
+            f"[Gateway] Created embedding route: /v1/embeddings -> {lemonade_url} (model={lemonade_embedding_model}{limits_desc})"
+        )
         return result
 
     def delete_embedding_route(self) -> None:
@@ -513,10 +664,22 @@ class ApisixGatewayManager:
         route_uri: str = "/v1/chat/completions",
         enable_embedding: bool = True,
         model_routes: Optional[list[ModelRouteConfig]] = None,
+        model_instances: Optional[list[ModelInstanceConfig]] = None,
     ) -> list[ConsumerConfig]:
-        if model_routes:
+        if model_instances:
+            self.create_ai_route(
+                lemonade_url=lemonade_url,
+                lemonade_api_key=lemonade_api_key,
+                uri=route_uri,
+                model_instances=model_instances,
+            )
+        elif model_routes:
             for mr in model_routes:
-                route_id = f"ai-gateway-{mr.route_id_suffix}" if mr.route_id_suffix else APISIX_ROUTE_ID
+                route_id = (
+                    f"ai-gateway-{mr.route_id_suffix}"
+                    if mr.route_id_suffix
+                    else APISIX_ROUTE_ID
+                )
                 self.create_ai_route(
                     lemonade_url=lemonade_url,
                     lemonade_api_key=lemonade_api_key,
@@ -537,14 +700,25 @@ class ApisixGatewayManager:
             mr.route_uri == "/v1/embeddings" for mr in (model_routes or [])
         ):
             embedding_concurrency = 0
-            if model_routes:
+            if model_instances:
+                emb_short = lemonade_embedding_model.removeprefix("user.")
+                emb_instance = next(
+                    (
+                        mi
+                        for mi in model_instances
+                        if mi.model == lemonade_embedding_model or mi.model == emb_short
+                    ),
+                    None,
+                )
+                if emb_instance:
+                    embedding_concurrency = emb_instance.concurrency_limit
+            elif model_routes:
                 emb_short = lemonade_embedding_model.removeprefix("user.")
                 emb_route = next(
                     (
                         mr
                         for mr in model_routes
-                        if mr.model == lemonade_embedding_model
-                        or mr.model == emb_short
+                        if mr.model == lemonade_embedding_model or mr.model == emb_short
                     ),
                     None,
                 )
@@ -559,6 +733,18 @@ class ApisixGatewayManager:
 
         created: list[ConsumerConfig] = []
         if users:
+            per_model_limits = None
+            if model_instances:
+                per_model_limits = [
+                    {
+                        "name": mi.instance_name,
+                        "limit": mi.token_limit,
+                        "time_window": mi.token_window,
+                    }
+                    for mi in model_instances
+                    if mi.token_limit > 0
+                ]
+
             for user_cfg in users:
                 consumer = self.create_consumer(
                     username=user_cfg.username,
@@ -566,6 +752,7 @@ class ApisixGatewayManager:
                     concurrency_limit=user_cfg.concurrency_limit,
                     token_limit=user_cfg.token_limit,
                     token_window=user_cfg.token_window,
+                    per_model_token_limits=per_model_limits,
                 )
                 created.append(consumer)
 
@@ -617,7 +804,7 @@ def generate_kilo_gateway_config(
         model_checkpoint=model_checkpoint,
         model_context=model_context,
         chat_models=chat_models,
-        default_model=default_model,
+        default_model=default_model or "",
         embedding_model=embedding_model if enable_embedding else None,
         skeleton_path=skeleton_path,
     )
@@ -740,8 +927,22 @@ Examples:
         action="append",
         default=None,
         help=(
-            "Per-model route with concurrency. Format: short_name:route_uri:concurrency "
+            "Per-model route with concurrency (legacy per-endpoint mode). "
+            "Format: short_name:route_uri:concurrency "
             "(e.g. 'gemma-4-31b-it:/v1/chat/completions:1'). "
+            "'user.' prefix is added automatically. May be specified multiple times."
+        ),
+    )
+    setup_parser.add_argument(
+        "--model-instance",
+        type=str,
+        action="append",
+        default=None,
+        help=(
+            "Per-model instance for single-route ai-proxy-multi (recommended). "
+            "Format: short_name:priority:weight:concurrency:token_limit:token_window "
+            "(e.g. 'glm-4-flash:2:0:2:500:60'). "
+            "Priority: higher = tried first. Weight: 0 for failover-only. "
             "'user.' prefix is added automatically. May be specified multiple times."
         ),
     )
@@ -923,21 +1124,72 @@ Examples:
         )
 
         model_routes: Optional[list[ModelRouteConfig]] = None
-        if args.model_route:
+        model_instances: Optional[list[ModelInstanceConfig]] = None
+
+        if args.model_instance:
+            model_instances = []
+            for spec in args.model_instance:
+                parts = spec.split(":")
+                if len(parts) < 2:
+                    print(
+                        f"[Gateway] Warning: Ignoring invalid --model-instance '{spec}' (expected short_name:priority[:weight[:concurrency[:token_limit[:token_window]]]])"
+                    )
+                    continue
+                short_name = parts[0]
+                prefixed_model = (
+                    f"user.{short_name}"
+                    if not short_name.startswith("user.")
+                    else short_name
+                )
+                instance_name = f"{short_name}-instance"
+                try:
+                    priority = int(parts[1])
+                    weight = int(parts[2]) if len(parts) > 2 else 0
+                    concurrency = (
+                        int(parts[3]) if len(parts) > 3 else CONCURRENCY_LIMIT_DEFAULT
+                    )
+                    token_lim = int(parts[4]) if len(parts) > 4 else TOKEN_LIMIT_DEFAULT
+                    token_win = (
+                        int(parts[5]) if len(parts) > 5 else TOKEN_WINDOW_DEFAULT
+                    )
+                except (ValueError, IndexError) as e:
+                    print(f"[Gateway] Warning: Invalid --model-instance '{spec}': {e}")
+                    continue
+                model_instances.append(
+                    ModelInstanceConfig(
+                        model=prefixed_model,
+                        instance_name=instance_name,
+                        priority=priority,
+                        weight=weight,
+                        concurrency_limit=concurrency,
+                        token_limit=token_lim,
+                        token_window=token_win,
+                    )
+                )
+
+        if not model_instances and args.model_route:
             model_routes = []
             for spec in args.model_route:
                 parts = spec.split(":")
                 if len(parts) < 3:
-                    print(f"[Gateway] Warning: Ignoring invalid --model-route '{spec}' (expected short_name:uri:concurrency)")
+                    print(
+                        f"[Gateway] Warning: Ignoring invalid --model-route '{spec}' (expected short_name:uri:concurrency)"
+                    )
                     continue
                 short_name = parts[0]
                 route_uri = parts[1]
                 try:
                     concurrency = int(parts[2])
                 except ValueError:
-                    print(f"[Gateway] Warning: Invalid concurrency in --model-route '{spec}'")
+                    print(
+                        f"[Gateway] Warning: Invalid concurrency in --model-route '{spec}'"
+                    )
                     continue
-                prefixed_model = f"user.{short_name}" if not short_name.startswith("user.") else short_name
+                prefixed_model = (
+                    f"user.{short_name}"
+                    if not short_name.startswith("user.")
+                    else short_name
+                )
                 suffix = short_name.replace(".", "-")
                 if route_uri == "/v1/embeddings":
                     suffix = f"embedding-{suffix}"
@@ -958,6 +1210,7 @@ Examples:
             lemonade_embedding_model=args.embedding_model,
             enable_embedding=not args.no_embedding,
             model_routes=model_routes,
+            model_instances=model_instances,
         )
 
         print("\n" + "=" * 70)
@@ -973,7 +1226,12 @@ Examples:
             limits_parts = []
             if consumer.concurrency_limit > 0:
                 limits_parts.append(f"concurrency={consumer.concurrency_limit}")
-            if consumer.token_limit > 0:
+            if consumer.per_model_token_limits:
+                for ml in consumer.per_model_token_limits:
+                    limits_parts.append(
+                        f"{ml['name']}: tokens={ml['limit']}/{ml['time_window']}s"
+                    )
+            elif consumer.token_limit > 0:
                 limits_parts.append(
                     f"tokens={consumer.token_limit}/{consumer.token_window}s"
                 )
