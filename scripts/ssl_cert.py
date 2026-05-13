@@ -265,6 +265,27 @@ class SSLCertificateGenerator:
             print("[SSL]   - Firefox: Preferences > Privacy > View Certificates > Authorities > Import")
             print("[SSL]   - Linux: sudo cp rootCA.pem /usr/local/share/ca-certificates/ && sudo update-ca-certificates")
 
+    def _copy_ca_root(self) -> None:
+        """Copy mkcert CA root to SSL output dir for /ca.crt download endpoint."""
+        ca_root = self._get_mkcert_ca_root()
+        if not ca_root:
+            return
+        src = Path(ca_root) / "rootCA.pem"
+        dst = self.output_dir / "rootCA.crt"
+        if not src.is_file():
+            return
+        if dst.is_file():
+            return
+        try:
+            shutil.copy2(str(src), str(dst))
+            print(f"[SSL] CA root copied to {dst} (served at /ca.crt)")
+        except PermissionError:
+            tmp_path = Path("/tmp/rootCA.crt")
+            shutil.copy2(str(src), str(tmp_path))
+            subprocess.run(["sudo", "cp", str(tmp_path), str(dst)], check=True)
+            tmp_path.unlink(missing_ok=True)
+            print(f"[SSL] CA root copied to {dst} (served at /ca.crt)")
+
     def _generate_mkcert_cert(
         self,
         cert_file: Path,
@@ -290,6 +311,7 @@ class SSLCertificateGenerator:
                 text=True,
             )
             _sudo_chmod(key_file, 0o600)
+            self._copy_ca_root()
             print(f"[SSL] Certificate saved: {cert_file}")
             print(f"[SSL] Key saved: {key_file}")
             return str(cert_file), str(key_file)
