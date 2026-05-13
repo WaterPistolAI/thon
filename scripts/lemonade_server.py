@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """
-Lemonade Server Manager forTHON Example
+Lemonade Server Manager for THON
 
 Installs, configures, and manages a local Lemonade inference server
 that provides LLM endpoints for VS Code extensions in sandbox instances.

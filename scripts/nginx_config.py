@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """
-Nginx Configuration Generator forTHON Example
+Nginx Configuration Generator for THON
 
 Generates a single combined nginx config with all location blocks in one
 server block. Multiple server blocks with ``server_name _;`` on the same

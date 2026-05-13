@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """
-SSL Certificate Generator forTHON Example
+SSL Certificate Generator for THON
 
 Uses mkcert (preferred) to generate CA-trusted certificates that browsers
 accept without warnings. Falls back to openssl if mkcert is not installed.

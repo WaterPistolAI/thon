@@ -1,4 +1,4 @@
-#THON Example AGENTS
+# THON AGENTS
 
 Use this file for all work in `./`. Reference template: `examples/vscode/`.
 This is a hackathon-focused multi-instanceTHON development tool with nginx

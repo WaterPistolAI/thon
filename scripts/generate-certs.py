@@ -14,7 +14,7 @@
 # limitations under the License.
 
 """
-Certificate Generation Script forTHON Example
+Certificate Generation Script for THON
 
 This script generates self-signed certificates using mkcert for local development.
 It creates:
@@ -148,7 +148,7 @@ def generate_per_sandbox_cert(cert_dir: Path, sandbox_id: str) -> tuple[Path, Pa
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Generate mkcert certificates forTHON example",
+        description="Generate mkcert certificates for THON",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
