@@ -756,10 +756,10 @@ class LemonadeServerManager:
         port = self.get_port()
         docker_ip = detect_docker_host_ip()
 
-        if external_ip:
-            base_host = external_ip
-        elif docker_ip:
+        if docker_ip:
             base_host = docker_ip
+        elif external_ip:
+            base_host = external_ip
         else:
             base_host = "localhost"
 

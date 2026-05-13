@@ -330,15 +330,13 @@ if [[ "${LANGFUSE_ENABLED}" == "true" ]]; then
 fi
 python3 "${LEMONADE_PY}" generate-kilo-config "${KILO_ARGS[@]}"
 
-if [[ -n "${EXTERNAL_IP}" ]]; then
+DOCKER_GW="$(docker network inspect bridge -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true)"
+if [[ -n "${DOCKER_GW}" ]]; then
+    BASE_HOST="${DOCKER_GW}"
+elif [[ -n "${EXTERNAL_IP}" ]]; then
     BASE_HOST="${EXTERNAL_IP}"
 else
-    DOCKER_GW="$(docker network inspect bridge -f '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true)"
-    if [[ -n "${DOCKER_GW}" ]]; then
-        BASE_HOST="${DOCKER_GW}"
-    else
-        BASE_HOST="localhost"
-    fi
+    BASE_HOST="localhost"
 fi
 
 BASE_URL="http://${BASE_HOST}:${PORT}/v1"
