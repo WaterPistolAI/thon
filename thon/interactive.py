@@ -224,6 +224,23 @@ def run_interactive(
         if nginx.enabled:
             nginx.ssl_dir = _prompt("SSL cert directory", default=nginx.ssl_dir)
 
+    # ── Workspace ────────────────────────────────────────────
+    _section("Workspace Persistence")
+    workspace = WorkspaceSettings()
+    if not non_interactive:
+        _info(
+            "Without a workspace dir, data is ephemeral (lost when instances are killed)."
+        )
+        _info(
+            "With a workspace dir, each user gets a persistent bind mount at "
+            "{dir}/{group}/{username}."
+        )
+        if _yes_no("Enable persistent workspaces?", default=False):
+            workspace.dir = _prompt(
+                "Host directory for workspace bind mounts",
+                default="/thon-workspace",
+            )
+
     # ── Lemonade ─────────────────────────────────────────────
     _section("Lemonade Server (Local LLM Inference)")
     lemonade = LemonadeSettings()
@@ -391,7 +408,7 @@ def run_interactive(
         sandbox=sandbox,
         vscode=vscode,
         nginx=nginx,
-        workspace=WorkspaceSettings(),
+        workspace=workspace,
         lemonade=lemonade,
         kilo=kilo,
         gateway=gateway,
