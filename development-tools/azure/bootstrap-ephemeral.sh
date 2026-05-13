@@ -7,6 +7,8 @@ VOLUME_LABEL="scratch-data"
 CONTAINERD_CONFIG="/etc/containerd/config.toml"
 LEMONADE_SERVICE="/usr/lib/systemd/system/lemond.service"
 
+mkdir -p "$MOUNT_POINT"
+
 echo "Step 1: Identifying NVMe Disk..."
 
 # 1. Look for NVMe disks that have NO partitions
@@ -47,6 +49,9 @@ fi
 # Create sub-directories for the services
 mkdir -p "$MOUNT_POINT/containerd"
 mkdir -p "$MOUNT_POINT/huggingface"
+
+# Grant Lemonade ownership of Hugging Face hub models
+chown lemonade:lemonade "$MOUNT_POINT/huggingface"
 
 echo "Step 2: Configuring Containerd..."
 if [ -f "$CONTAINERD_CONFIG" ]; then
