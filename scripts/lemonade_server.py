@@ -505,7 +505,7 @@ class LemonadeServerManager:
         """Load a model via the Lemonade HTTP API so it is ready for inference."""
         endpoint = self.get_endpoint()
         url = f"{endpoint}/api/v1/load"
-        payload = json.dumps({"model": model, "recipe": "llamacpp"}).encode()
+        payload = json.dumps({"model_name": model, "recipe": "llamacpp"}).encode()
         req = urllib.request.Request(
             url,
             data=payload,
@@ -720,6 +720,7 @@ class LemonadeServerManager:
         skeleton_path: Optional[Path] = None,
         chat_models: Optional[list[dict]] = None,
         default_model: Optional[str] = None,
+        small_model: str = "",
         langfuse_enabled: bool = False,
     ) -> Path:
         """Generate a kilo.jsonc config for Kilo Code pointing at this Lemonade server.
@@ -738,6 +739,7 @@ class LemonadeServerManager:
             skeleton_path: Path to a kilo.jsonc.skeleton file with user overrides.
             chat_models: Additional model options [{name, checkpoint, context, output}].
             default_model: Override for the top-level model field.
+            small_model: Small model for agentic tool calling (e.g. ``lemonade/user.gemma-4-E2B-it``).
             langfuse_enabled: Enable Langfuse observability plugin in the config.
 
         Returns:
@@ -774,6 +776,7 @@ class LemonadeServerManager:
             model_context=self._get_ctx_size(),
             chat_models=chat_models,
             default_model=default_model or "",
+            small_model=small_model,
             embedding_model=f"user.{embedding_model_name}"
             if embedding_model_name
             else None,

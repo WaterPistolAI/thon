@@ -521,7 +521,7 @@ async def run_from_config(
     image = thon_cfg.sandbox.image or os.getenv(
         "SANDBOX_IMAGE", "waterpistol/thon:latest"
     )
-    python_version = thon_cfg.sandbox.python_version or "3.11"
+    python_version = os.getenv("PYTHON_VERSION", "3.12")
     starting_port = thon_cfg.sandbox.starting_port
     timeout_minutes = thon_cfg.sandbox.timeout_minutes
     secure = thon_cfg.vscode.secure
@@ -1021,8 +1021,8 @@ Examples:
     parser.add_argument(
         "--python-version",
         type=str,
-        default="3.11",
-        help="Python version for the sandbox (default: 3.11)",
+        default="3.12",
+        help="Python version for the sandbox (default: 3.12, set by Docker image)",
     )
     parser.add_argument(
         "--secure",
@@ -1164,7 +1164,7 @@ Examples:
     domain = args.domain or os.getenv("SANDBOX_DOMAIN", "localhost:8080")
     api_key = args.api_key or os.getenv("SANDBOX_API_KEY")
     image = args.image or os.getenv("SANDBOX_IMAGE", "waterpistol/thon:latest")
-    python_version = args.python_version or os.getenv("PYTHON_VERSION", "3.11")
+    python_version = args.python_version or os.getenv("PYTHON_VERSION", "3.12")
 
     groups_path = resolve_path(args.groups) if args.groups else None
 

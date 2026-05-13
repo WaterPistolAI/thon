@@ -39,7 +39,6 @@ class SandboxSettings(BaseModel):
     domain: str = "localhost:8080"
     api_key: str = ""
     image: str = "waterpistol/thon:latest"
-    python_version: str = "3.11"
     starting_port: int = 8443
     timeout_minutes: int = 0
 
@@ -144,6 +143,7 @@ class KiloSettings(BaseModel):
     config_file: str = ""
     skeleton_file: str = "config/kilo.jsonc.skeleton"
     chat_model: str = "lemonade/user.gemma-4-31b-it"
+    small_model: str = ""
 
     @property
     def resolved_config_file(self) -> Path:

@@ -73,6 +73,7 @@ def generate_kilo_config(
     model_output: int = 4096,
     chat_models: Optional[list[dict]] = None,
     default_model: str = "",
+    small_model: str = "",
     embedding_base_url: Optional[str] = None,
     embedding_api_key: Optional[str] = None,
     embedding_model: Optional[str] = None,
@@ -91,6 +92,7 @@ def generate_kilo_config(
         model_output: Max output tokens.
         chat_models: Additional model options ``[{name, checkpoint, context, output}]``.
         default_model: Override for the top-level ``model`` field (e.g. ``lemonade/user.gemma-4-31b-it``).
+        small_model: Small model for agentic tool calling (e.g. ``lemonade/user.gemma-4-E2B-it``).
         embedding_base_url: Separate URL for embedding API (defaults to base_url).
         embedding_api_key: Separate API key for embedding (defaults to api_key).
         embedding_model: Embedding model name (e.g. ``user.harrier-oss-v1-0.6b``).
@@ -150,6 +152,8 @@ def generate_kilo_config(
             },
         },
     }
+    if small_model:
+        generated["small_model"] = small_model
     if embedding_model:
         generated["indexing"]["openai-compatible"]["model"] = embedding_model
 

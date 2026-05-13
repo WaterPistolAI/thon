@@ -31,6 +31,7 @@ from thon.config import (
     DashboardSettings,
     GatewaySettings,
     KiloSettings,
+    LangfuseSettings,
     LemonadeSettings,
     ModelConcurrency,
     NginxSettings,
@@ -442,6 +443,10 @@ def run_interactive(
                     "Default chat model",
                     default=model_options[0] if model_options else kilo.chat_model,
                 )
+                kilo.small_model = _prompt(
+                    "Small model for agentic tool calling (leave empty to skip)",
+                    default="",
+                )
         elif _yes_no("Use a custom Kilo Code config?", default=False):
             kilo.config_file = _prompt(
                 "Path to kilo.jsonc", default=str(THON_DIR / "kilo.jsonc")
@@ -476,10 +481,9 @@ def run_interactive(
 
             if gateway.rate_limit_scope == "per-model":
                 _info(
-                    "Per-model rate limiting uses ai-proxy-multi with per-instance "
-                    "ai-rate-limiting on a single route. Models are selected by "
-                    "priority — when a model hits its limit, traffic falls back to "
-                    "the next model."
+                    "Per-model rate limiting stores per-model limits in config. "
+                    "APISIX currently applies uniform limits; per-model enforcement "
+                    "requires a custom plugin (future enhancement)."
                 )
                 models = lemonade.effective_chat_models() if lemonade.enabled else []
                 if models:
@@ -488,23 +492,8 @@ def run_interactive(
                         f"{', '.join(m.name for m in models)}"
                     )
                     for i, m in enumerate(models):
-                        default_priority = len(models) - i
                         _info(f"  [{i + 1}] {m.name} ({m.checkpoint})")
-                        mc = ModelConcurrency(
-                            model=m.name,
-                            priority=int(
-                                _prompt(
-                                    f"Priority for {m.name} (higher = tried first)",
-                                    default=str(default_priority),
-                                )
-                            ),
-                        )
-                        mc.concurrency_limit = int(
-                            _prompt(
-                                f"Max concurrent requests for {m.name}",
-                                default=str(gateway.concurrency_limit),
-                            )
-                        )
+                        mc = ModelConcurrency(model=m.name)
                         mc.token_limit = int(
                             _prompt(
                                 f"Token limit for {m.name} (0 = no limit)",
@@ -529,21 +518,7 @@ def run_interactive(
                         )
                         if not mc_model:
                             break
-                        mc = ModelConcurrency(
-                            model=mc_model,
-                            priority=int(
-                                _prompt(
-                                    f"Priority for {mc_model} (higher = tried first)",
-                                    default="1",
-                                )
-                            ),
-                        )
-                        mc.concurrency_limit = int(
-                            _prompt(
-                                f"Max concurrent requests for {mc_model}",
-                                default=str(gateway.concurrency_limit),
-                            )
-                        )
+                        mc = ModelConcurrency(model=mc_model)
                         mc.token_limit = int(
                             _prompt(
                                 f"Token limit for {mc_model} (0 = no limit)",
@@ -593,6 +568,20 @@ def run_interactive(
         dashboard.port = int(_prompt("Dashboard port", default=str(dashboard.port)))
         dashboard.debug = _yes_no("Enable debug mode?", default=False)
 
+    # ── Langfuse ─────────────────────────────────────────────
+    _section("Langfuse Observability")
+    langfuse = LangfuseSettings()
+    if not non_interactive:
+        langfuse.enabled = _yes_no(
+            "Enable Langfuse LLM observability?", default=False
+        )
+        if langfuse.enabled:
+            langfuse.public_key = _prompt("Langfuse public key")
+            langfuse.secret_key = _prompt("Langfuse secret key")
+            langfuse.base_url = _prompt(
+                "Langfuse base URL", default=langfuse.base_url
+            )
+
     # ── Auth ─────────────────────────────────────────────────
     _section("Authentication (OIDC)")
     auth = AuthSettings()
@@ -620,6 +609,7 @@ def run_interactive(
         lemonade=lemonade,
         kilo=kilo,
         gateway=gateway,
+        langfuse=langfuse,
         dashboard=dashboard,
         auth=auth,
     )

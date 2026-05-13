@@ -286,7 +286,7 @@ if [[ -n "${ADMIN_KEY}" ]]; then
 elif [[ -n "${API_KEY}" ]]; then
     CURL_ARGS+=(-H "Authorization: Bearer ${API_KEY}")
 fi
-CURL_ARGS+=(-d "{\"model\": \"${PREFIXED_NAME}\", \"recipe\": \"llamacpp\"}")
+CURL_ARGS+=(-d "{\"model_name\": \"${PREFIXED_NAME}\", \"recipe\": \"llamacpp\"}")
 
 curl "${CURL_ARGS[@]}" && echo "[Lemonade] Model loaded: ${PREFIXED_NAME}" || \
     echo "[Lemonade] Warning: Model load request failed (model may still be loading)"
@@ -300,7 +300,7 @@ if [[ "${EMBEDDING}" == "true" ]]; then
     elif [[ -n "${API_KEY}" ]]; then
         EMB_CURL_ARGS+=(-H "Authorization: Bearer ${API_KEY}")
     fi
-    EMB_CURL_ARGS+=(-d "{\"model\": \"${PREFIXED_EMB_NAME}\", \"recipe\": \"llamacpp\"}")
+    EMB_CURL_ARGS+=(-d "{\"model_name\": \"${PREFIXED_EMB_NAME}\", \"recipe\": \"llamacpp\"}")
 
     curl "${EMB_CURL_ARGS[@]}" && echo "[Lemonade] Embedding model loaded: ${PREFIXED_EMB_NAME}" || \
         echo "[Lemonade] Warning: Embedding model load request failed (model may still be loading)"

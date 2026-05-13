@@ -193,13 +193,6 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 if skeleton_path.is_file():
                     cmd.extend(["--kilo-skeleton", str(skeleton_path)])
 
-            chat_models = config.lemonade.effective_chat_models()
-            extras = chat_models[1:] if len(chat_models) > 1 else []
-            if extras:
-                for m in extras:
-                    cmd.append("--additional-model")
-                    cmd.append(f"{m.name}:{m.checkpoint}:{m.context}")
-
             print(f"  Running: {' '.join(cmd)}")
             subprocess.run(cmd, check=False)
 
@@ -249,25 +242,16 @@ def cmd_setup(args: argparse.Namespace) -> None:
             lemonade_embedding = f"user.{config.lemonade.embedding_model_name}"
             cmd.extend(["--embedding-model", lemonade_embedding])
 
-            if (
-                config.gateway.rate_limit_scope == "per-model"
-                and config.gateway.model_concurrency
-            ):
-                for mc in config.gateway.model_concurrency:
-                    cmd.append(
-                        f"--model-instance={mc.model}:{mc.priority}:{0}:{mc.concurrency_limit}:{mc.token_limit}:{mc.token_window}"
-                    )
-            else:
-                cmd.extend(
-                    [
-                        "--concurrency-limit",
-                        str(config.gateway.concurrency_limit),
-                        "--token-limit",
-                        str(config.gateway.token_limit),
-                        "--token-window",
-                        str(config.gateway.token_window),
-                    ]
-                )
+            cmd.extend(
+                [
+                    "--concurrency-limit",
+                    str(config.gateway.concurrency_limit),
+                    "--token-limit",
+                    str(config.gateway.token_limit),
+                    "--token-window",
+                    str(config.gateway.token_window),
+                ]
+            )
 
             if config.groups:
                 groups_yaml = PROJECT_ROOT / "groups.yaml"
