@@ -1,0 +1,12 @@
+[Unit]
+Description=Initialize Ephemeral NVMe and Update Service Configs
+After=local-fs.target
+Before=containerd.service docker.service lemonade.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/bootstrap-ephemeral.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
