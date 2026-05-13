@@ -3,6 +3,7 @@ set -e
 
 # --- CONFIGURATION ---
 MOUNT_POINT="/scratch-data"
+VOLUME_LABEL="scratch-data"
 CONTAINERD_CONFIG="/etc/containerd/config.toml"
 LEMONADE_SERVICE="/usr/lib/systemd/system/lemond.service"
 
@@ -29,12 +30,18 @@ if [ -z "$TARGET_DISK" ]; then
     fi
 else
     echo "Found raw ephemeral disk: $TARGET_DISK"
-    # Proceed with mkfs and mount...
     if ! blkid "$TARGET_DISK" > /dev/null 2>&1; then
-        mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 "$TARGET_DISK"
+        mkfs.ext4 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 -L "$VOLUME_LABEL" "$TARGET_DISK"
+    elif ! blkid "$TARGET_DISK" -s LABEL -o value | grep -q "$VOLUME_LABEL"; then
+        e2label "$TARGET_DISK" "$VOLUME_LABEL"
     fi
     mkdir -p "$MOUNT_POINT"
     mount "$TARGET_DISK" "$MOUNT_POINT"
+
+    if ! grep -q "LABEL=$VOLUME_LABEL" /etc/fstab; then
+        echo "LABEL=$VOLUME_LABEL $MOUNT_POINT ext4 defaults,noatime,nofail 0 2" >> /etc/fstab
+        echo "Added fstab entry: LABEL=$VOLUME_LABEL -> $MOUNT_POINT"
+    fi
 fi
 
 # Create sub-directories for the services
