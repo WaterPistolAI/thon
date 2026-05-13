@@ -744,31 +744,6 @@ Examples:
         default=False,
         help="Disable embedding route creation",
     )
-    setup_parser.add_argument(
-        "--concurrency-limit",
-        type=int,
-        default=CONCURRENCY_LIMIT_DEFAULT,
-        help=f"Max concurrent requests (default: {CONCURRENCY_LIMIT_DEFAULT}, 0=no limit)",
-    )
-    setup_parser.add_argument(
-        "--token-limit",
-        type=int,
-        default=TOKEN_LIMIT_DEFAULT,
-        help=f"Token limit per time window (default: {TOKEN_LIMIT_DEFAULT} = no token limit)",
-    )
-    setup_parser.add_argument(
-        "--token-window",
-        type=int,
-        default=TOKEN_WINDOW_DEFAULT,
-        help=f"Token limit time window in seconds (default: {TOKEN_WINDOW_DEFAULT})",
-    )
-    setup_parser.add_argument("--admin-key", type=str, default=None)
-    setup_parser.add_argument(
-        "--admin-port", type=int, default=APISIX_ADMIN_PORT_DEFAULT
-    )
-    setup_parser.add_argument("--redis-host", type=str)
-    setup_parser.add_argument("--redis-port", type=int, default=6379)
-    setup_parser.add_argument("--redis-password", type=str)
 
     consumer_parser = subparsers.add_parser(
         "create-consumer", help="Create a single consumer"

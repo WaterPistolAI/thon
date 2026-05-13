@@ -33,7 +33,6 @@ from thon.config import (
     KiloSettings,
     LangfuseSettings,
     LemonadeSettings,
-    ModelConcurrency,
     NginxSettings,
     SandboxSettings,
     ThonConfig,
@@ -434,14 +433,16 @@ def run_interactive(
                     "Path to skeleton file",
                     default=kilo.skeleton_file,
                 )
-            if lemonade.chat_models:
-                model_options = [
-                    f"lemonade/user.{m.name}" for m in lemonade.chat_models
-                ]
-                _info(f"Available chat models: {', '.join(model_options)}")
+            all_models = lemonade.effective_chat_models()
+            if all_models:
+                _info(
+                    f"Available models (Lemonade uses user.<name> prefix): "
+                    f"{', '.join(m.name for m in all_models)}"
+                )
+                default_model = f"lemonade/user.{all_models[0].name}"
                 kilo.chat_model = _prompt(
                     "Default chat model",
-                    default=model_options[0] if model_options else kilo.chat_model,
+                    default=default_model,
                 )
                 kilo.small_model = _prompt(
                     "Small model for agentic tool calling (leave empty to skip)",
@@ -481,78 +482,29 @@ def run_interactive(
 
             if gateway.rate_limit_scope == "per-model":
                 _info(
-                    "Per-model rate limiting stores per-model limits in config. "
-                    "APISIX currently applies uniform limits; per-model enforcement "
-                    "requires a custom plugin (future enhancement)."
+                    "Per-model rate limiting is stored in config for future use. "
+                    "APISIX currently applies uniform per-consumer limits; "
+                    "per-model enforcement requires a custom plugin."
                 )
-                models = lemonade.effective_chat_models() if lemonade.enabled else []
-                if models:
-                    _info(
-                        f"Chat models from Lemonade config: "
-                        f"{', '.join(m.name for m in models)}"
-                    )
-                    for i, m in enumerate(models):
-                        _info(f"  [{i + 1}] {m.name} ({m.checkpoint})")
-                        mc = ModelConcurrency(model=m.name)
-                        mc.token_limit = int(
-                            _prompt(
-                                f"Token limit for {m.name} (0 = no limit)",
-                                default=str(gateway.token_limit),
-                            )
-                        )
-                        mc.token_window = int(
-                            _prompt(
-                                f"Token limit time window for {m.name} (seconds)",
-                                default=str(gateway.token_window),
-                            )
-                        )
-                        gateway.model_concurrency.append(mc)
-                else:
-                    _info(
-                        "No chat models configured — add models in Lemonade section first"
-                    )
-                    while True:
-                        mc_model = _prompt(
-                            "Model short name (e.g. gemma-4-31b-it)",
-                            allow_empty=True,
-                        )
-                        if not mc_model:
-                            break
-                        mc = ModelConcurrency(model=mc_model)
-                        mc.token_limit = int(
-                            _prompt(
-                                f"Token limit for {mc_model} (0 = no limit)",
-                                default=str(gateway.token_limit),
-                            )
-                        )
-                        mc.token_window = int(
-                            _prompt(
-                                f"Token limit time window for {mc_model} (seconds)",
-                                default=str(gateway.token_window),
-                            )
-                        )
-                        gateway.model_concurrency.append(mc)
-                        if not _yes_no("Add another model?", default=False):
-                            break
-            else:
-                gateway.concurrency_limit = int(
-                    _prompt(
-                        "Max concurrent requests per consumer",
-                        default=str(gateway.concurrency_limit),
-                    )
+
+            gateway.concurrency_limit = int(
+                _prompt(
+                    "Max concurrent requests per consumer",
+                    default=str(gateway.concurrency_limit),
                 )
-                gateway.token_limit = int(
-                    _prompt(
-                        "Token limit per consumer (0 = no limit)",
-                        default=str(gateway.token_limit),
-                    )
+            )
+            gateway.token_limit = int(
+                _prompt(
+                    "Token limit per consumer per time window (0 = no limit)",
+                    default=str(gateway.token_limit),
                 )
-                gateway.token_window = int(
-                    _prompt(
-                        "Token limit time window (seconds)",
-                        default=str(gateway.token_window),
-                    )
+            )
+            gateway.token_window = int(
+                _prompt(
+                    "Token limit time window (seconds)",
+                    default=str(gateway.token_window),
                 )
+            )
 
             if _yes_no("Use Redis for distributed rate limiting?", default=False):
                 gateway.redis_host = _prompt("Redis host", default="127.0.0.1")

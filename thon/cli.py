@@ -18,6 +18,7 @@ Workflow:
     thon install    # System packages + ~/.sandbox.toml (run once)
     thon init       # Interactive config wizard → thon.yaml
     thon setup      # Apply thon.yaml to services (Lemonade, APISIX, .env)
+    thon gateway    # Apply gateway config only (APISIX consumers + routes)
     thon run        # Start the API server
     thon launch     # Launch VS Code instances (batch mode)
 """
@@ -116,6 +117,71 @@ def cmd_init(args: argparse.Namespace) -> None:
     )
 
 
+def _run_gateway_setup(config: ThonConfig) -> None:
+    """Run APISIX gateway setup from thon.yaml config."""
+    _ensure_apisix_running()
+
+    apisix_py = PROJECT_ROOT / "scripts" / "apisix_gateway.py"
+    if not apisix_py.is_file():
+        print("  Error: apisix_gateway.py not found")
+        return
+
+    lemonade_host = config.lemonade.host
+    if lemonade_host == "0.0.0.0":
+        lemonade_host = "127.0.0.1"
+    lemonade_url = f"http://{lemonade_host}:{config.lemonade.port}"
+
+    cmd = [
+        sys.executable,
+        str(apisix_py),
+        "setup",
+        "--lemonade-url",
+        lemonade_url,
+    ]
+    if config.gateway.admin_key:
+        cmd.extend(["--admin-key", config.gateway.admin_key])
+    if config.gateway.redis_host:
+        cmd.extend(["--redis-host", config.gateway.redis_host])
+    if config.external_ip:
+        cmd.extend(["--external-ip", config.external_ip])
+    if config.gateway.mode == "per-group":
+        cmd.append("--per-group")
+
+    if config.lemonade.api_key:
+        cmd.extend(["--lemonade-api-key", config.lemonade.api_key])
+
+    lemonade_model = f"user.{config.lemonade.model_name}"
+    cmd.extend(["--lemonade-model", lemonade_model])
+
+    lemonade_embedding = f"user.{config.lemonade.embedding_model_name}"
+    cmd.extend(["--embedding-model", lemonade_embedding])
+
+    cmd.extend(
+        [
+            "--concurrency-limit",
+            str(config.gateway.concurrency_limit),
+            "--token-limit",
+            str(config.gateway.token_limit),
+            "--token-window",
+            str(config.gateway.token_window),
+        ]
+    )
+
+    if config.groups:
+        groups_yaml = PROJECT_ROOT / "groups.yaml"
+        if groups_yaml.is_file():
+            cmd.extend(["--groups", str(groups_yaml)])
+
+    print(f"  Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd, check=False)
+    if result.returncode != 0:
+        print(
+            "  Warning: APISIX gateway setup failed. "
+            "Ensure APISIX is installed (thon install --with-apisix) "
+            "and the admin key is configured."
+        )
+
+
 def cmd_setup(args: argparse.Namespace) -> None:
     config = _load_config(args.config)
     config.apply_env()
@@ -207,67 +273,7 @@ def cmd_setup(args: argparse.Namespace) -> None:
     step += 1
     if config.gateway.enabled:
         print(f"\n[{step}/{total}] AI Gateway...")
-
-        _ensure_apisix_running()
-
-        apisix_py = PROJECT_ROOT / "scripts" / "apisix_gateway.py"
-        if apisix_py.is_file():
-            lemonade_host = config.lemonade.host
-            if lemonade_host == "0.0.0.0":
-                lemonade_host = "127.0.0.1"
-            lemonade_url = f"http://{lemonade_host}:{config.lemonade.port}"
-
-            cmd = [
-                sys.executable,
-                str(apisix_py),
-                "setup",
-                "--lemonade-url",
-                lemonade_url,
-            ]
-            if config.gateway.admin_key:
-                cmd.extend(["--admin-key", config.gateway.admin_key])
-            if config.gateway.redis_host:
-                cmd.extend(["--redis-host", config.gateway.redis_host])
-            if config.external_ip:
-                cmd.extend(["--external-ip", config.external_ip])
-            if config.gateway.mode == "per-group":
-                cmd.append("--per-group")
-
-            if config.lemonade.api_key:
-                cmd.extend(["--lemonade-api-key", config.lemonade.api_key])
-
-            lemonade_model = f"user.{config.lemonade.model_name}"
-            cmd.extend(["--lemonade-model", lemonade_model])
-
-            lemonade_embedding = f"user.{config.lemonade.embedding_model_name}"
-            cmd.extend(["--embedding-model", lemonade_embedding])
-
-            cmd.extend(
-                [
-                    "--concurrency-limit",
-                    str(config.gateway.concurrency_limit),
-                    "--token-limit",
-                    str(config.gateway.token_limit),
-                    "--token-window",
-                    str(config.gateway.token_window),
-                ]
-            )
-
-            if config.groups:
-                groups_yaml = PROJECT_ROOT / "groups.yaml"
-                if groups_yaml.is_file():
-                    cmd.extend(["--groups", str(groups_yaml)])
-
-            print(f"  Running: {' '.join(cmd)}")
-            result = subprocess.run(cmd, check=False)
-            if result.returncode != 0:
-                print(
-                    "  Warning: APISIX gateway setup failed. "
-                    "Ensure APISIX is installed (thon install --with-apisix) "
-                    "and the admin key is configured."
-                )
-        else:
-            print("  Skipping (apisix_gateway.py not found)")
+        _run_gateway_setup(config)
     else:
         print(f"\n[{step}/{total}] AI Gateway — skipped (disabled)")
 
@@ -403,6 +409,28 @@ def cmd_launch(args: argparse.Namespace) -> None:
 
     group_filter = getattr(args, "group", None)
     asyncio.run(run_from_config(config, group_filter=group_filter))
+
+
+def cmd_gateway(args: argparse.Namespace) -> None:
+    config = _load_config(args.config)
+    config.apply_env()
+
+    print()
+    print("=" * 60)
+    print("  THON Gateway — APISIX setup from thon.yaml")
+    print("=" * 60)
+    print()
+
+    if not config.gateway.enabled:
+        print("  Gateway is disabled in thon.yaml. Enable it with thon init.")
+        if not _yes_no("Run anyway?"):
+            return
+
+    _run_gateway_setup(config)
+
+    print()
+    print("  Gateway setup complete.")
+    print()
 
 
 def cmd_config_show(args: argparse.Namespace) -> None:
@@ -543,6 +571,7 @@ Examples:
   thon init                     Interactive config wizard
   thon init --non-interactive   Generate config with defaults
   thon setup                    Configure services from thon.yaml
+  thon gateway                  Apply APISIX gateway config only
   thon run                      Start the API server
   thon launch                   Launch VS Code instances (batch mode)
   thon config show              Display current config
@@ -603,6 +632,11 @@ Examples:
         "setup", help="Configure services from thon.yaml (run after init)"
     )
 
+    # gateway
+    subparsers.add_parser(
+        "gateway", help="Apply APISIX gateway config only (consumers + routes)"
+    )
+
     # run
     run_parser = subparsers.add_parser(
         "run", help="Start the THON API server (default)"
@@ -654,6 +688,8 @@ Examples:
         cmd_init(args)
     elif args.command == "setup":
         cmd_setup(args)
+    elif args.command == "gateway":
+        cmd_gateway(args)
     elif args.command == "run":
         cmd_run(args)
     elif args.command == "launch":
