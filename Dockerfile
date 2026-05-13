@@ -57,6 +57,7 @@ RUN apt update && apt install -y --no-install-recommends \
     nodejs \
     npm \
     default-jre \
+    dotnet-sdk-10.0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Dotnet

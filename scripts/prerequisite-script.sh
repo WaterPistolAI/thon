@@ -1,1 +1,0 @@
-apt install nginx docker.io docker-buildx python3 python3-venv python3-pip python-is-python3 -y
