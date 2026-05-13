@@ -1,12 +1,40 @@
 {
   "$schema": "https://app.kilo.ai/config.json",
+  "compaction": {
+    "auto": true,
+    "prune": true
+  },
+  "share": "auto",
+  "permission": {
+    "bash": "allow"
+  },
+  "permission": {
+    "bash": "allow",
+    "read": "allow",
+    "edit": "allow",
+    "glob": "allow",
+    "grep": "allow",
+    "list": "allow",
+    "task": "allow",
+    "external_directory": "allow",
+    "todowrite": "allow",
+    "webfetch": "allow",
+    "websearch": "allow",
+    "lsp": "allow",
+    "doom_loop": "allow",
+    "skill": "allow",
+    "todoread": "allow",
+    "codesearch": "allow"
+  },
   "experimental": {
+    "disable_paste_summary": true,
     "batch_tool": false,
     "codebase_search": true,
     "openTelemetry": true,
     "continue_loop_on_deny": true,
     "semantic_indexing": true,
-    "agent_manager_tool": false
+    "continue_loop_on_deny": true,
+    "agent_manager_tool": true
   },
   "indexing": {
     "enabled": true,
