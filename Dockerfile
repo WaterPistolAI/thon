@@ -70,11 +70,6 @@ RUN npm install -g pnpm npx opencode-plugin-langfuse
 RUN curl -fsSL https://code-server.dev/install.sh | sh \
     && code-server --version
 
-RUN PRODUCT_JSON="$(find /usr/lib/code-server -name product.json -path '*/lib/vscode/*' | head -1)" \
-    && if [ -n "$PRODUCT_JSON" ]; then \
-    python3 -c "import json; f='$PRODUCT_JSON'; p=json.load(open(f)); p['extensionsGallery']={'serviceUrl':'https://marketplace.visualstudio.com/_apis/public/gallery','cacheUrl':'https://vscode.blob.core.windows.net/gallery/index','itemUrl':'https://marketplace.visualstudio.com/items','controlUrl':'','recommendationsUrl':''}; json.dump(p,open(f,'w'),indent=2)"; \
-    fi
-
 # Create non-root user for security
 RUN useradd -m -s /bin/bash vscode \
     && mkdir -p /workspace \
