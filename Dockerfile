@@ -70,10 +70,11 @@ RUN npm install -g pnpm npx opencode-plugin-langfuse
 RUN curl -fsSL https://code-server.dev/install.sh | sh \
     && code-server --version
 
-RUN PRODUCT_JSON="$(find /usr/lib/code-server -name product.json -path '*/lib/vscode/*' | head -1)" \
-    && if [ -n "$PRODUCT_JSON" ]; then \
-    python3 -c "import json; f='$PRODUCT_JSON'; p=json.load(open(f)); p['extensionsGallery']={'serviceUrl':'https://open-vsx.org/vscode/gallery','cacheUrl':'','itemUrl':'https://open-vsx.org/vscode/item','controlUrl':'','recommendationsUrl':'',  'resourceUrlTemplate': 'https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}', 'extensionUrlTemplate': 'https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest'}; json.dump(p,open(f,'w'),indent=2)"; \
-    fi
+# Use Open VSX for extension marketplace
+# RUN PRODUCT_JSON="$(find /usr/lib/code-server -name product.json -path '*/lib/vscode/*' | head -1)" \
+#     && if [ -n "$PRODUCT_JSON" ]; then \
+#     python3 -c "import json; f='$PRODUCT_JSON'; p=json.load(open(f)); p['extensionsGallery']={'serviceUrl':'https://open-vsx.org/vscode/gallery','cacheUrl':'','itemUrl':'https://open-vsx.org/vscode/item','controlUrl':'','recommendationsUrl':'', 'resourceUrlTemplate': 'https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}', 'extensionUrlTemplate': 'https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest'}; json.dump(p,open(f,'w'),indent=2)"; \
+#     fi
 
 # Create non-root user for security
 RUN useradd -m -s /bin/bash vscode \
@@ -90,13 +91,21 @@ WORKDIR /workspace
 USER vscode
 
 # Install VS Code extensions from extensions.txt
-COPY --chown=vscode:vscode config/extensions.txt.example /tmp/extensions.txt
+COPY --chown=vscode:vscode config/extensions.txt /tmp/extensions.txt
+RUN wget https://github.com/Kilo-Org/kilocode/releases/latest/download/kilo-vscode-linux-x64.vsix -O kilo-vscode-linux-x64.vsix 
+
+
 RUN while IFS= read -r ext; do \
       ext="$(echo "$ext" | tr -d '\r')"; \
       [ -z "$ext" ] && continue; \
-    code-server --install-extension "$ext" --force || echo "WARNING: Failed to install $ext"; \
+    code-server --install-extension  "$ext" --force || echo "WARNING: Failed to install $ext"; \
     done < /tmp/extensions.txt \
-    && rm /tmp/extensions.txt
+    && rm /tmp/extensions.txt 
+
+# RUN code-server --install-extension /tmp/kilo-vscode-linux-x64.vsix --force || echo "WARNING: Failed to install Kilo Code" \
+#     && rm kilo-vscode-linux-x64.vsix
+
+
 
 # Default command (HTTP mode by default)
 # For HTTPS mode, mount certificates and run:
