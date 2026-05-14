@@ -183,7 +183,7 @@
         "kilo-code.new.agentManagerOpen",
         "kilo-code.new.agentManager.showTerminal"
     ],
-    "remote.autoForwardPorts": "hybrid",
+    "remote.autoForwardPorts": true,
     "kilo-code.new.browserAutomation.useSystemChrome": false,
     "telemetry.telemetryLevel": "off",
     "kilo-code.new.showTaskTimeline": true,
