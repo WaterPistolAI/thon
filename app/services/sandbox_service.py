@@ -39,6 +39,7 @@ from app.db import (
     get_records,
     get_setting,
     link_user_sandbox,
+    mark_orphaned_terminated,
     mark_terminated,
     unlink_user_sandbox,
     update_endpoint,
@@ -293,6 +294,15 @@ class SandboxService:
         except Exception as e:
             if self._is_sdk_or_server_error(e):
                 logger.warning("Sandbox server error: %s", e)
+                orphaned = mark_orphaned_terminated(
+                    [], db_path=self._config.database.path
+                )
+                if orphaned:
+                    logger.info(
+                        "Server unreachable; marked %d orphaned record(s): %s",
+                        len(orphaned),
+                        orphaned,
+                    )
                 return [], 0
             raise
 
@@ -362,6 +372,19 @@ class SandboxService:
         for inst in instances:
             if inst.state == InstanceState.TERMINATED:
                 mark_terminated(inst.id, db_path=self._config.database.path)
+
+        active_ids = [
+            inst.id for inst in instances if inst.state != InstanceState.TERMINATED
+        ]
+        orphaned = mark_orphaned_terminated(
+            active_ids, db_path=self._config.database.path
+        )
+        if orphaned:
+            logger.info(
+                "Marked %d orphaned sandbox record(s) as terminated: %s",
+                len(orphaned),
+                orphaned,
+            )
 
         for inst in instances:
             if inst.endpoint:

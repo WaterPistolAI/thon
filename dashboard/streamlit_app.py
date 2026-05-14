@@ -416,17 +416,29 @@ def _create_instance_dialog() -> None:
             return
 
         username = st.selectbox("User", options=[u.username for u in users])
+        selected_user = next((u for u in users if u.username == username), None)
         port = st.number_input("Port", min_value=1024, max_value=65535, value=8443)
         secure = st.checkbox("Enable password authentication")
+
+        workspace_volume = None
+        if selected_user and selected_user.workspace_path and selected_user.workspace_path.startswith("thon-"):
+            workspace_volume = selected_user.workspace_path
 
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Create", type="primary"):
                 svc = _get_sandbox_service()
+                cfg = _get_config()
                 user = UserInfo(group=group_name, username=username)
                 try:
                     _run_async(
-                        svc.create_instance(user=user, port=int(port), secure=secure)
+                        svc.create_instance(
+                            user=user,
+                            port=int(port),
+                            secure=secure,
+                            workspace_volume=workspace_volume,
+                            workspace_dir=cfg.workspace_dir if not workspace_volume else None,
+                        )
                     )
                     st.success(f"Instance created: {group_name}/{username}")
                     st.session_state.show_create_instance = False

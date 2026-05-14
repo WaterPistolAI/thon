@@ -254,6 +254,38 @@ def mark_terminated(sandbox_id: str, db_path: Optional[str] = None) -> None:
             session.commit()
 
 
+def mark_orphaned_terminated(
+    active_sandbox_ids: list[str], db_path: Optional[str] = None
+) -> list[str]:
+    """Mark DB records whose sandbox_id is not in active_sandbox_ids as terminated.
+
+    Also clears UserRecord.sandbox_id for those orphaned sandboxes.
+
+    Returns list of orphaned sandbox_ids that were cleaned up.
+    """
+    orphaned: list[str] = []
+    with get_session(db_path) as session:
+        active_set = set(active_sandbox_ids)
+        records = session.exec(
+            select(SandboxRecord).where(SandboxRecord.terminated_at == None)  # noqa: E711
+        ).all()
+        for rec in records:
+            if rec.sandbox_id not in active_set:
+                rec.terminated_at = datetime.utcnow()
+                session.add(rec)
+                orphaned.append(rec.sandbox_id)
+                user = session.exec(
+                    select(UserRecord).where(UserRecord.sandbox_id == rec.sandbox_id)
+                ).first()
+                if user:
+                    user.sandbox_id = None
+                    user.updated_at = datetime.utcnow()
+                    session.add(user)
+        if orphaned:
+            session.commit()
+    return orphaned
+
+
 def update_endpoint(
     sandbox_id: str, endpoint: str, db_path: Optional[str] = None
 ) -> None:
