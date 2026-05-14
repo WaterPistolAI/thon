@@ -70,6 +70,11 @@ RUN npm install -g pnpm npx opencode-plugin-langfuse
 RUN curl -fsSL https://code-server.dev/install.sh | sh \
     && code-server --version
 
+RUN PRODUCT_JSON="$(find /usr/lib/code-server -name product.json -path '*/lib/vscode/*' | head -1)" \
+    && if [ -n "$PRODUCT_JSON" ]; then \
+    python3 -c "import json; f='$PRODUCT_JSON'; p=json.load(open(f)); p['extensionsGallery']={'serviceUrl':'https://open-vsx.org/vscode/gallery','cacheUrl':'','itemUrl':'https://open-vsx.org/vscode/item','controlUrl':'','recommendationsUrl':'',  'resourceUrlTemplate': 'https://open-vsx.org/vscode/unpkg/{publisher}/{name}/{version}/{path}', 'extensionUrlTemplate': 'https://open-vsx.org/vscode/gallery/{publisher}/{name}/latest'}; json.dump(p,open(f,'w'),indent=2)"; \
+    fi
+
 # Create non-root user for security
 RUN useradd -m -s /bin/bash vscode \
     && mkdir -p /workspace \
