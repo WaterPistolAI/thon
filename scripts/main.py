@@ -388,6 +388,7 @@ async def create_instance(
     elif workspace_dir:
         host_path = os.path.join(workspace_dir, user.workspace)
         os.makedirs(host_path, exist_ok=True)
+        os.chown(host_path, 1001, 1001)
         volumes = [
             Volume(
                 name=f"workspace-{user.group}-{user.username}",
