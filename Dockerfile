@@ -21,15 +21,13 @@
 #   - For HTTPS, mount certificates and use: code-server --cert /certs/server.pem --cert-key /certs/server-key.pem
 #   - mkcert certificates can be generated on host and mounted into container
 
-# Use the official Ubuntu 26.04 LTS base image
-FROM ubuntu:26.04
+# Use the official Ubuntu 24.04 LTS base image
+FROM ubuntu:24.04
 
 # Set environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=1
-
-
 
 # Install dependencies
 RUN apt update && apt install -y --no-install-recommends \
@@ -53,20 +51,23 @@ RUN apt update && apt install -y --no-install-recommends \
     python3-venv\
     python3-pip \
     python-is-python3 \
-    python3-pyro5 \
-    nodejs \
-    npm \
     default-jre \
     dotnet-sdk-10.0 \
-    && rm -rf /var/lib/apt/lists/*
+    chromium-browser
 
-# Dotnet
-RUN wget https://packages.microsoft.com/config/ubuntu/26.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-RUN dpkg -i packages-microsoft-prod.deb
-RUN apt update
+RUN apt remove \
+    nodejs \
+    npm
 
-RUN npm install -g pnpm npx opencode-plugin-langfuse
-RUN npm install -g pnpm npx playwright
+RUN wget -qO- https://deb.nodesource.com/setup_24.x | bash -
+RUN apt install -y --no-install-recommends \
+    nodejs
+
+RUN apt autoclean && apt autoremove
+RUN rm -rf /var/lib/apt/lists/*
+
+# Install Node Packages
+RUN npm install -g pnpm opencode-plugin-langfuse playwright @kilocode/cli
 
 # Install code-server
 RUN curl -fsSL https://code-server.dev/install.sh | sh \
@@ -94,7 +95,7 @@ USER vscode
 
 # Install VS Code extensions from extensions.txt
 COPY --chown=vscode:vscode config/extensions.txt /tmp/extensions.txt
-RUN wget https://github.com/Kilo-Org/kilocode/releases/latest/download/kilo-vscode-linux-x64.vsix -O kilo-vscode-linux-x64.vsix 
+RUN wget https://github.com/Kilo-Org/kilocode/releases/latest/download/kilo-vscode-linux-x64.vsix -O /tmp/kilo-vscode-linux-x64.vsix 
 
 
 RUN while IFS= read -r ext; do \
@@ -103,7 +104,7 @@ RUN while IFS= read -r ext; do \
     code-server --install-extension  "$ext" --force || echo "WARNING: Failed to install $ext"; \
     done < /tmp/extensions.txt \
     && rm /tmp/extensions.txt \
-    && rm kilo-vscode-linux-x64.vsix
+    && rm /tmp/kilo-vscode-linux-x64.vsix
 
 
 # Default command (HTTP mode by default)

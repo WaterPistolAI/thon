@@ -435,6 +435,7 @@ class LemonadeServerManager:
         self,
         model: str,
         checkpoint: Optional[str] = None,
+        labels: Optional[list[str]] = None,
     ) -> None:
         """Download a model to the local cache via the lemonade CLI.
 
@@ -443,6 +444,7 @@ class LemonadeServerManager:
                 checkpoint (e.g. "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL").
             checkpoint: HuggingFace checkpoint when pulling a user model by
                 name.  Required when model starts with "user.".
+            labels: Optional labels for the model (e.g. ["embedding"]).
         """
         if self._is_model_downloaded(model):
             print(f"[Lemonade] Model already downloaded: {model}")
@@ -459,6 +461,9 @@ class LemonadeServerManager:
         cmd: list[str] = ["lemonade", "pull", model]
         if checkpoint and model.startswith("user."):
             cmd += ["--checkpoint", "main", checkpoint, "--recipe", "llamacpp"]
+        if labels:
+            for label in labels:
+                cmd += ["--label", label]
 
         result = subprocess.run(cmd, check=False, env=env)
         if result.returncode != 0:
@@ -515,7 +520,7 @@ class LemonadeServerManager:
                 continue
         return False
 
-    def load_model(self, model: str, timeout: int = 120) -> bool:
+    def load_model(self, model: str, timeout: int = 900) -> bool:
         """Load a model via the Lemonade HTTP API so it is ready for inference."""
         endpoint = self.get_endpoint()
         url = f"{endpoint}/api/v1/load"
@@ -982,7 +987,7 @@ async def cmd_run(
     prefixed_emb = ""
     if embedding:
         prefixed_emb = f"user.{embedding_model_name}"
-        manager.pull_model(prefixed_emb, checkpoint=embedding_model)
+        manager.pull_model(prefixed_emb, checkpoint=embedding_model, labels=["embeddings"])
 
     await asyncio.sleep(2)
     manager.load_model(prefixed_model)

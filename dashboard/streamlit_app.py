@@ -1081,14 +1081,15 @@ def page_lemonade() -> None:
         st.subheader("Slots")
         slot_rows = []
         for s in slots:
-            nt = s.get("next_token", {})
+            nt_raw = s.get("next_token", [])
+            nt = nt_raw[0] if isinstance(nt_raw, list) and len(nt_raw) > 0 else {}
             slot_rows.append(
                 {
                     "ID": s.get("id", "-"),
-                    "State": _state_badge(s.get("state", "-")),
-                    "Task ID": s.get("task_id", "-"),
-                    "Cache Tokens": f"{s.get('cache_tokens', 0):,}"
-                    if s.get("cache_tokens") is not None
+                    "State": _state_badge(s.get("state", "-") or ("Processing" if s.get("is_processing") else "Idle")),
+                    "Task ID": s.get("id_task", "-"),
+                    "Cache Tokens": f"{s.get('cache_tokens', s.get('n_ctx', 0)):,}"
+                    if s.get("cache_tokens") is not None or s.get("n_ctx") is not None
                     else "-",
                     "Decoded": nt.get("n_decoded", "-"),
                     "Remaining": nt.get("n_remain", "-"),
