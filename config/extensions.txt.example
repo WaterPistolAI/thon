@@ -23,7 +23,6 @@ kokororin.vscode-phpfmt
 koszti.snowflake-driver-for-sqltools
 mechatroner.rainbow-csv
 meta.pyrefly
-ms-dotnettools.csdevkit
 ms-dotnettools.vscode-dotnet-runtime
 ms-pyright.pyright
 ms-python.autopep8
@@ -56,4 +55,3 @@ xdebug.php-debug
 yoavbls.pretty-ts-errors
 yzhang.markdown-all-in-one
 zobo.php-intellisense
-/tmp/kilo-vscode-linux-x64.vsix

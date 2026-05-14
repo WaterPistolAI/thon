@@ -55,10 +55,6 @@ RUN apt update && apt install -y --no-install-recommends \
     dotnet-sdk-10.0 \
     chromium-browser
 
-RUN apt remove \
-    nodejs \
-    npm
-
 RUN wget -qO- https://deb.nodesource.com/setup_24.x | bash -
 RUN apt install -y --no-install-recommends \
     nodejs
@@ -103,8 +99,9 @@ RUN while IFS= read -r ext; do \
       [ -z "$ext" ] && continue; \
     code-server --install-extension  "$ext" --force || echo "WARNING: Failed to install $ext"; \
     done < /tmp/extensions.txt \
-    && rm /tmp/extensions.txt \
-    && rm /tmp/kilo-vscode-linux-x64.vsix
+    && code-server --install-extension /tmp/kilo-vscode-linux-x64.vsix --force || echo "WARNING: Failed to install Kilo Code" \
+    && rm /tmp/kilo-vscode-linux-x64.vsix \
+    && rm /tmp/extensions.txt
 
 
 # Default command (HTTP mode by default)
