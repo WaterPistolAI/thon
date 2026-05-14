@@ -240,6 +240,13 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 str(config.lemonade.ctx_size_per_user),
                 "--embedding-ctx-size-per-user",
                 str(config.lemonade.embedding_ctx_size_per_user),
+                "--prefer-system"
+                if config.lemonade.prefer_system
+                else "--no-prefer-system",
+                "--llamacpp-bin",
+                config.lemonade.llamacpp_bin,
+                "--rocm-channel",
+                config.lemonade.rocm_channel,
             ]
             if config.lemonade.generate_keys:
                 cmd.append("--generate-keys")

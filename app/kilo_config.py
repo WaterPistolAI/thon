@@ -136,6 +136,7 @@ def generate_kilo_config(
                 "options": {
                     "apiKey": api_key,
                     "baseURL": base_url,
+                    "timeout": False,
                 },
             },
         },

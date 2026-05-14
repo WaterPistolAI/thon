@@ -280,6 +280,7 @@ class LemonadeServerManager:
         generate_keys: bool = False,
         prefer_system: bool = True,
         llamacpp_bin: str = DEFAULT_LLMACPP_BIN,
+        rocm_channel: str = "preview",
     ) -> None:
         """Write config.json and optionally set API keys in systemd override."""
         import shutil
@@ -287,15 +288,21 @@ class LemonadeServerManager:
         existing = _sudo_read_json(self.config_path) or {}
 
         resolved_bin = llamacpp_bin
-        if resolved_bin != "builtin":
+        if prefer_system:
+            system_llama = shutil.which("llama-server")
+            if system_llama:
+                resolved_bin = system_llama
+                print(f"[Lemonade] Found system llama-server: {resolved_bin}")
+            else:
+                resolved_bin = "builtin"
+                prefer_system = False
+                print("[Lemonade] No system llama-server found, using builtin")
+        elif resolved_bin not in ("builtin", "latest", ""):
             if not shutil.which(resolved_bin) and not Path(resolved_bin).is_file():
-                system_llama = shutil.which("llama-server")
-                if system_llama:
-                    resolved_bin = system_llama
-                    print(f"[Lemonade] Found system llama-server: {resolved_bin}")
-                else:
-                    resolved_bin = "builtin"
-                    print("[Lemonade] No system llama-server found, using builtin")
+                print(f"[Lemonade] Binary not found: {resolved_bin}, falling back to builtin")
+                resolved_bin = "builtin"
+
+        bin_value = resolved_bin
 
         config: dict = {
             "config_version": existing.get("config_version", 1),
@@ -311,14 +318,21 @@ class LemonadeServerManager:
             "offline": existing.get("offline", False),
             "disable_model_filtering": existing.get("disable_model_filtering", False),
             "enable_dgpu_gtt": existing.get("enable_dgpu_gtt", False),
+            "rocm_channel": rocm_channel,
             "llamacpp": {
                 **LLAMACPP_DEFAULTS,
                 **existing.get("llamacpp", {}),
                 "backend": llamacpp_backend,
                 "prefer_system": prefer_system,
-                "rocm_bin": resolved_bin if prefer_system else "builtin",
-                "vulkan_bin": resolved_bin if prefer_system else "builtin",
-                "cpu_bin": resolved_bin if prefer_system else "builtin",
+                "rocm_bin": bin_value
+                if llamacpp_backend in ("auto", "rocm")
+                else "builtin",
+                "vulkan_bin": bin_value
+                if llamacpp_backend in ("auto", "vulkan")
+                else "builtin",
+                "cpu_bin": bin_value
+                if llamacpp_backend in ("auto", "cpu")
+                else "builtin",
             },
             "whispercpp": {
                 **WHISPERCPP_DEFAULTS,
@@ -870,6 +884,7 @@ async def cmd_run(
     kilo_skeleton: Optional[str] = None,
     prefer_system: bool = True,
     llamacpp_bin: str = DEFAULT_LLMACPP_BIN,
+    rocm_channel: str = "preview",
     embedding: bool = True,
     embedding_model: str = DEFAULT_EMBEDDING_MODEL,
     embedding_model_name: str = DEFAULT_EMBEDDING_MODEL_NAME,
@@ -942,6 +957,7 @@ async def cmd_run(
         generate_keys=generate_keys,
         prefer_system=prefer_system,
         llamacpp_bin=llamacpp_bin,
+        rocm_channel=rocm_channel,
     )
 
     manager.restart()
@@ -1095,25 +1111,32 @@ Examples:
         "--llamacpp-backend",
         type=str,
         default="auto",
-        help="llama.cpp backend: auto, vulkan, cpu (default: auto)",
+        help="llama.cpp backend: auto, cpu, vulkan, rocm, metal, system (default: auto)",
     )
     config_parser.add_argument(
         "--prefer-system",
         action="store_true",
         default=True,
-        help="Prefer system-installed llama.cpp over bundled (default: True)",
+        help="Prefer system-installed llama-server over Lemonade's packaged version (default: True)",
     )
     config_parser.add_argument(
         "--no-prefer-system",
         action="store_false",
         dest="prefer_system",
-        help="Use bundled llama.cpp instead of system-installed",
+        help="Use Lemonade's packaged llama.cpp instead of system-installed",
     )
     config_parser.add_argument(
         "--llamacpp-bin",
         type=str,
         default=DEFAULT_LLMACPP_BIN,
-        help=f"Path to system llama-server binary (default: {DEFAULT_LLMACPP_BIN})",
+        help="Binary source: builtin (packaged), latest (track upstream), or path (default: builtin)",
+    )
+    config_parser.add_argument(
+        "--rocm-channel",
+        type=str,
+        default="preview",
+        choices=["preview", "stable", "nightly"],
+        help="ROCm channel: preview (default), stable, or nightly",
     )
     config_parser.add_argument(
         "--ctx-size",
@@ -1233,25 +1256,32 @@ Examples:
         "--llamacpp-backend",
         type=str,
         default="auto",
-        help="llama.cpp backend: auto, vulkan, cpu (default: auto)",
+        help="llama.cpp backend: auto, cpu, vulkan, rocm, metal, system (default: auto)",
     )
     run_parser.add_argument(
         "--prefer-system",
         action="store_true",
         default=True,
-        help="Prefer system-installed llama.cpp over bundled (default: True)",
+        help="Prefer system-installed llama-server over Lemonade's packaged version (default: True)",
     )
     run_parser.add_argument(
         "--no-prefer-system",
         action="store_false",
         dest="prefer_system",
-        help="Use bundled llama.cpp instead of system-installed",
+        help="Use Lemonade's packaged llama.cpp instead of system-installed",
     )
     run_parser.add_argument(
         "--llamacpp-bin",
         type=str,
         default=DEFAULT_LLMACPP_BIN,
-        help=f"Path to system llama-server binary (default: {DEFAULT_LLMACPP_BIN})",
+        help="Binary source: builtin (packaged), latest (track upstream), or path (default: builtin)",
+    )
+    run_parser.add_argument(
+        "--rocm-channel",
+        type=str,
+        default="preview",
+        choices=["preview", "stable", "nightly"],
+        help="ROCm channel: preview (default), stable, or nightly",
     )
     run_parser.add_argument(
         "--ctx-size",
@@ -1537,6 +1567,7 @@ Examples:
             generate_keys=args.generate_keys,
             prefer_system=args.prefer_system,
             llamacpp_bin=args.llamacpp_bin,
+            rocm_channel=getattr(args, "rocm_channel", "preview"),
         )
         if args.kilo_config and (manager.api_key or manager.admin_api_key):
             manager.generate_kilo_config(
@@ -1581,6 +1612,7 @@ Examples:
                 kilo_skeleton=args.kilo_skeleton,
                 prefer_system=args.prefer_system,
                 llamacpp_bin=args.llamacpp_bin,
+                rocm_channel=getattr(args, "rocm_channel", "preview"),
                 mmproj=args.mmproj,
                 embedding=args.embedding,
                 embedding_model=args.embedding_model,

@@ -92,6 +92,7 @@ class LemonadeSettings(BaseModel):
     llamacpp_backend: str = "auto"
     prefer_system: bool = True
     llamacpp_bin: str = "builtin"
+    rocm_channel: str = "preview"
     generate_keys: bool = True
     api_key: str = ""
     admin_api_key: str = ""

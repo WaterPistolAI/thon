@@ -52,7 +52,8 @@
       },
       "options": {
         "apiKey": "AmnVwR6GLuJh3CN-sFQlmS4Q6LPY5thU",
-        "baseURL": "http://52.162.90.16:13305/v1"
+        "baseURL": "http://52.162.90.16:13305/v1",
+        "timeout": false
       }
     }
   }

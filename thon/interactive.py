@@ -226,12 +226,17 @@ def run_interactive(
     """
     target = Path(config_path) if config_path else THON_DIR / "thon.yaml"
 
+    existing: Optional[ThonConfig] = None
     if target.exists():
-        print(f"Found existing config at {target}")
-        if not non_interactive and not _yes_no("Overwrite?", default=False):
-            print(f"Loading existing config from {target}")
-            return ThonConfig.from_yaml(target)
-        print(f"Re-initializing {target}...")
+        try:
+            existing = ThonConfig.from_yaml(target)
+            print(f"Found existing config at {target}")
+            if not non_interactive and not _yes_no("Re-configure?", default=False):
+                print(f"Keeping existing config at {target}")
+                return existing
+            print(f"Re-configuring {target} (existing values used as defaults)...")
+        except Exception:
+            print("Could not parse existing config, starting fresh")
 
     print()
     print("╔══════════════════════════════════════════════════════════╗")
@@ -245,12 +250,13 @@ def run_interactive(
 
     # ── External IP ──────────────────────────────────────────
     _section("Network")
+    default_ip = (existing.external_ip if existing else "") or detected_ip or ""
     if detected_ip:
         _info(f"Detected external IP: {detected_ip}")
     external_ip = (
-        detected_ip or ""
+        default_ip
         if non_interactive
-        else _prompt("External IP for SSL certs and URLs", default=detected_ip or "")
+        else _prompt("External IP for SSL certs and URLs", default=default_ip)
     )
 
     # ── Groups ───────────────────────────────────────────────
@@ -258,16 +264,23 @@ def run_interactive(
     _info("Define groups and users. Each user gets their own VS Code sandbox.")
 
     groups: dict[str, list[str]] = {}
+    if existing and existing.groups:
+        groups = dict(existing.groups)
+        _info(f"Loaded {len(groups)} existing group(s): {', '.join(groups.keys())}")
     if non_interactive:
-        groups = {"alpha": ["alice", "bob"]}
+        if not groups:
+            groups = {"alpha": ["alice", "bob"]}
     else:
+        if not _yes_no("Keep existing groups?", default=True) if groups else True:
+            groups = {}
         while True:
             group_name = _prompt("Group name (or empty to finish)", allow_empty=True)
             if not group_name:
                 break
+            existing_users = ",".join(groups.get(group_name, ["workspace"]))
             users_str = _prompt(
                 f"Users for '{group_name}' (comma-separated)",
-                default="workspace",
+                default=existing_users,
             )
             users = [u.strip() for u in users_str.split(",") if u.strip()]
             groups[group_name] = users
@@ -284,7 +297,7 @@ def run_interactive(
     # ── Sandbox ──────────────────────────────────────────────
     _section("Sandbox")
     sandbox_toml = _read_sandbox_toml()
-    sandbox = SandboxSettings()
+    sandbox = (existing.sandbox if existing else None) or SandboxSettings()
     if sandbox_toml["domain"]:
         sandbox.domain = sandbox_toml["domain"]
         _info(f"Read domain from ~/.sandbox.toml: {sandbox.domain}")
@@ -314,45 +327,53 @@ def run_interactive(
 
     # ── VS Code ──────────────────────────────────────────────
     _section("VS Code Instances")
-    vscode = VscodeSettings()
+    vscode = (existing.vscode if existing else None) or VscodeSettings()
     if not non_interactive:
         vscode.secure = _yes_no(
-            "Enable per-user password authentication?", default=False
+            "Enable per-user password authentication?", default=vscode.secure
         )
-        if _yes_no("Inject custom VS Code settings?", default=False):
+        if _yes_no(
+            "Inject custom VS Code settings?", default=bool(vscode.settings_file)
+        ):
             vscode.settings_file = _prompt(
                 "Path to VS Code settings JSON",
-                default="config/vscode-settings.jsonc",
+                default=vscode.settings_file or "config/vscode-settings.jsonc",
             )
 
     # ── Nginx / SSL ──────────────────────────────────────────
     _section("Nginx & SSL")
-    nginx = NginxSettings()
+    nginx = (existing.nginx if existing else None) or NginxSettings()
     if not non_interactive:
-        nginx.enabled = _yes_no("Enable nginx reverse proxy with SSL?", default=True)
+        nginx.enabled = _yes_no(
+            "Enable nginx reverse proxy with SSL?", default=nginx.enabled
+        )
         if nginx.enabled:
             nginx.ssl_dir = _prompt("SSL cert directory", default=nginx.ssl_dir)
 
     # ── Workspace ────────────────────────────────────────────
     _section("Workspace Persistence")
-    workspace = WorkspaceSettings()
+    workspace = (existing.workspace if existing else None) or WorkspaceSettings()
     if not non_interactive:
         _info(
-            "Without a workspace dir, data is ephemeral (lost when instances are killed)."
+            "Each user gets a Docker named volume (thon-workspace-{group}-{username}) "
+            "that persists across container restarts automatically."
         )
         _info(
-            "With a workspace dir, each user gets a persistent bind mount at "
-            "{dir}/{group}/{username}."
+            "Optionally, a host bind mount directory can override named volumes. "
+            "This maps {dir}/{group}/{username} directly into containers."
         )
-        if _yes_no("Enable persistent workspaces?", default=False):
+        if _yes_no(
+            "Use host bind mounts instead of Docker volumes?",
+            default=bool(workspace.dir),
+        ):
             workspace.dir = _prompt(
                 "Host directory for workspace bind mounts",
-                default="/thon-workspace",
+                default=workspace.dir or "/thon-workspace",
             )
 
     # ── Lemonade ─────────────────────────────────────────────
     _section("Lemonade Server (Local LLM Inference)")
-    lemonade = LemonadeSettings()
+    lemonade = (existing.lemonade if existing else None) or LemonadeSettings()
     lemonade_installed = _is_installed("lemonade-server")
     if lemonade_installed:
         _info("Lemonade server is installed")
@@ -366,7 +387,7 @@ def run_interactive(
     if not non_interactive:
         lemonade.enabled = _yes_no(
             "Enable Lemonade inference server?",
-            default=lemonade_installed,
+            default=lemonade.enabled or lemonade_installed,
         )
         if lemonade.enabled:
             lemonade.host = _prompt("Bind address", default=lemonade.host)
@@ -404,8 +425,57 @@ def run_interactive(
             lemonade.llamacpp_backend = _prompt(
                 "llama.cpp backend",
                 default=lemonade.llamacpp_backend,
-                choices=["auto", "vulkan", "cpu"],
+                choices=["auto", "cpu", "vulkan", "rocm", "metal", "system"],
             )
+            if lemonade.llamacpp_backend == "rocm":
+                lemonade.rocm_channel = _prompt(
+                    "ROCm channel",
+                    default=lemonade.rocm_channel,
+                    choices=["preview", "stable", "nightly"],
+                )
+                _info(
+                    "preview: Custom builds with latest optimizations (default). "
+                    "stable: Upstream llama.cpp releases. "
+                    "nightly: Bleeding-edge experimental builds."
+                )
+            if lemonade.llamacpp_backend == "system":
+                _info(
+                    "System backend uses a system-installed llama-server binary. "
+                    "Requires llama-server in PATH."
+                )
+                lemonade.prefer_system = True
+            else:
+                lemonade.prefer_system = _yes_no(
+                    "Prefer system-installed llama-server over Lemonade's packaged version?",
+                    default=lemonade.prefer_system,
+                )
+            if not lemonade.prefer_system and lemonade.llamacpp_backend != "system":
+                lemonade.llamacpp_bin = _prompt(
+                    "llama.cpp binary source",
+                    default=lemonade.llamacpp_bin,
+                    choices=["builtin", "latest"],
+                )
+                if lemonade.llamacpp_bin == "latest":
+                    _info(
+                        "Will track the most recent upstream release on first install"
+                    )
+                else:
+                    _info("Using Lemonade's packaged and tested version")
+            elif lemonade.prefer_system or lemonade.llamacpp_backend == "system":
+                import shutil
+
+                system_llama = shutil.which("llama-server")
+                if system_llama:
+                    lemonade.llamacpp_bin = system_llama
+                    _info(f"Found system llama-server: {system_llama}")
+                else:
+                    _info("No system llama-server found in PATH")
+                    lemonade.llamacpp_bin = _prompt(
+                        "Path to llama-server binary (or 'builtin' to use packaged)",
+                        default="builtin",
+                    )
+                    if lemonade.llamacpp_bin == "builtin":
+                        lemonade.prefer_system = False
             if lemonade.api_key:
                 _info("API key already loaded from systemd (press Enter to keep)")
                 if not _yes_no("Regenerate API keys?", default=False):
@@ -423,7 +493,7 @@ def run_interactive(
 
     # ── Kilo Code ────────────────────────────────────────────
     _section("Kilo Code")
-    kilo = KiloSettings()
+    kilo = (existing.kilo if existing else None) or KiloSettings()
     if not non_interactive:
         if lemonade.enabled:
             _info("Kilo Code config will be auto-generated during setup")
@@ -439,14 +509,14 @@ def run_interactive(
                     f"Available models (Lemonade uses user.<name> prefix): "
                     f"{', '.join(m.name for m in all_models)}"
                 )
-                default_model = f"lemonade/user.{all_models[0].name}"
+                default_model = kilo.chat_model or f"lemonade/user.{all_models[0].name}"
                 kilo.chat_model = _prompt(
                     "Default chat model",
                     default=default_model,
                 )
                 kilo.small_model = _prompt(
                     "Small model for agentic tool calling (leave empty to skip)",
-                    default="",
+                    default=kilo.small_model,
                 )
         elif _yes_no("Use a custom Kilo Code config?", default=False):
             kilo.config_file = _prompt(
@@ -455,7 +525,7 @@ def run_interactive(
 
     # ── AI Gateway ───────────────────────────────────────────
     _section("AI Gateway (APISIX Rate Limiting)")
-    gateway = GatewaySettings()
+    gateway = (existing.gateway if existing else None) or GatewaySettings()
     apisix_installed = _is_installed("apisix")
     detected_admin_key = _detect_apisix_admin_key()
     if apisix_installed:
@@ -466,7 +536,7 @@ def run_interactive(
     if not non_interactive:
         gateway.enabled = _yes_no(
             "Enable APISIX AI Gateway with rate limiting?",
-            default=apisix_installed,
+            default=gateway.enabled or apisix_installed,
         )
         if gateway.enabled:
             gateway.mode = _prompt(
@@ -506,49 +576,70 @@ def run_interactive(
                 )
             )
 
-            if _yes_no("Use Redis for distributed rate limiting?", default=False):
-                gateway.redis_host = _prompt("Redis host", default="127.0.0.1")
+            if _yes_no(
+                "Use Redis for distributed rate limiting?",
+                default=bool(gateway.redis_host),
+            ):
+                gateway.redis_host = _prompt(
+                    "Redis host", default=gateway.redis_host or "127.0.0.1"
+                )
     else:
         if apisix_installed and detected_admin_key:
             gateway.enabled = True
 
     # ── Dashboard ────────────────────────────────────────────
     _section("Dashboard")
-    dashboard = DashboardSettings()
+    dashboard = (existing.dashboard if existing else None) or DashboardSettings()
     if not non_interactive:
         dashboard.host = _prompt("Dashboard bind address", default=dashboard.host)
         dashboard.port = int(_prompt("Dashboard port", default=str(dashboard.port)))
-        dashboard.debug = _yes_no("Enable debug mode?", default=False)
+        dashboard.debug = _yes_no("Enable debug mode?", default=dashboard.debug)
 
     # ── Langfuse ─────────────────────────────────────────────
     _section("Langfuse Observability")
-    langfuse = LangfuseSettings()
+    langfuse = (existing.langfuse if existing else None) or LangfuseSettings()
     if not non_interactive:
         langfuse.enabled = _yes_no(
-            "Enable Langfuse LLM observability?", default=False
+            "Enable Langfuse LLM observability?", default=langfuse.enabled
         )
         if langfuse.enabled:
-            langfuse.public_key = _prompt("Langfuse public key")
-            langfuse.secret_key = _prompt("Langfuse secret key")
-            langfuse.base_url = _prompt(
-                "Langfuse base URL", default=langfuse.base_url
+            langfuse.public_key = _prompt(
+                "Langfuse public key", default=langfuse.public_key
             )
+            langfuse.secret_key = _prompt(
+                "Langfuse secret key", default=langfuse.secret_key
+            )
+            langfuse.base_url = _prompt("Langfuse base URL", default=langfuse.base_url)
 
     # ── Auth ─────────────────────────────────────────────────
     _section("Authentication (OIDC)")
-    auth = AuthSettings()
+    auth = (existing.auth if existing else None) or AuthSettings()
     if not non_interactive:
-        auth.enabled = _yes_no("Enable OIDC authentication?", default=False)
+        auth.enabled = _yes_no("Enable OIDC authentication?", default=auth.enabled)
         if auth.enabled:
-            if _yes_no("Configure GitHub OAuth?", default=False):
-                auth.github.client_id = _prompt("GitHub Client ID")
-                auth.github.client_secret = _prompt("GitHub Client Secret")
-            if _yes_no("Configure GitLab OAuth?", default=False):
-                auth.gitlab.client_id = _prompt("GitLab Client ID")
-                auth.gitlab.client_secret = _prompt("GitLab Client Secret")
-            if _yes_no("Configure LinkedIn OIDC?", default=False):
-                auth.linkedin.client_id = _prompt("LinkedIn Client ID")
-                auth.linkedin.client_secret = _prompt("LinkedIn Client Secret")
+            if _yes_no("Configure GitHub OAuth?", default=bool(auth.github.client_id)):
+                auth.github.client_id = _prompt(
+                    "GitHub Client ID", default=auth.github.client_id
+                )
+                auth.github.client_secret = _prompt(
+                    "GitHub Client Secret", default=auth.github.client_secret
+                )
+            if _yes_no("Configure GitLab OAuth?", default=bool(auth.gitlab.client_id)):
+                auth.gitlab.client_id = _prompt(
+                    "GitLab Client ID", default=auth.gitlab.client_id
+                )
+                auth.gitlab.client_secret = _prompt(
+                    "GitLab Client Secret", default=auth.gitlab.client_secret
+                )
+            if _yes_no(
+                "Configure LinkedIn OIDC?", default=bool(auth.linkedin.client_id)
+            ):
+                auth.linkedin.client_id = _prompt(
+                    "LinkedIn Client ID", default=auth.linkedin.client_id
+                )
+                auth.linkedin.client_secret = _prompt(
+                    "LinkedIn Client Secret", default=auth.linkedin.client_secret
+                )
 
     # ── Assemble ─────────────────────────────────────────────
     config = ThonConfig(
