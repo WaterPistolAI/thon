@@ -421,7 +421,11 @@ def _create_instance_dialog() -> None:
         secure = st.checkbox("Enable password authentication")
 
         workspace_volume = None
-        if selected_user and selected_user.workspace_path and selected_user.workspace_path.startswith("thon-"):
+        if (
+            selected_user
+            and selected_user.workspace_path
+            and selected_user.workspace_path.startswith("thon-")
+        ):
             workspace_volume = selected_user.workspace_path
 
         c1, c2 = st.columns(2)
@@ -437,7 +441,9 @@ def _create_instance_dialog() -> None:
                             port=int(port),
                             secure=secure,
                             workspace_volume=workspace_volume,
-                            workspace_dir=cfg.workspace_dir if not workspace_volume else None,
+                            workspace_dir=cfg.workspace_dir
+                            if not workspace_volume
+                            else None,
                         )
                     )
                     st.success(f"Instance created: {group_name}/{username}")
@@ -640,11 +646,13 @@ def page_users() -> None:
                                         user=UserInfo(
                                             group=g.name, username=user.username
                                         ),
-                                        secure=os.getenv("THON_SECURE", "false").lower() in ("true", "1", "yes"),
+                                        secure=os.getenv("THON_SECURE", "false").lower()
+                                        in ("true", "1", "yes"),
                                         workspace_dir=cfg.workspace_dir or None,
                                         workspace_volume=user.workspace_path or None,
                                     )
                                 )
+                                _ensure_gateway_consumer(cfg, user, g)
                                 st.success("Instance launched")
                                 st.rerun()
                             except SandboxOperationError as e:
@@ -786,6 +794,71 @@ def page_groups() -> None:
     _transfer_user_dialog(svc, group_id_map)
 
 
+def _ensure_gateway_consumer(
+    cfg: AppConfig,
+    user_record: UserRecord,
+    group_record: "GroupRecordWithUsers",
+) -> None:
+    """Create an APISIX consumer for a user if gateway is enabled and consumer doesn't exist."""
+    _load_gateway_config_from_db(cfg)
+    if not cfg.gateway.enabled:
+        return
+    try:
+        svc = _get_apisix_service()
+        lemonade_host = (
+            cfg.lemonade.host if cfg.lemonade.host != "0.0.0.0" else "127.0.0.1"
+        )
+        lemonade_url = f"http://{lemonade_host}:{cfg.lemonade.port}"
+        if cfg.gateway.gateway_mode == "per-group":
+            consumer_name = f"group-{group_record.name}"
+            group_users = get_users(group_record.id, db_path=cfg.database.path)
+            num_users = len(group_users)
+            rate_limit = (
+                cfg.gateway.token_limit * num_users
+                if cfg.gateway.token_limit > 0
+                else 0
+            )
+            try:
+                svc.create_consumer(
+                    username=consumer_name,
+                    rate_limit=rate_limit,
+                    time_window=cfg.gateway.token_window,
+                )
+            except Exception:
+                pass
+        else:
+            consumer_name = f"{group_record.name}-{user_record.username}"
+            try:
+                svc.create_consumer(
+                    username=consumer_name,
+                    rate_limit=cfg.gateway.token_limit,
+                    time_window=cfg.gateway.token_window,
+                )
+            except Exception:
+                pass
+        try:
+            svc.create_route(
+                lemonade_url=lemonade_url,
+                lemonade_api_key=cfg.lemonade.api_key,
+                lemonade_model="user.gemma-4-31b-it",
+            )
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+
+def _ensure_gateway_consumers_for_group(
+    cfg: AppConfig, group_record: "GroupRecordWithUsers"
+) -> None:
+    """Create APISIX consumers for all users in a group if gateway is enabled."""
+    _load_gateway_config_from_db(cfg)
+    if not cfg.gateway.enabled:
+        return
+    for user in group_record.users:
+        _ensure_gateway_consumer(cfg, user, group_record)
+
+
 def _check_existing_instance(sandbox_svc: SandboxService, user: UserInfo) -> bool:
     """Return True if user already has a running or paused instance."""
     try:
@@ -822,6 +895,7 @@ def _start_user_instance(
                 workspace_dir=cfg.workspace_dir if not workspace_volume else None,
             )
         )
+        _ensure_gateway_consumer(cfg, user_record, group_record)
         st.toast(f"Instance started: {user.label}")
         st.rerun()
     except Exception as e:
@@ -855,6 +929,7 @@ def _start_group_instances(group_record: GroupRecordWithUsers) -> None:
                 user_volumes=user_volumes if user_volumes else None,
             )
         )
+        _ensure_gateway_consumers_for_group(cfg, group_record)
         st.toast(f"Started {len(results)} instance(s) for group '{group_record.name}'")
         st.rerun()
     except Exception as e:
@@ -994,6 +1069,7 @@ def page_lemonade() -> None:
     st.header("Lemonade Server")
 
     svc = _get_lemonade_service()
+    groups_svc = _get_groups_service()
 
     if st.button("🔄 Refresh"):
         st.rerun()
@@ -1010,6 +1086,38 @@ def page_lemonade() -> None:
     c2.metric("Model", status.model or "-")
     c3.metric("Context", f"{status.ctx_size:,}" if status.ctx_size else "-")
     c4.metric("Users", status.num_users or "-")
+
+    # ── Rescale ─────────────────────────────────────────────────
+    with st.expander("Rescale Inference Server"):
+        _info_msg = (
+            "Rescale updates context sizes and parallel slots (-np) to match "
+            "the current number of registered users, then restarts the server. "
+            "All models are unloaded and must be reloaded after restart."
+        )
+        st.caption(_info_msg)
+        try:
+            all_groups = groups_svc.list_groups()
+            total_users = sum(len(g.users) for g in all_groups)
+        except Exception:
+            total_users = 0
+
+        rc1, rc2 = st.columns([1, 3])
+        with rc1:
+            rescale_num = st.number_input(
+                "Users", min_value=1, max_value=200, value=max(total_users, 1)
+            )
+        with rc2:
+            st.write("")  # spacer
+            st.write("")  # spacer
+            if st.button("Rescale Server", type="secondary"):
+                try:
+                    svc.rescale(num_users=rescale_num)
+                    st.success(
+                        f"Rescaled for {rescale_num} user(s). Server restarting..."
+                    )
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Rescale failed: {e}")
 
     st.divider()
 
@@ -1091,20 +1199,37 @@ def page_lemonade() -> None:
 
     if slots and isinstance(slots, list) and len(slots) > 0:
         st.subheader("Slots")
+
+        total_slots = len(slots)
+        processing = sum(1 for s in slots if s.get("is_processing"))
+        idle = total_slots - processing
+        avg_ctx = sum(s.get("n_ctx", 0) for s in slots) // max(total_slots, 1)
+
+        sc1, sc2, sc3, sc4 = st.columns(4)
+        sc1.metric("Total Slots", total_slots)
+        sc2.metric("Processing", processing)
+        sc3.metric("Idle", idle)
+        sc4.metric("Context/Slot", f"{avg_ctx:,}")
+
         slot_rows = []
         for s in slots:
             nt_raw = s.get("next_token", [])
             nt = nt_raw[0] if isinstance(nt_raw, list) and len(nt_raw) > 0 else {}
+            n_ctx = s.get("n_ctx", 0)
+            cache = s.get("cache_tokens", 0)
+            cache_pct = f"{cache / n_ctx * 100:.1f}%" if n_ctx > 0 and cache else "0%"
+            is_proc = s.get("is_processing", False)
             slot_rows.append(
                 {
-                    "ID": s.get("id", "-"),
-                    "State": _state_badge(s.get("state", "-") or ("Processing" if s.get("is_processing") else "Idle")),
+                    "Slot": s.get("id", "-"),
+                    "Status": "🟢 Processing" if is_proc else "⚪ Idle",
                     "Task ID": s.get("id_task", "-"),
-                    "Cache Tokens": f"{s.get('cache_tokens', s.get('n_ctx', 0)):,}"
-                    if s.get("cache_tokens") is not None or s.get("n_ctx") is not None
-                    else "-",
-                    "Decoded": nt.get("n_decoded", "-"),
+                    "Context": f"{n_ctx:,}",
+                    "Cache Used": f"{cache:,}" if cache else "0",
+                    "Cache %": cache_pct,
+                    "Decoded": nt.get("n_decoded", 0),
                     "Remaining": nt.get("n_remain", "-"),
+                    "Has Next": "✓" if nt.get("has_next_token") else "✗",
                 }
             )
         st.dataframe(pd.DataFrame(slot_rows), hide_index=True, width="stretch")

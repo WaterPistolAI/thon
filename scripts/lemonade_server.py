@@ -299,7 +299,9 @@ class LemonadeServerManager:
                 print("[Lemonade] No system llama-server found, using builtin")
         elif resolved_bin not in ("builtin", "latest", ""):
             if not shutil.which(resolved_bin) and not Path(resolved_bin).is_file():
-                print(f"[Lemonade] Binary not found: {resolved_bin}, falling back to builtin")
+                print(
+                    f"[Lemonade] Binary not found: {resolved_bin}, falling back to builtin"
+                )
                 resolved_bin = "builtin"
 
         bin_value = resolved_bin
@@ -561,6 +563,104 @@ class LemonadeServerManager:
         if config:
             return config.get("port", DEFAULT_PORT)
         return DEFAULT_PORT
+
+    def rescale(
+        self,
+        num_users: int,
+        ctx_size_per_user: int = PER_USER_CTX,
+        embedding_ctx_size_per_user: int = EMBEDDING_PER_USER_CTX,
+        llamacpp_backend: Optional[str] = None,
+    ) -> None:
+        """Rescale the Lemonade server for a different number of parallel users.
+
+        Updates recipe_options.json with new ctx_size and -np values, then
+        restarts the Lemonade service.  Existing model configs are preserved;
+        only ctx_size, llamacpp_args, and llamacpp_backend are updated.
+
+        Args:
+            num_users: New number of parallel users.
+            ctx_size_per_user: Context size per user for chat models.
+            embedding_ctx_size_per_user: Context size per user for embedding models.
+            llamacpp_backend: Override backend (None = keep existing).
+        """
+        if num_users < 1:
+            num_users = 1
+
+        recipe_options_path = self.config_dir / "recipe_options.json"
+        existing = _sudo_read_json(recipe_options_path) or {}
+
+        total_ctx = ctx_size_per_user * num_users
+        total_emb_ctx = embedding_ctx_size_per_user * num_users
+
+        chat_args = (
+            f"-b 8192 -ub 8192 "
+            f"-to 3600 "
+            f"-ctk q8_0 -ctv q8_0 "
+            f"--temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.0 "
+            f"--repeat-penalty 1.0 "
+            f"--no-webui "
+            f"--threads-http -1 --threads -1 "
+            f"-np {num_users}"
+        )
+        emb_args = (
+            f"-b 8192 -ub 8192 "
+            f"-to 3600 "
+            f"-ctk q8_0 -ctv q8_0 "
+            f"--no-webui "
+            f"--threads-http -1 --threads -1 "
+            f"-np {num_users}"
+        )
+
+        embedding_labels = {"embedding", "embeddings"}
+        updated_models: list[str] = []
+
+        for model_key, opts in existing.items():
+            if not isinstance(opts, dict):
+                continue
+            backend = llamacpp_backend or opts.get("llamacpp_backend", "auto")
+
+            user_models_path = self.config_dir / "user_models.json"
+            models_data = _sudo_read_json(user_models_path) or {}
+            bare_name = model_key.removeprefix("user.")
+            model_entry = models_data.get(bare_name, {})
+            labels = model_entry.get("labels", [])
+
+            is_embedding = bool(set(labels) & embedding_labels)
+            if is_embedding:
+                opts["ctx_size"] = total_emb_ctx
+                opts["llamacpp_args"] = emb_args
+                opts["llamacpp_backend"] = backend
+            else:
+                opts["ctx_size"] = total_ctx
+                opts["llamacpp_args"] = chat_args
+                opts["llamacpp_backend"] = backend
+
+            existing[model_key] = opts
+            updated_models.append(model_key)
+
+        _sudo_write_json(recipe_options_path, existing)
+
+        config = _sudo_read_json(self.config_path) or {}
+        max_models = config.get("max_loaded_models", 1)
+        has_embedding = any(
+            "embedding"
+            in str(models_data.get(m.removeprefix("user."), {}).get("labels", []))
+            for m in existing
+        )
+        if has_embedding and max_models < 2:
+            config["max_loaded_models"] = 2
+            _sudo_write_json(self.config_path, config)
+
+        print(f"[Lemonade] Rescaled for {num_users} user(s):")
+        print(f"  Chat ctx: {total_ctx} ({ctx_size_per_user} x {num_users})")
+        print(
+            f"  Embedding ctx: {total_emb_ctx} ({embedding_ctx_size_per_user} x {num_users})"
+        )
+        print(f"  -np: {num_users}")
+        print(f"  Updated models: {', '.join(updated_models)}")
+
+        self.restart()
+        print("[Lemonade] Server restarted with new settings")
 
     def write_model_configs(
         self,
@@ -987,7 +1087,9 @@ async def cmd_run(
     prefixed_emb = ""
     if embedding:
         prefixed_emb = f"user.{embedding_model_name}"
-        manager.pull_model(prefixed_emb, checkpoint=embedding_model, labels=["embeddings"])
+        manager.pull_model(
+            prefixed_emb, checkpoint=embedding_model, labels=["embeddings"]
+        )
 
     await asyncio.sleep(2)
     manager.load_model(prefixed_model)
@@ -1482,6 +1584,47 @@ Examples:
         help=f"Context size per user for embedding model (default: {EMBEDDING_PER_USER_CTX})",
     )
 
+    rescale_parser = subparsers.add_parser(
+        "rescale",
+        help="Rescale inference server for current number of users",
+    )
+    rescale_parser.add_argument(
+        "--groups",
+        type=str,
+        default=None,
+        help="Groups YAML file to count users from",
+    )
+    rescale_parser.add_argument(
+        "--group",
+        type=str,
+        default=None,
+        help="Filter to a single group from groups.yaml",
+    )
+    rescale_parser.add_argument(
+        "--num-users",
+        type=int,
+        default=None,
+        help="Override number of users (auto-detected from --groups if not set)",
+    )
+    rescale_parser.add_argument(
+        "--ctx-size-per-user",
+        type=int,
+        default=PER_USER_CTX,
+        help=f"Context size per user for chat model (default: {PER_USER_CTX})",
+    )
+    rescale_parser.add_argument(
+        "--embedding-ctx-size-per-user",
+        type=int,
+        default=EMBEDDING_PER_USER_CTX,
+        help=f"Context size per user for embedding model (default: {EMBEDDING_PER_USER_CTX})",
+    )
+    rescale_parser.add_argument(
+        "--llamacpp-backend",
+        type=str,
+        default=None,
+        help="Override llama.cpp backend (keeps current if not set)",
+    )
+
     generate_kilo_parser = subparsers.add_parser(
         "generate-kilo-config",
         help="Generate kilo.jsonc for Kilo Code",
@@ -1647,6 +1790,19 @@ Examples:
                 llamacpp_backend=args.llamacpp_backend,
                 per_user_ctx=args.embedding_ctx_size_per_user,
             )
+    elif args.command == "rescale":
+        num_users = args.num_users
+        if args.groups and num_users is None:
+            num_users = load_user_count(args.groups, args.group)
+        if num_users is None or num_users < 1:
+            print("[Lemonade] Error: specify --num-users or --groups")
+            sys.exit(1)
+        manager.rescale(
+            num_users=num_users,
+            ctx_size_per_user=args.ctx_size_per_user,
+            embedding_ctx_size_per_user=args.embedding_ctx_size_per_user,
+            llamacpp_backend=args.llamacpp_backend,
+        )
     elif args.command == "generate-kilo-config":
         mgr = LemonadeServerManager(
             api_key=args.api_key,

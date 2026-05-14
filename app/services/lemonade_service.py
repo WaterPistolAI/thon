@@ -16,6 +16,7 @@
 
 import json
 import logging
+import os
 import re
 import subprocess
 import urllib.error
@@ -257,3 +258,50 @@ class LemonadeService:
         """POST /v1/slots/{id}?action=save|restore|erase — slot cache ops."""
         path = f"/v1/slots/{slot_id}?action={action}"
         return self._proxy_post(path, body)
+
+    def rescale(
+        self,
+        num_users: int,
+        ctx_size_per_user: int = 262144,
+        embedding_ctx_size_per_user: int = 32768,
+        llamacpp_backend: Optional[str] = None,
+    ) -> dict:
+        """Rescale the Lemonade server for a different number of parallel users.
+
+        Updates recipe_options.json and restarts the service.
+        """
+        import sys
+        from pathlib import Path
+
+        scripts_dir = Path(__file__).resolve().parent.parent.parent / "scripts"
+        lemonade_py = scripts_dir / "lemonade_server.py"
+        if not lemonade_py.is_file():
+            raise LemonadeConnectionError("lemonade_server.py not found")
+
+        cmd = [
+            sys.executable,
+            str(lemonade_py),
+            "rescale",
+            "--num-users",
+            str(num_users),
+            "--ctx-size-per-user",
+            str(ctx_size_per_user),
+            "--embedding-ctx-size-per-user",
+            str(embedding_ctx_size_per_user),
+        ]
+        if llamacpp_backend:
+            cmd += ["--llamacpp-backend", llamacpp_backend]
+
+        env = {**os.environ, "LEMONADE_API_KEY": self._cfg.api_key}
+        if self._cfg.admin_api_key:
+            env["LEMONADE_ADMIN_API_KEY"] = self._cfg.admin_api_key
+
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=False, env=env
+        )
+        output = result.stdout + result.stderr
+        if result.returncode != 0:
+            logger.error("Rescale failed: %s", output)
+            raise LemonadeConnectionError(f"Rescale failed: {output[:500]}")
+
+        return {"status": "ok", "num_users": num_users, "output": output}

@@ -235,3 +235,18 @@ async def lemonade_slot_erase(slot_id: int) -> dict:
         return svc.slot_action(slot_id, "erase")
     except LemonadeConnectionError as exc:
         _handle_connection_error(exc)
+
+
+@router.post("/rescale")
+async def lemonade_rescale(
+    num_users: int = Query(..., description="Number of parallel users"),
+) -> dict:
+    """Rescale the Lemonade server for a different number of parallel users.
+
+    Updates recipe_options.json (ctx_size, -np) and restarts the service.
+    """
+    svc = _get_service()
+    try:
+        return svc.rescale(num_users=num_users)
+    except LemonadeConnectionError as exc:
+        _handle_connection_error(exc)
