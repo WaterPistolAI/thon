@@ -309,7 +309,7 @@ class LemonadeServerManager:
             "port": port,
             "host": host,
             "log_level": existing.get("log_level", "info"),
-            "global_timeout": existing.get("global_timeout", 300),
+            "global_timeout": existing.get("global_timeout", 1800),
             "max_loaded_models": max_loaded_models,
             "no_broadcast": existing.get("no_broadcast", False),
             "extra_models_dir": existing.get("extra_models_dir", ""),

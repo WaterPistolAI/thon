@@ -66,6 +66,8 @@ RUN dpkg -i packages-microsoft-prod.deb
 RUN apt update
 
 RUN npm install -g pnpm npx opencode-plugin-langfuse
+RUN npm install -g pnpm npx playwright
+
 # Install code-server
 RUN curl -fsSL https://code-server.dev/install.sh | sh \
     && code-server --version
