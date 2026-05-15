@@ -79,11 +79,11 @@ def _sudo_write_text(path: Path, content: str) -> None:
 
 
 class SSLCertificateGenerator:
-
     def __init__(self, output_dir: str = "/etc/nginx/ssl"):
         self.output_dir = Path(output_dir)
         _sudo_mkdir(self.output_dir)
         self._mkcert_path: Optional[str] = None
+        self._certbot_path: Optional[str] = None
 
     def _find_mkcert(self) -> Optional[str]:
         if self._mkcert_path is not None:
@@ -93,6 +93,17 @@ class SSLCertificateGenerator:
         if mkcert:
             self._mkcert_path = mkcert
             return mkcert
+
+        return None
+
+    def _find_certbot(self) -> Optional[str]:
+        if self._certbot_path is not None:
+            return self._certbot_path
+
+        certbot = shutil.which("certbot")
+        if certbot:
+            self._certbot_path = certbot
+            return certbot
 
         return None
 
@@ -127,7 +138,9 @@ class SSLCertificateGenerator:
             if result.returncode == 0 and result.stdout.strip():
                 return result.stdout.strip()
             if result.stderr.strip():
-                print(f"[SSL] mkcert -CAROOT failed (rc={result.returncode}): {result.stderr.strip()}")
+                print(
+                    f"[SSL] mkcert -CAROOT failed (rc={result.returncode}): {result.stderr.strip()}"
+                )
         except Exception as e:
             print(f"[SSL] mkcert -CAROOT error: {e}")
         return self._find_ca_root_fallback()
@@ -181,7 +194,15 @@ class SSLCertificateGenerator:
         """Check if existing cert contains the requested IP in its SAN extension."""
         try:
             result = subprocess.run(
-                ["openssl", "x509", "-in", str(cert_path), "-noout", "-ext", "subjectAltName"],
+                [
+                    "openssl",
+                    "x509",
+                    "-in",
+                    str(cert_path),
+                    "-noout",
+                    "-ext",
+                    "subjectAltName",
+                ],
                 capture_output=True,
                 text=True,
                 check=True,
@@ -208,28 +229,47 @@ class SSLCertificateGenerator:
     def generate_server_cert(
         self,
         server_ip: Optional[str] = None,
+        domain: Optional[str] = None,
+        ssl_provider: str = "auto",
+        certbot_email: Optional[str] = None,
     ) -> tuple[str, str]:
         """Generate a single shared cert for the whole instance.
 
-        Uses mkcert if available (CA-trusted, no browser warnings).
-        Falls back to openssl self-signed.
-
-        The cert filename includes a hash of server_ip so changing
-        the IP triggers regeneration with the new SAN.
+        SSL provider selection:
+          - "auto" (default): Use certbot if domain is set, else mkcert/openssl.
+          - "certbot": Use Let's Encrypt via certbot (requires domain).
+          - "mkcert": Use mkcert (CA-trusted for local dev).
+          - "openssl": Use self-signed openssl cert.
 
         Args:
-            server_ip: External IP for SAN (fixes Service Worker SSL errors)
+            server_ip: External IP for SAN (fixes Service Worker SSL errors).
+            domain: Domain name for Let's Encrypt certificate.
+            ssl_provider: Which SSL provider to use.
+            certbot_email: Email for Let's Encrypt registration.
 
         Returns:
             Tuple of (cert_path, key_path)
         """
+        if ssl_provider == "certbot" or (ssl_provider == "auto" and domain):
+            if domain:
+                return self._generate_certbot_cert(domain, certbot_email)
+            print("[SSL] certbot requires a domain, falling back to mkcert/openssl")
+
+        return self._generate_mkoropenssl_cert(server_ip)
+
+    def _generate_mkoropenssl_cert(
+        self, server_ip: Optional[str] = None
+    ) -> tuple[str, str]:
+        """Generate cert via mkcert (preferred) or openssl fallback."""
         name = self._cert_name(server_ip)
 
         cert_file, key_file = self._find_existing_cert(name)
 
         if cert_file and key_file:
             if server_ip and not self._cert_has_san(cert_file, server_ip):
-                print(f"[SSL] Existing cert missing IP={server_ip} in SAN, regenerating")
+                print(
+                    f"[SSL] Existing cert missing IP={server_ip} in SAN, regenerating"
+                )
                 _sudo_unlink(cert_file)
                 _sudo_unlink(key_file)
             else:
@@ -261,9 +301,15 @@ class SSLCertificateGenerator:
             print(f"[SSL] mkcert CA root: {ca_root}")
             print("[SSL] Install this CA on client machines for browser trust:")
             print(f"[SSL]   Copy {ca_root}/rootCA.pem to client, then:")
-            print("[SSL]   - Chrome: Settings > Security > Manage certificates > Authorities > Import")
-            print("[SSL]   - Firefox: Preferences > Privacy > View Certificates > Authorities > Import")
-            print("[SSL]   - Linux: sudo cp rootCA.pem /usr/local/share/ca-certificates/ && sudo update-ca-certificates")
+            print(
+                "[SSL]   - Chrome: Settings > Security > Manage certificates > Authorities > Import"
+            )
+            print(
+                "[SSL]   - Firefox: Preferences > Privacy > View Certificates > Authorities > Import"
+            )
+            print(
+                "[SSL]   - Linux: sudo cp rootCA.pem /usr/local/share/ca-certificates/ && sudo update-ca-certificates"
+            )
 
     def _copy_ca_root(self) -> None:
         """Copy mkcert CA root to SSL output dir for /ca.crt download endpoint."""
@@ -297,15 +343,20 @@ class SSLCertificateGenerator:
             san_names.insert(0, server_ip)
 
         mkcert = self._find_mkcert()
-        print(f"[SSL] Generating CA-trusted cert via mkcert for: {', '.join(san_names)}")
+        print(
+            f"[SSL] Generating CA-trusted cert via mkcert for: {', '.join(san_names)}"
+        )
 
         try:
             subprocess.run(
                 [
                     mkcert,
-                    "-cert-file", str(cert_file),
-                    "-key-file", str(key_file),
-                ] + san_names,
+                    "-cert-file",
+                    str(cert_file),
+                    "-key-file",
+                    str(key_file),
+                ]
+                + san_names,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -321,6 +372,74 @@ class SSLCertificateGenerator:
             name = self._cert_name(server_ip)
             return self._generate_openssl_cert(name, server_ip)
 
+    def _generate_certbot_cert(
+        self,
+        domain: str,
+        email: Optional[str] = None,
+    ) -> tuple[str, str]:
+        """Generate a Let's Encrypt certificate via certbot.
+
+        Uses the nginx plugin for HTTP-01 challenge. The cert is stored
+        in /etc/letsencrypt/live/<domain>/ with auto-renewal.
+
+        Args:
+            domain: Domain name (e.g. "thon.example.com").
+            email: Registration email for Let's Encrypt.
+
+        Returns:
+            Tuple of (cert_path, key_path)
+        """
+        letsencrypt_dir = Path(f"/etc/letsencrypt/live/{domain}")
+        cert_file = letsencrypt_dir / "fullchain.pem"
+        key_file = letsencrypt_dir / "privkey.pem"
+
+        if cert_file.exists() and key_file.exists():
+            print(f"[SSL] Reusing existing Let's Encrypt cert for {domain}")
+            print(f"[SSL]   Cert: {cert_file}")
+            print(f"[SSL]   Key:  {key_file}")
+            return str(cert_file), str(key_file)
+
+        certbot = self._find_certbot()
+        if not certbot:
+            raise RuntimeError(
+                "certbot not found. Install: sudo apt install certbot python3-certbot-nginx"
+            )
+
+        if not email:
+            email = "admin@" + domain
+            print(f"[SSL] No email provided, using: {email}")
+
+        print(f"[SSL] Requesting Let's Encrypt certificate for {domain}...")
+
+        cmd = [
+            certbot,
+            "certonly",
+            "--nginx",
+            "-d",
+            domain,
+            "--non-interactive",
+            "--agree-tos",
+            "--email",
+            email,
+        ]
+
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                stderr = result.stderr or result.stdout
+                raise RuntimeError(f"certbot failed (rc={result.returncode}): {stderr}")
+        except FileNotFoundError as e:
+            raise RuntimeError(f"certbot not found: {e}") from e
+
+        if not cert_file.exists() or not key_file.exists():
+            raise RuntimeError(f"certbot completed but cert not found at {cert_file}")
+
+        print(f"[SSL] Let's Encrypt certificate issued for {domain}")
+        print(f"[SSL]   Cert: {cert_file}")
+        print(f"[SSL]   Key:  {key_file}")
+        print("[SSL]   Auto-renewal: certbot renew (cron/systemd timer)")
+        return str(cert_file), str(key_file)
+
     def _generate_openssl_cert(
         self,
         name: str,
@@ -331,7 +450,9 @@ class SSLCertificateGenerator:
 
         if cert_file.exists() and key_file.exists():
             if server_ip and not self._cert_has_san(cert_file, server_ip):
-                print(f"[SSL] Existing openssl cert missing IP={server_ip} in SAN, regenerating")
+                print(
+                    f"[SSL] Existing openssl cert missing IP={server_ip} in SAN, regenerating"
+                )
                 cert_file.unlink()
                 key_file.unlink(missing_ok=True)
             else:
@@ -369,12 +490,20 @@ extendedKeyUsage = serverAuth, clientAuth
         try:
             subprocess.run(
                 [
-                    "openssl", "req", "-x509", "-nodes",
-                    "-days", "365",
-                    "-newkey", f"rsa:{key_size}",
-                    "-keyout", str(key_file),
-                    "-out", str(cert_file),
-                    "-config", str(conf_file),
+                    "openssl",
+                    "req",
+                    "-x509",
+                    "-nodes",
+                    "-days",
+                    "365",
+                    "-newkey",
+                    f"rsa:{key_size}",
+                    "-keyout",
+                    str(key_file),
+                    "-out",
+                    str(cert_file),
+                    "-config",
+                    str(conf_file),
                 ],
                 check=True,
                 capture_output=True,
@@ -385,9 +514,7 @@ extendedKeyUsage = serverAuth, clientAuth
             print(f"[SSL] Key saved: {key_file}")
             return str(cert_file), str(key_file)
         except subprocess.CalledProcessError as e:
-            raise RuntimeError(
-                f"Failed to generate SSL cert: {e.stderr}"
-            ) from e
+            raise RuntimeError(f"Failed to generate SSL cert: {e.stderr}") from e
         finally:
             _sudo_unlink(conf_file)
 

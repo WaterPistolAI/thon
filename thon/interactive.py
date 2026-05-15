@@ -349,6 +349,36 @@ def run_interactive(
         )
         if nginx.enabled:
             nginx.ssl_dir = _prompt("SSL cert directory", default=nginx.ssl_dir)
+            nginx.domain = _prompt(
+                "Domain name (leave empty for IP-only setup)",
+                default=nginx.domain,
+                allow_empty=True,
+            )
+            if nginx.domain:
+                _info(
+                    "A real domain enables Let's Encrypt (auto-renewed, browser-trusted). "
+                    "Ensure DNS points to this server before proceeding."
+                )
+                nginx.ssl_provider = _prompt(
+                    "SSL provider",
+                    default="certbot",
+                    choices=["auto", "certbot", "mkcert", "openssl"],
+                )
+                if nginx.ssl_provider in ("auto", "certbot"):
+                    nginx.certbot_email = _prompt(
+                        "Let's Encrypt email",
+                        default=nginx.certbot_email or f"admin@{nginx.domain}",
+                    )
+            else:
+                _info(
+                    "No domain set. Will use mkcert (local CA) or openssl (self-signed). "
+                    "For production, set a domain and use Let's Encrypt."
+                )
+                nginx.ssl_provider = _prompt(
+                    "SSL provider",
+                    default=nginx.ssl_provider,
+                    choices=["auto", "mkcert", "openssl"],
+                )
 
     # ── Workspace ────────────────────────────────────────────
     _section("Workspace Persistence")

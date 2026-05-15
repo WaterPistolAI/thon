@@ -442,9 +442,7 @@ async def create_instance(
         await sandbox.commands.run("chown -R vscode:vscode /workspace")
 
     if lemonade_config_content:
-        await _inject_kilo_config(
-            user, sandbox, lemonade_config_content
-        )
+        await _inject_kilo_config(user, sandbox, lemonade_config_content)
 
     if vscode_settings_content:
         await _inject_vscode_settings(user, sandbox, vscode_settings_content)
@@ -458,9 +456,7 @@ async def create_instance(
             api_key=gateway_api_key,
             enable_embedding=True,
         )
-        await _inject_kilo_config(
-            user, sandbox, kilo_content
-        )
+        await _inject_kilo_config(user, sandbox, kilo_content)
 
     if secure and password:
         config_dir = "/home/vscode/.config/code-server"
@@ -769,6 +765,9 @@ async def run_from_config(
             ssl_gen = SSLCertificateGenerator(output_dir=thon_cfg.nginx.ssl_dir)
             cert_path, key_path = ssl_gen.generate_server_cert(
                 server_ip=external_ip,
+                domain=thon_cfg.nginx.domain or None,
+                ssl_provider=thon_cfg.nginx.ssl_provider,
+                certbot_email=thon_cfg.nginx.certbot_email or None,
             )
 
             ca_cert_path = ""
@@ -1042,6 +1041,25 @@ Examples:
         type=str,
         default="/etc/nginx/ssl",
         help="Directory to store SSL certificates (default: /etc/nginx/ssl)",
+    )
+    parser.add_argument(
+        "--domain",
+        type=str,
+        default=None,
+        help="Domain name for Let's Encrypt SSL certificate (e.g. thon.example.com)",
+    )
+    parser.add_argument(
+        "--ssl-provider",
+        type=str,
+        default="auto",
+        choices=["auto", "certbot", "mkcert", "openssl"],
+        help="SSL certificate provider (default: auto = certbot if domain set, else mkcert/openssl)",
+    )
+    parser.add_argument(
+        "--certbot-email",
+        type=str,
+        default=None,
+        help="Email for Let's Encrypt registration (default: admin@<domain>)",
     )
     parser.add_argument(
         "--no-nginx",
@@ -1477,6 +1495,13 @@ Examples:
             ssl_gen = SSLCertificateGenerator(output_dir=args.ssl_dir)
             cert_path, key_path = ssl_gen.generate_server_cert(
                 server_ip=external_ip,
+                domain=args.domain if hasattr(args, "domain") else None,
+                ssl_provider=args.ssl_provider
+                if hasattr(args, "ssl_provider")
+                else "auto",
+                certbot_email=args.certbot_email
+                if hasattr(args, "certbot_email")
+                else None,
             )
 
             ca_cert_path = ""

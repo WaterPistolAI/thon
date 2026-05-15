@@ -234,6 +234,9 @@ class SandboxService:
     def sync_nginx(self) -> list[int]:
         """Regenerate nginx config from all active instance endpoints.
 
+        Queries both the DB records and live API to ensure all running
+        instances have nginx proxy entries, even if DB records are stale.
+
         Returns the list of ports that were configured, or empty list
         if nginx is not available.
         """
@@ -241,14 +244,42 @@ class SandboxService:
         if ng is None:
             return []
         try:
+            endpoints_from_db: list[str] = []
             records = get_records(db_path=self._config.database.path)
-            endpoints = [
-                r.endpoint
-                for r in records.values()
-                if r.endpoint and r.port and r.terminated_at is None
-            ]
+            for r in records.values():
+                if r.endpoint and r.port and r.terminated_at is None:
+                    endpoints_from_db.append(r.endpoint)
+
+            endpoints_from_api: list[str] = []
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    import concurrent.futures
+
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        instances, _ = loop.run_in_executor(
+                            pool,
+                            lambda: asyncio.run(
+                                self.list_instances(
+                                    states=[InstanceState.RUNNING, InstanceState.PAUSED]
+                                )
+                            ),
+                        ).result()
+                else:
+                    instances, _ = asyncio.run(
+                        self.list_instances(
+                            states=[InstanceState.RUNNING, InstanceState.PAUSED]
+                        )
+                    )
+                for inst in instances:
+                    if inst.endpoint:
+                        endpoints_from_api.append(inst.endpoint)
+            except Exception:
+                pass
+
+            all_endpoints = list(set(endpoints_from_db + endpoints_from_api))
             ports: set[int] = set()
-            for ep in endpoints:
+            for ep in all_endpoints:
                 try:
                     host_port = ep.split("/")[0]
                     port_str = host_port.split(":")[1]
@@ -256,7 +287,7 @@ class SandboxService:
                 except (IndexError, ValueError):
                     continue
             sorted_ports = sorted(ports)
-            ng.sync_from_endpoints(endpoints)
+            ng.sync_from_endpoints(all_endpoints)
             logger.info("Nginx synced: %d port(s) %s", len(sorted_ports), sorted_ports)
             return sorted_ports
         except Exception as exc:

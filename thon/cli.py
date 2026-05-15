@@ -195,13 +195,50 @@ def cmd_setup(args: argparse.Namespace) -> None:
     step = 0
     total = 4
 
-    # 1. SSL directory
+    # 1. SSL directory & certs
     step += 1
     if config.nginx.enabled:
-        print(f"\n[{step}/{total}] SSL directory...")
+        print(f"\n[{step}/{total}] SSL setup...")
         ssl_dir = config.nginx.ssl_dir
         os.makedirs(ssl_dir, exist_ok=True)
         print(f"  SSL dir: {ssl_dir}")
+
+        if config.nginx.domain and config.nginx.ssl_provider in ("auto", "certbot"):
+            print(f"  Domain: {config.nginx.domain} (Let's Encrypt)")
+            print("  Installing certbot if needed...")
+            try:
+                subprocess.run(
+                    [
+                        "sudo",
+                        "apt-get",
+                        "install",
+                        "-y",
+                        "certbot",
+                        "python3-certbot-nginx",
+                    ],
+                    check=False,
+                    capture_output=True,
+                )
+            except Exception:
+                pass
+            try:
+                from scripts.ssl_cert import SSLCertificateGenerator
+
+                ssl_gen = SSLCertificateGenerator(output_dir=ssl_dir)
+                cert, key = ssl_gen.generate_server_cert(
+                    domain=config.nginx.domain,
+                    ssl_provider="certbot",
+                    certbot_email=config.nginx.certbot_email or None,
+                )
+                print(f"  Cert: {cert}")
+                print(f"  Key:  {key}")
+            except Exception as e:
+                print(f"  Certbot failed: {e}")
+                print(
+                    f"  You can retry manually: sudo certbot --nginx -d {config.nginx.domain}"
+                )
+        else:
+            print("  Provider: mkcert/openssl (no domain configured)")
     else:
         print(f"\n[{step}/{total}] SSL — skipped (nginx disabled)")
 

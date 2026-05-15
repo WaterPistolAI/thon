@@ -56,6 +56,9 @@ class NginxSettings(BaseModel):
 
     enabled: bool = True
     ssl_dir: str = "/etc/nginx/ssl"
+    domain: str = ""
+    ssl_provider: str = "auto"
+    certbot_email: str = ""
 
 
 class WorkspaceSettings(BaseModel):
