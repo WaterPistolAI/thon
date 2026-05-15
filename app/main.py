@@ -172,8 +172,15 @@ async def lifespan(app: FastAPI):
     cfg = get_app_config()
     configure_logging(cfg)
     _log_startup_diagnostics(cfg)
-    yield
+
     svc = get_sandbox_service()
+    try:
+        await svc.reconcile()
+        svc.sync_nginx()
+    except Exception as exc:
+        logger.warning("Startup reconcile failed: %s", exc)
+
+    yield
     await svc.close()
     logger.info("THON server stopped")
 

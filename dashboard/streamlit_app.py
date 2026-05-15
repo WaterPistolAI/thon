@@ -1747,6 +1747,15 @@ def main() -> None:
     cfg = _get_config()
     _check_auth(cfg)
 
+    if not st.session_state.get("_reconciled"):
+        try:
+            svc = _get_sandbox_service()
+            _run_async(svc.reconcile())
+            svc.sync_nginx()
+        except Exception:
+            pass
+        st.session_state._reconciled = True
+
     st.sidebar.title("◆ THON")
     st.sidebar.caption(_get_git_version())
 

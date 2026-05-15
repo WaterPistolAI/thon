@@ -259,7 +259,9 @@ def mark_orphaned_terminated(
 ) -> list[str]:
     """Mark DB records whose sandbox_id is not in active_sandbox_ids as terminated.
 
-    Also clears UserRecord.sandbox_id for those orphaned sandboxes.
+    Does NOT clear UserRecord.sandbox_id — that should only happen when the
+    user explicitly kills an instance, since the container may still exist
+    but just be unreachable (e.g. server restart).
 
     Returns list of orphaned sandbox_ids that were cleaned up.
     """
@@ -274,13 +276,6 @@ def mark_orphaned_terminated(
                 rec.terminated_at = datetime.utcnow()
                 session.add(rec)
                 orphaned.append(rec.sandbox_id)
-                user = session.exec(
-                    select(UserRecord).where(UserRecord.sandbox_id == rec.sandbox_id)
-                ).first()
-                if user:
-                    user.sandbox_id = None
-                    user.updated_at = datetime.utcnow()
-                    session.add(user)
         if orphaned:
             session.commit()
     return orphaned

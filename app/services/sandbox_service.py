@@ -19,7 +19,7 @@ import base64
 import logging
 import os
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -104,6 +104,88 @@ class SandboxService:
             await self._manager.close()
             self._manager = None
             self._closed = True
+
+    async def reconcile(self) -> None:
+        """Reconcile running instances with DB user records.
+
+        On server restart, the OpenSandbox API may list running containers
+        whose sandbox_ids are no longer linked to user records. This method
+        re-links them by matching group/username metadata, and creates
+        missing DB records.
+        """
+        try:
+            instances, _ = await self.list_instances()
+        except Exception as e:
+            logger.warning("Reconcile: failed to list instances: %s", e)
+            return
+
+        if not instances:
+            logger.info("Reconcile: no running instances found")
+            return
+
+        from app.db import (
+            SandboxRecord,
+            find_user_by_group_and_name,
+            get_groups,
+            get_session,
+            select,
+        )
+
+        db_path = self._config.database.path
+        groups = get_groups(db_path=db_path)
+        group_id_map = {g.name: g.id for g in groups}
+        relinked = 0
+        created = 0
+
+        with get_session(db_path) as session:
+            for inst in instances:
+                if inst.state not in (InstanceState.RUNNING, InstanceState.PAUSED):
+                    continue
+
+                existing_rec = session.exec(
+                    select(SandboxRecord).where(
+                        SandboxRecord.sandbox_id == inst.id
+                    )
+                ).first()
+
+                if existing_rec and existing_rec.terminated_at is None:
+                    continue
+
+                if existing_rec and existing_rec.terminated_at is not None:
+                    existing_rec.terminated_at = None
+                    session.add(existing_rec)
+
+                if not existing_rec:
+                    new_rec = SandboxRecord(
+                        sandbox_id=inst.id,
+                        group_name=inst.user.group,
+                        username=inst.user.username,
+                        port=inst.port,
+                        endpoint=inst.endpoint or "",
+                        image=inst.image or "",
+                    )
+                    session.add(new_rec)
+                    created += 1
+
+                db_user = find_user_by_group_and_name(
+                    group_id=group_id_map.get(inst.user.group, ""),
+                    username=inst.user.username,
+                    db_path=db_path,
+                )
+                if db_user and not db_user.sandbox_id:
+                    db_user.sandbox_id = inst.id
+                    db_user.updated_at = datetime.utcnow()
+                    session.add(db_user)
+                    relinked += 1
+
+            session.commit()
+
+        if relinked or created:
+            logger.info(
+                "Reconcile: relinked %d user(s), created %d record(s)",
+                relinked,
+                created,
+            )
 
     @staticmethod
     def _is_sandbox_error(exc: BaseException) -> bool:
@@ -236,8 +318,8 @@ class SandboxService:
     def sync_nginx(self) -> list[int]:
         """Regenerate nginx config from all active instance endpoints.
 
-        Queries both the DB records and live API to ensure all running
-        instances have nginx proxy entries, even if DB records are stale.
+        Uses DB records as the source of truth. Call ``reconcile()`` first
+        to ensure DB records reflect live containers.
 
         Returns the list of ports that were configured, or empty list
         if nginx is not available.
@@ -246,42 +328,14 @@ class SandboxService:
         if ng is None:
             return []
         try:
-            endpoints_from_db: list[str] = []
             records = get_records(db_path=self._config.database.path)
-            for r in records.values():
-                if r.endpoint and r.port and r.terminated_at is None:
-                    endpoints_from_db.append(r.endpoint)
-
-            endpoints_from_api: list[str] = []
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    import concurrent.futures
-
-                    with concurrent.futures.ThreadPoolExecutor() as pool:
-                        instances, _ = loop.run_in_executor(
-                            pool,
-                            lambda: asyncio.run(
-                                self.list_instances(
-                                    states=[InstanceState.RUNNING, InstanceState.PAUSED]
-                                )
-                            ),
-                        ).result()
-                else:
-                    instances, _ = asyncio.run(
-                        self.list_instances(
-                            states=[InstanceState.RUNNING, InstanceState.PAUSED]
-                        )
-                    )
-                for inst in instances:
-                    if inst.endpoint:
-                        endpoints_from_api.append(inst.endpoint)
-            except Exception:
-                pass
-
-            all_endpoints = list(set(endpoints_from_db + endpoints_from_api))
+            endpoints = [
+                r.endpoint
+                for r in records.values()
+                if r.endpoint and r.port and r.terminated_at is None
+            ]
             ports: set[int] = set()
-            for ep in all_endpoints:
+            for ep in endpoints:
                 try:
                     host_port = ep.split("/")[0]
                     port_str = host_port.split(":")[1]
@@ -289,7 +343,7 @@ class SandboxService:
                 except (IndexError, ValueError):
                     continue
             sorted_ports = sorted(ports)
-            ng.sync_from_endpoints(all_endpoints)
+            ng.sync_from_endpoints(endpoints)
             logger.info("Nginx synced: %d port(s) %s", len(sorted_ports), sorted_ports)
             return sorted_ports
         except Exception as exc:
