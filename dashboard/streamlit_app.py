@@ -334,7 +334,7 @@ def page_instances() -> None:
     rows = []
     for inst in filtered:
         label = f"{inst.user.group}/{inst.user.username}"
-        endpoint = inst.public_url or inst.endpoint or "-"
+        endpoint = inst.domain_url or inst.public_url or inst.endpoint or "-"
         rows.append(
             {
                 "User": label,
@@ -461,9 +461,13 @@ def _instance_detail(svc: SandboxService, inst) -> None:
     st.write(f"**ID:** `{inst.id}`")
     st.write(f"**State:** {_state_badge(inst.state.value)}")
     st.write(f"**Port:** {inst.port}")
+    if inst.domain_url:
+        st.write(f"**Domain URL:** [{inst.domain_url}]({inst.domain_url})")
     if inst.public_url:
-        st.write(f"**URL:** [{inst.public_url}]({inst.public_url})")
-    elif inst.endpoint:
+        st.write(f"**IP URL:** [{inst.public_url}]({inst.public_url})")
+    if inst.local_url:
+        st.write(f"**Local URL:** [{inst.local_url}]({inst.local_url})")
+    if not inst.domain_url and not inst.public_url and inst.endpoint:
         st.write(f"**Endpoint:** `{inst.endpoint}`")
     if inst.password:
         st.write(f"**Password:** `{inst.password}`")
@@ -1333,7 +1337,7 @@ def _load_gateway_config_from_db(cfg: AppConfig) -> None:
         "gateway_enabled": ("enabled", lambda v: v in ("true", "1", "yes")),
         "gateway_mode": ("gateway_mode", str),
         "gateway_rate_limit": ("rate_limit_tokens", int),
-        "gateway_time_window": ("rate_limit_window", int),
+        "gateway_rate_limit_window": ("rate_limit_window", int),
         "gateway_redis_host": ("redis_host", lambda v: v or None),
         "gateway_redis_port": ("redis_port", int),
         "gateway_admin_url": ("admin_url", str),
@@ -1344,6 +1348,10 @@ def _load_gateway_config_from_db(cfg: AppConfig) -> None:
         val = get_setting(db_key, db_path=db_path)
         if val is not None:
             setattr(cfg.gateway, attr, converter(val))
+
+    domain = get_setting("nginx_domain", db_path=db_path)
+    if domain:
+        cfg.nginx.domain = domain
 
 
 def page_gateway() -> None:

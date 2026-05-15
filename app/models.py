@@ -76,6 +76,8 @@ class InstanceInfo(BaseModel):
     port: int
     endpoint: Optional[str] = None
     public_url: Optional[str] = None
+    domain_url: Optional[str] = None
+    local_url: Optional[str] = None
     password: Optional[str] = None
     image: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -85,6 +87,8 @@ class InstanceInfo(BaseModel):
     @computed_field
     @property
     def url(self) -> Optional[str]:
+        if self.domain_url:
+            return self.domain_url
         if self.public_url:
             return self.public_url
         if self.endpoint:

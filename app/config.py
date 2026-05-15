@@ -114,6 +114,7 @@ class NginxConfig:
 
     ssl_dir: str = "/etc/nginx/ssl"
     external_ip: Optional[str] = field(default_factory=lambda: os.getenv("EXTERNAL_IP"))
+    domain: str = field(default_factory=lambda: os.getenv("THON_DOMAIN", ""))
 
 
 @dataclass

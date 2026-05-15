@@ -66,7 +66,7 @@ COMBINED_CONFIG_TEMPLATE = """server {{
     listen 80;
     listen 443 ssl;
     listen [::]:443 ssl;
-    server_name _;
+    server_name {server_name};
 
     ssl_certificate {cert_path};
     ssl_certificate_key {key_path};
@@ -85,13 +85,27 @@ class NginxConfigGenerator:
         sites_available_dir: str | Path = SITES_AVAILABLE,
         sites_enabled_dir: str | Path = SITES_ENABLED,
         ssl_dir: str | Path = SSL_DIR,
+        domain: str = "",
     ) -> None:
         self.sites_available_dir = Path(sites_available_dir)
         self.sites_enabled_dir = Path(sites_enabled_dir)
         self.ssl_dir = Path(ssl_dir)
+        self.domain = domain
 
     def _find_cert_pair(self) -> tuple[str, str]:
-        """Find SSL cert/key in ssl_dir."""
+        """Find SSL cert/key. Prefers Let's Encrypt if domain is configured."""
+        if self.domain:
+            le_cert = Path(f"/etc/letsencrypt/live/{self.domain}/fullchain.pem")
+            le_key = Path(f"/etc/letsencrypt/live/{self.domain}/privkey.pem")
+            if le_cert.exists() and le_key.exists():
+                return str(le_cert), str(le_key)
+            result = subprocess.run(
+                ["sudo", "test", "-r", str(le_cert)],
+                capture_output=True,
+                check=False,
+            )
+            if result.returncode == 0:
+                return str(le_cert), str(le_key)
         for cert_path in sorted(self.ssl_dir.iterdir()):
             name = cert_path.name
             if name.endswith("-key.pem") or name.endswith(".key"):
@@ -140,6 +154,7 @@ class NginxConfigGenerator:
         config_content = COMBINED_CONFIG_TEMPLATE.format(
             cert_path=cert_path,
             key_path=key_path,
+            server_name=self.domain or "_",
             ca_location=ca_location,
             location_blocks=location_blocks,
         )

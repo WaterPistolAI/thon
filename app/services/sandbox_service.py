@@ -77,7 +77,9 @@ class SandboxService:
     def nginx(self) -> Optional[NginxConfigGenerator]:
         if self._nginx is None and self._config.nginx.external_ip:
             try:
-                self._nginx = NginxConfigGenerator()
+                self._nginx = NginxConfigGenerator(
+                    domain=self._config.nginx.domain,
+                )
             except Exception as exc:
                 logger.debug("Nginx init failed: %s", exc)
         return self._nginx
@@ -422,6 +424,10 @@ class SandboxService:
                 inst.public_url = self._build_public_url(
                     inst.endpoint, fallback_ip=db_external_ip
                 )
+                inst.local_url = self._build_local_url(inst.endpoint)
+                domain = self._config.nginx.domain
+                if domain:
+                    inst.domain_url = self._build_domain_url(inst.endpoint, domain)
 
         return instances, result.pagination.total_items if result.pagination else len(
             instances
@@ -825,3 +831,29 @@ class SandboxService:
             endpoint_str.split(":", 1)[1] if ":" in endpoint_str else endpoint_str
         )
         return f"https://{ext_ip}/{endpoint_path}/"
+
+    @staticmethod
+    def _build_local_url(endpoint_str: str) -> Optional[str]:
+        """Build a local HTTP URL from an internal endpoint string.
+
+        Converts ``127.0.0.1:47887/proxy/8443`` → ``http://localhost:47887/proxy/8443/``
+        """
+        if not endpoint_str:
+            return None
+        endpoint_path = (
+            endpoint_str.split(":", 1)[1] if ":" in endpoint_str else endpoint_str
+        )
+        return f"http://localhost/{endpoint_path}/"
+
+    @staticmethod
+    def _build_domain_url(endpoint_str: str, domain: str) -> Optional[str]:
+        """Build a domain HTTPS URL from an internal endpoint string.
+
+        Converts ``127.0.0.1:47887/proxy/8443`` → ``https://{domain}/47887/proxy/8443/``
+        """
+        if not endpoint_str or not domain:
+            return None
+        endpoint_path = (
+            endpoint_str.split(":", 1)[1] if ":" in endpoint_str else endpoint_str
+        )
+        return f"https://{domain}/{endpoint_path}/"

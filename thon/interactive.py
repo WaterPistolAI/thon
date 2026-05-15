@@ -248,15 +248,40 @@ def run_interactive(
 
     detected_ip = _detect_external_ip()
 
-    # ── External IP ──────────────────────────────────────────
-    _section("Network")
+    # ── Network & SSL ────────────────────────────────────────
+    _section("Network & SSL")
+    nginx = (existing.nginx if existing else None) or NginxSettings()
     default_ip = (existing.external_ip if existing else "") or detected_ip or ""
     if detected_ip:
         _info(f"Detected external IP: {detected_ip}")
+
+    _info(
+        "SSL can use either a domain name (Let's Encrypt, browser-trusted) "
+        "or an IP address (mkcert/self-signed, requires CA install on clients)."
+    )
+    has_domain = _yes_no(
+        "Use a domain name for SSL?",
+        default=bool(nginx.domain or (existing.external_ip if existing else "")),
+    )
+    if has_domain:
+        nginx.domain = _prompt(
+            "Domain name (e.g. thon.example.com)",
+            default=nginx.domain,
+        )
+        nginx.ssl_provider = "certbot"
+        nginx.certbot_email = _prompt(
+            "Let's Encrypt email",
+            default=nginx.certbot_email or f"admin@{nginx.domain}",
+        )
+        _info("Ensure DNS for this domain points to this server before running setup.")
+    else:
+        nginx.domain = ""
+        nginx.ssl_provider = "mkcert"
+
     external_ip = (
         default_ip
         if non_interactive
-        else _prompt("External IP for SSL certs and URLs", default=default_ip)
+        else _prompt("External IP for URLs and SAN", default=default_ip)
     )
 
     # ── Groups ───────────────────────────────────────────────
@@ -341,44 +366,12 @@ def run_interactive(
             )
 
     # ── Nginx / SSL ──────────────────────────────────────────
-    _section("Nginx & SSL")
-    nginx = (existing.nginx if existing else None) or NginxSettings()
     if not non_interactive:
         nginx.enabled = _yes_no(
             "Enable nginx reverse proxy with SSL?", default=nginx.enabled
         )
         if nginx.enabled:
             nginx.ssl_dir = _prompt("SSL cert directory", default=nginx.ssl_dir)
-            nginx.domain = _prompt(
-                "Domain name (leave empty for IP-only setup)",
-                default=nginx.domain,
-                allow_empty=True,
-            )
-            if nginx.domain:
-                _info(
-                    "A real domain enables Let's Encrypt (auto-renewed, browser-trusted). "
-                    "Ensure DNS points to this server before proceeding."
-                )
-                nginx.ssl_provider = _prompt(
-                    "SSL provider",
-                    default="certbot",
-                    choices=["auto", "certbot", "mkcert", "openssl"],
-                )
-                if nginx.ssl_provider in ("auto", "certbot"):
-                    nginx.certbot_email = _prompt(
-                        "Let's Encrypt email",
-                        default=nginx.certbot_email or f"admin@{nginx.domain}",
-                    )
-            else:
-                _info(
-                    "No domain set. Will use mkcert (local CA) or openssl (self-signed). "
-                    "For production, set a domain and use Let's Encrypt."
-                )
-                nginx.ssl_provider = _prompt(
-                    "SSL provider",
-                    default=nginx.ssl_provider,
-                    choices=["auto", "mkcert", "openssl"],
-                )
 
     # ── Workspace ────────────────────────────────────────────
     _section("Workspace Persistence")
@@ -400,6 +393,8 @@ def run_interactive(
                 "Host directory for workspace bind mounts",
                 default=workspace.dir or "/thon-workspace",
             )
+        else:
+            workspace.dir = ""
 
     # ── Lemonade ─────────────────────────────────────────────
     _section("Lemonade Server (Local LLM Inference)")
