@@ -30,8 +30,8 @@ sudo apt-get install -y --no-install-recommends \
     python-is-python3 \
     nginx \
     mkcert \
-    docker.io \
-    docker-buildx \
+    docker-ce \
+    docker-buildx-plugin \
     openssl \
     ca-certificates \
     curl \
