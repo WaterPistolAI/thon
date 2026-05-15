@@ -365,10 +365,11 @@ def run_interactive(
                 default=vscode.settings_file or "config/vscode-settings.jsonc",
             )
 
-    # ── Nginx / SSL ──────────────────────────────────────────
+    # ── Nginx ─────────────────────────────────────────────────
+    _section("Nginx Reverse Proxy")
     if not non_interactive:
         nginx.enabled = _yes_no(
-            "Enable nginx reverse proxy with SSL?", default=nginx.enabled
+            "Enable nginx reverse proxy?", default=nginx.enabled
         )
         if nginx.enabled:
             nginx.ssl_dir = _prompt("SSL cert directory", default=nginx.ssl_dir)
