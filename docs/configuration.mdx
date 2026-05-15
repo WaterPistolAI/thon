@@ -21,6 +21,12 @@ CLI, API, and dashboard all read from it (or its `.env` export).
 # External IP for SSL cert SAN and URLs (auto-detected if empty)
 external_ip: ""
 
+# Demo mode (default workspace when no groups)
+demo: false
+
+# Logging level: DEBUG, INFO, WARNING, ERROR
+log_level: "INFO"
+
 # ── Groups & Users ────────────────────────────────────────────
 # Each user gets their own VS Code sandbox with workspace at
 # /workspace/{group}/{username}
@@ -40,28 +46,26 @@ sandbox:
   domain: "localhost:8080"
   api_key: ""
   image: "waterpistol/thon:latest"
-  python_version: "3.11"
   starting_port: 8443
   timeout_minutes: 0
 
 # ── VS Code Instances ────────────────────────────────────────
 vscode:
-  # Enable per-user password authentication for code-server
   secure: false
-  # Path to VS Code settings JSON (injected into each sandbox)
   settings_file: ""
-  # Path to extensions.txt list (injected into each sandbox)
   extensions_file: ""
 
 # ── Nginx & SSL ──────────────────────────────────────────────
 nginx:
   enabled: true
   ssl_dir: "/etc/nginx/ssl"
+  domain: ""                   # Domain for server_name (enables Let's Encrypt)
+  ssl_provider: "auto"         # auto, certbot, mkcert, openssl
+  certbot_email: ""            # Email for Let's Encrypt registration
 
 # ── Workspace ─────────────────────────────────────────────────
-# Set dir to enable persistent bind mounts (empty = ephemeral)
 workspace:
-  dir: ""
+  dir: ""                      # Host directory for bind mounts (empty = ephemeral)
 
 # ── Lemonade Server (Local LLM Inference) ────────────────────
 lemonade:
@@ -71,29 +75,70 @@ lemonade:
   model: "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL"
   model_name: "gemma-4-31b-it"
   mmproj: "mmproj-BF16.gguf"
-  llamacpp_backend: "auto"
+  ctx_size_per_user: 262144
+  embedding_model: "SuperPauly/harrier-oss-v1-0.6b-gguf:harrier-oss-v1-0.6B-BF16"
+  embedding_model_name: "harrier-oss-v1-0.6b"
+  embedding_ctx_size_per_user: 32768
+  embedding_dimensions: 0
+  llamacpp_backend: "auto"     # auto, vulkan, cpu
   prefer_system: true
-  llamacpp_bin: "/usr/local/bin/llama-server"
+  llamacpp_bin: "builtin"
+  rocm_channel: "preview"
   generate_keys: true
   api_key: ""
   admin_api_key: ""
+  llamacpp:                    # Inference tuning parameters
+    ctk: "q8_0"
+    ctv: "q8_0"
+    batch_size: 8192
+    ubatch_size: 8192
+    split_mode: ""
+    main_gpu: -1
+    cpu_moe: false
+    n_cpu_moe: 0
+    min_p: 0.0
+    presence_penalty: 0.0
+  chat_models:                 # Additional models for selection
+    - name: "gemma-4-31b-it"
+      checkpoint: "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL"
+      context: 262144
+      output: 4096
+    - name: "qwen3.6-27b"
+      checkpoint: "unsloth/Qwen3.6-27B-GGUF:Q8_K_XL"
+      context: 262144
+      output: 4096
 
 # ── Kilo Code ─────────────────────────────────────────────────
-# Auto-generated from Lemonade settings when lemonade.enabled=true
 kilo:
-  config_file: ""
+  config_file: ""              # Output path (default: ~/.thon/kilo.jsonc)
+  skeleton_file: "config/kilo.jsonc.skeleton"
+  chat_model: "lemonade/user.gemma-4-31b-it"
+  small_model: ""
 
 # ── AI Gateway (APISIX Rate Limiting) ────────────────────────
 gateway:
   enabled: false
-  # per-user: each user gets their own API key and rate limit
-  # per-group: each group shares one API key with combined limit
-  mode: "per-user"
-  admin_key: "edd1c9f034335f136f87ad84b625c8f1"
+  mode: "per-user"             # per-user or per-group
+  rate_limit_scope: "per-user" # per-user or per-model
+  admin_key: ""
   redis_host: ""
   redis_port: 6379
-  rate_limit: 500
-  time_window: 60
+  concurrency_limit: 1
+  token_limit: 0               # 0 = unlimited
+  token_window: 60
+  model_concurrency:           # Per-model limits (when rate_limit_scope=per-model)
+    - model: "gemma-4-31b-it"
+      concurrency_limit: 1
+      token_limit: 0
+      token_window: 60
+      priority: 0
+
+# ── Langfuse Observability ────────────────────────────────────
+langfuse:
+  enabled: false
+  public_key: ""
+  secret_key: ""
+  base_url: "https://cloud.langfuse.com"
 
 # ── Dashboard ─────────────────────────────────────────────────
 dashboard:
@@ -102,7 +147,6 @@ dashboard:
   debug: false
 
 # ── Authentication (OIDC) ─────────────────────────────────────
-# For Streamlit dashboard: set AUTH_LOCAL_PASSWORD env variable
 auth:
   enabled: false
   session_secret: ""
@@ -122,14 +166,17 @@ auth:
 | Section | Description |
 |---------|-------------|
 | `external_ip` | External IP for SSL cert SAN and URLs |
+| `demo` | Demo mode (default workspace when no groups) |
+| `log_level` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 | `groups` | Group name → list of usernames mapping |
 | `sandbox` | Sandbox server connection and instance settings |
 | `vscode` | VS Code security and customization |
-| `nginx` | Nginx reverse proxy and SSL |
+| `nginx` | Nginx reverse proxy, SSL, domain, and provider selection |
 | `workspace` | Persistent workspace bind-mounts |
-| `lemonade` | Local LLM inference server |
-| `kilo` | Kilo Code extension config injection |
-| `gateway` | APISIX AI Gateway with rate limiting |
+| `lemonade` | Local LLM inference server with llamacpp tuning |
+| `kilo` | Kilo Code extension config injection with skeleton merging |
+| `gateway` | APISIX AI Gateway with rate limiting and per-model concurrency |
+| `langfuse` | Langfuse LLM observability integration |
 | `dashboard` | Web dashboard settings |
 | `auth` | OIDC authentication providers |
 
@@ -189,6 +236,24 @@ groups:
 ---
 
 ## nginx Configuration
+
+### SSL Providers
+
+| Provider | Description | Best For |
+|----------|-------------|----------|
+| `auto` (default) | Tries mkcert → certbot → openssl in order | Most setups |
+| `certbot` | Let's Encrypt certificates (requires domain + port 80) | Production with domain |
+| `mkcert` | CA-trusted certs, filename includes IP hash | Development |
+| `openssl` | Self-signed certs with IP/domain in SAN | Fallback |
+
+Select via `nginx.ssl_provider` in `thon.yaml` or `THON_SSL_PROVIDER` env var.
+
+### Domain Configuration
+
+When `nginx.domain` is set:
+- nginx uses the domain as `server_name`
+- Let's Encrypt is preferred for CA-trusted certificates
+- `InstanceInfo.domain_url` is populated for domain-based URLs
 
 ### Directory Structure
 
@@ -394,6 +459,37 @@ When embedding is enabled, the embedding model gets its own entry in
 | `ctx_size` | `262144` per user | `32768` per user |
 | `-np` | `num_users` | `num_users` |
 
+### Dynamic Rescaling
+
+Adjust context size and parallel slots without restarting the server:
+
+```bash
+# Via CLI
+python ./scripts/lemonade_server.py rescale --num-users 8
+
+# Via API
+curl -X POST http://localhost:8100/api/lemonade/rescale?num_users=8
+```
+
+This rewrites `recipe_options.json` and reloads models.
+
+### llamacpp Tuning Parameters
+
+The `lemonade.llamacpp` section in `thon.yaml` controls inference tuning:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `ctk` | `q8_0` | Cache type K |
+| `ctv` | `q8_0` | Cache type V |
+| `batch_size` | `8192` | Batch size |
+| `ubatch_size` | `8192` | Micro-batch size |
+| `split_mode` | `""` | Multi-GPU split mode |
+| `main_gpu` | `-1` | Primary GPU index |
+| `cpu_moe` | `false` | Offload MoE to CPU |
+| `n_cpu_moe` | `0` | Number of CPU MoE experts |
+| `min_p` | `0.0` | Minimum P sampling |
+| `presence_penalty` | `0.0` | Presence penalty |
+
 ### Recipe Options Fields
 
 | Field | Description |
@@ -412,6 +508,26 @@ that appear in the Lemonade desktop app.
 ---
 
 ## kilo.jsonc (Kilo Code Config)
+
+### Skeleton Merging
+
+The `config/kilo.jsonc.skeleton` file provides a base config. Dynamic fields
+(provider, apiKey, model, indexing) are deep-merged on top. Template variables
+are substituted per-user:
+
+| Variable | Replacement |
+|----------|-------------|
+| `$THON_USERNAME` | User's username |
+| `$THON_USER_EMAIL` | User's email or `{username}@thon.local` |
+| `$WORKSPACE` | User's workspace path |
+
+### Deployment Modes
+
+| Mode | Config Source | Kilo Points To |
+|------|--------------|----------------|
+| **lemonade-direct** | `--lemonade kilo.jsonc` | Lemonade server directly |
+| **gateway-per-user** | `--gateway` | APISIX gateway (per-user API key) |
+| **gateway-per-group** | `--gateway --gateway-per-group` | APISIX gateway (shared group API key) |
 
 ### Location in Sandbox
 
@@ -669,6 +785,12 @@ to generate the `.env` file from `thon.yaml`.
 | `LEMONADE_ADMIN_API_KEY` | (none) | Lemonade admin API key |
 | `THON_DB_PATH` | `~/.thon/thon.db` | SQLite database path |
 | `THON_WORKSPACE_DIR` | `~/.thon/workspace` | Workspace directory for groups |
+| `THON_DOMAIN` | (none) | Domain name for nginx and Let's Encrypt |
+| `THON_SSL_PROVIDER` | `auto` | SSL provider: auto, certbot, mkcert, openssl |
+| `THON_CERTBOT_EMAIL` | (none) | Email for Let's Encrypt registration |
+| `THON_KILO_CONFIG` | (none) | Path to kilo.jsonc |
+| `THON_VSCODE_SETTINGS` | (none) | Path to VS Code settings file |
+| `THON_LOG_LEVEL` | `INFO` | Logging level |
 | `DASHBOARD_HOST` | `0.0.0.0` | FastAPI bind address |
 | `DASHBOARD_PORT` | `8100` | FastAPI port |
 | `DASHBOARD_DEBUG` | `false` | Enable FastAPI debug/reload mode |
@@ -679,7 +801,7 @@ to generate the `.env` file from `thon.yaml`.
 |----------|---------|-------------|
 | `GATEWAY_ENABLED` | `false` | Enable APISIX AI Gateway |
 | `GATEWAY_ADMIN_URL` | `http://127.0.0.1:9180` | APISIX Admin API URL |
-| `GATEWAY_ADMIN_KEY` | `edd1c9f034335f136f87ad84b625c8f1` | APISIX Admin API key |
+| `GATEWAY_ADMIN_KEY` | (auto-detected) | APISIX Admin API key |
 | `GATEWAY_PROXY_PORT` | `9080` | APISIX proxy port |
 | `GATEWAY_REDIS_HOST` | (none) | Redis host for shared rate limiting |
 | `GATEWAY_REDIS_PORT` | `6379` | Redis port |
@@ -687,6 +809,17 @@ to generate the `.env` file from `thon.yaml`.
 | `GATEWAY_RATE_LIMIT_TOKENS` | `500` | Token limit per consumer per time window |
 | `GATEWAY_RATE_LIMIT_WINDOW` | `60` | Rate limit time window in seconds |
 | `GATEWAY_MODE` | `per-user` | Consumer mode: `per-user` or `per-group` |
+| `GATEWAY_RATE_LIMIT_SCOPE` | `per-user` | Rate limit scope: `per-user` or `per-model` |
+| `GATEWAY_CONCURRENCY_LIMIT` | `1` | Concurrency limit per consumer |
+
+### Langfuse Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LANGFUSE_ENABLED` | `false` | Enable Langfuse observability |
+| `LANGFUSE_PUBLIC_KEY` | (none) | Langfuse public key |
+| `LANGFUSE_SECRET_KEY` | (none) | Langfuse secret key |
+| `LANGFUSE_BASEURL` | `https://cloud.langfuse.com` | Langfuse API base URL |
 
 ### Running
 
@@ -695,7 +828,7 @@ to generate the `.env` file from `thon.yaml`.
 streamlit run dashboard/streamlit_app.py --server.port 8501
 
 # FastAPI REST API (port 8100, optional)
-python -m app.main
+python -m thon run
 ```
 
 See [Dashboard](./dashboard) for full documentation including pages and

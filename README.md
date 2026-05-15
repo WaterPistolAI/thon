@@ -8,19 +8,22 @@ via Lemonade Server.
 
 ## Features
 
-- **Unified CLI**: `thon init`, `thon setup`, `thon run` — one config file (`thon.yaml`) for everything
+- **Unified CLI**: `thon install`, `thon init`, `thon setup`, `thon run`, `thon launch` — one config file (`thon.yaml`) for everything
 - **Multi-Instance**: Multiple concurrent VS Code sandboxes from a single command
 - **Groups-Based**: Define users and groups in YAML or manage via dashboard
-- **Web Dashboard**: Streamlit dashboard for instance, group, Lemonade, and gateway management
+- **Web Dashboard**: Streamlit dashboard with 7 pages for instance, group, user, workspace, Lemonade, and gateway management
 - **REST API**: FastAPI REST API with Swagger UI for programmatic access
-- **SSL/TLS**: Automatic nginx reverse proxy with mkcert or openssl certificates
+- **SSL/TLS**: Automatic nginx reverse proxy with 4 SSL providers (auto, certbot, mkcert, openssl)
+- **Domain Support**: Let's Encrypt certificates and domain-based URLs
 - **Persistent Workspaces**: PVC Docker volumes or host bind mounts for workspace persistence
 - **Local LLM**: Optional Lemonade Server integration for local inference (chat + embedding)
 - **Semantic Indexing**: Embedding model for Kilo Code's semantic code search
-- **AI Gateway**: Optional APISIX gateway with per-user or per-group rate limiting and API keys
+- **AI Gateway**: Optional APISIX gateway with per-user or per-group rate limiting and per-model concurrency
 - **Authentication**: Local password for dashboard; OIDC/OAuth2 (GitHub, GitLab, LinkedIn) for REST API
 - **Config Files**: Store and manage groups YAML, kilo.jsonc, and VS Code settings in the database
-- **Kilo Code Ready**: Auto-generated config with experimental flags and indexing for Kilo Code
+- **Kilo Code Ready**: Auto-generated config with skeleton merging, experimental flags, and indexing
+- **LLM Observability**: Optional Langfuse integration for tracing LLM calls
+- **Azure NVMe**: Ephemeral NVMe disk automation for high-speed container and model storage
 
 ## Video Guide
 
@@ -60,8 +63,11 @@ This creates a `thon.yaml` config file with all settings.
 # Install prerequisites and configure all components
 python -m thon setup
 
-# Start VS Code instances
+# Start the API server
 python -m thon run
+
+# Launch VS Code instances
+python -m thon launch
 ```
 
 Alternatively, use `main.py` directly:
@@ -110,14 +116,15 @@ Each user gets their own VS Code sandbox at `https://<ip>/<endpoint_path>/`.
 
 | Component | Role |
 |-----------|------|
-| **thon CLI** | Unified entry point: `thon init`, `thon setup`, `thon run`, `thon config` |
+| **thon CLI** | Unified entry point: `thon install`, `thon init`, `thon setup`, `thon run`, `thon launch`, `thon config`, `thon nginx`, `thon gateway`, `thon cleanup` |
 | **main.py** | Orchestrates sandbox creation, nginx configs, workspace setup |
-| **Streamlit Dashboard** | Web UI for instance, group, Lemonade, and gateway management (:8501) |
-| **FastAPI REST API** | Programmatic API for instances, groups, Lemonade, gateway, auth (:8100) |
-| **nginx** | SSL termination + WebSocket proxy (per-port server blocks) |
+| **Streamlit Dashboard** | Web UI with 7 pages for instance, group, user, workspace, Lemonade, gateway, and settings management (:8501) |
+| **FastAPI REST API** | Programmatic API for instances, groups, users, Lemonade, gateway, auth, nginx, config files (:8100) |
+| **nginx** | SSL termination + WebSocket proxy (per-port or combined config) |
 | **code-server** | VS Code in the browser, runs HTTP inside each sandbox |
 | **Lemonade Server** | Optional local LLM inference (chat + embedding models) |
-| **APISIX Gateway** | Optional rate limiting with per-user or per-group API keys |
+| **APISIX Gateway** | Optional rate limiting with per-user or per-group API keys and per-model concurrency |
+| **SQLite** | Persistent storage for sandbox records, groups, users, events, and settings |
 
 ### Network Modes (auto-detected)
 
@@ -141,10 +148,26 @@ or `thon.yaml`. When a sandbox is recreated, the same PVC volume is reattached.
 
 ### SSL/TLS
 
-- **mkcert** (preferred): CA-trusted certs, filename includes IP hash
-- **openssl** (fallback): Self-signed certs with IP in SAN
-- Single shared cert for all instances on port 443
-- CA cert served at `https://<ip>/ca.crt` for remote clients
+| Provider | Description | Best For |
+|----------|-------------|----------|
+| **auto** (default) | Tries mkcert → certbot → openssl in order | Most setups |
+| **certbot** | Let's Encrypt certificates | Production with domain |
+| **mkcert** | CA-trusted certs, filename includes IP hash | Development |
+| **openssl** | Self-signed certs with IP/domain in SAN | Fallback |
+
+When a domain is configured (`nginx.domain` in `thon.yaml`), nginx uses it as
+`server_name` and Let's Encrypt is preferred for CA-trusted certificates.
+CA cert served at `https://<ip>/ca.crt` for remote clients.
+
+### URL Display
+
+| URL Type | Format | Priority |
+|----------|--------|----------|
+| Domain URL | `https://{domain}/{endpoint_path}/` | Highest (when domain configured) |
+| Public URL | `https://{ip}/{endpoint_path}/` | Medium (via external IP) |
+| Local URL | `http://127.0.0.1:{port}/` | Lowest (local access) |
+
+`InstanceInfo.url` computed property: `domain_url` > `public_url` > `local_url`.
 
 ## thon CLI Reference
 
@@ -154,29 +177,63 @@ python -m thon COMMAND [OPTIONS]
 
 | Command | Description |
 |---------|-------------|
+| `thon install` | Install system prerequisites (run once) |
 | `thon init` | Interactive setup wizard (creates `thon.yaml`) |
-| `thon setup` | Install prerequisites + configure from `thon.yaml` |
-| `thon run` | Start VS Code instances from `thon.yaml` |
+| `thon setup` | Configure services from `thon.yaml` |
+| `thon gateway` | Apply APISIX gateway config only |
+| `thon run` | Start the API server (FastAPI) |
+| `thon launch` | Launch VS Code instances (batch mode) |
 | `thon config show` | Display current config |
 | `thon config env` | Export config as `.env` file |
 | `thon config validate` | Validate `thon.yaml` |
+| `thon nginx sync` | Regenerate nginx config from active instances |
+| `thon nginx cleanup` | Remove all THON nginx configs |
 | `thon cleanup` | Tear down all resources |
 
 | Global Option | Default | Description |
 |--------------|---------|-------------|
-| `--config PATH` | ./thon.yaml | Path to config file |
+| `--config PATH` | ~/.thon/thon.yaml | Path to config file |
+
+### install Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--non-interactive` | Install all optional components without prompting | `false` |
+| `--with-apisix` | Install APISIX AI Gateway packages | `false` |
+| `--with-lemonade` | Install Lemonade server packages | `false` |
+| `--ssl-dir DIR` | SSL certificate directory | `/etc/nginx/ssl` |
+
+### run Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--log-level LEVEL` | Log level (DEBUG, INFO, WARNING, ERROR) | From `thon.yaml` or `INFO` |
+
+### launch Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--group GROUP` | Launch only this group | (all groups) |
+| `--demo` | Create default workspace when no groups configured | `false` |
 
 ### Examples
 
 ```bash
-python -m thon init                          # Interactive setup wizard
-python -m thon init --non-interactive        # CI-friendly defaults
-python -m thon setup                         # Install + configure
-python -m thon run                           # Start instances
-python -m thon run --group alpha             # Start one group
-python -m thon config validate               # Check config
-python -m thon config env --output .env      # Export .env
-python -m thon cleanup                       # Tear down
+python -m thon install                          # Install prerequisites
+python -m thon install --with-apisix             # Install with AI Gateway
+python -m thon init                              # Interactive setup wizard
+python -m thon init --non-interactive            # CI-friendly defaults
+python -m thon setup                             # Install + configure
+python -m thon run                               # Start API server
+python -m thon run --log-level DEBUG             # With debug logging
+python -m thon launch                            # Start instances
+python -m thon launch --group alpha              # Start one group
+python -m thon launch --demo                     # Demo mode
+python -m thon config validate                   # Check config
+python -m thon config env --output .env          # Export .env
+python -m thon nginx sync                        # Sync nginx configs
+python -m thon nginx cleanup                     # Remove nginx configs
+python -m thon cleanup                           # Tear down
 ```
 
 ## main.py CLI Reference
@@ -246,6 +303,15 @@ python ./scripts/main.py [OPTIONS]
 | `--gateway-rate-limit N` | Token limit per consumer per time window | `500` |
 | `--gateway-time-window N` | Rate limit time window in seconds | `60` |
 
+### Langfuse Observability
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--langfuse` | Enable Langfuse LLM tracing | `false` |
+| `--langfuse-public-key KEY` | Langfuse public key | (none) |
+| `--langfuse-secret-key KEY` | Langfuse secret key | (none) |
+| `--langfuse-base-url URL` | Langfuse API base URL | `https://cloud.langfuse.com` |
+
 ### Maintenance
 
 | Option | Description | Default |
@@ -288,6 +354,9 @@ python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --
 # With AI Gateway + Redis rate limiting
 python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --gateway --gateway-redis-host 127.0.0.1
 
+# With Langfuse LLM observability
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc --langfuse
+
 # With custom VS Code settings
 python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --vscode-settings vscode-settings.jsonc
 
@@ -297,15 +366,15 @@ python ./scripts/main.py --cleanup
 
 ## Dashboard
 
-THON includes a Streamlit-based web dashboard for managing VS Code sandbox instances,
-groups, Lemonade Server, and AI Gateway. The FastAPI REST API provides Swagger UI
-for programmatic access.
+THON includes a Streamlit-based web dashboard with 7 pages for managing VS Code sandbox
+instances, groups, users, workspaces, Lemonade Server, and AI Gateway. The FastAPI REST
+API provides Swagger UI for programmatic access.
 
 ### Quick Start
 
 ```bash
 # Install dependencies
-pip install streamlit pandas
+pip install streamlit pandas fastapi uvicorn pydantic sqlmodel sqlalchemy
 
 # Run the dashboard
 streamlit run dashboard/streamlit_app.py --server.port 8501
@@ -316,7 +385,7 @@ streamlit run dashboard/streamlit_app.py --server.port 8501
 Optionally run the FastAPI REST API for programmatic access:
 
 ```bash
-python -m app.main
+python -m thon run
 # API docs at http://localhost:8100/docs
 ```
 
@@ -326,7 +395,9 @@ python -m app.main
 |------|----------|
 | **Instances** | List, search/filter, create, pause/resume/kill, bulk actions, recreate with PVC volume |
 | **Groups** | CRUD groups/users, transfer users, start per-user/group instances with PVC workspaces |
-| **Lemonade Server** | Status, health, performance, slots, system info, available models |
+| **Users** | List, search, create/edit users with email, launch/stop per-user instances |
+| **Workspaces** | Overview of workspace volumes and mount status |
+| **Lemonade Server** | Status, health, performance, slots, system info, available models, dynamic rescale |
 | **AI Gateway** | Configure, setup, manage consumers, cleanup, mode/rate limit settings |
 | **Settings** | External IP, configuration file management (upload/edit/delete from DB) |
 
@@ -358,7 +429,7 @@ bash ./scripts/setup-lemonade.sh \
 Or use the Python wrapper:
 
 ```bash
-python ./lemonade_server.py run \
+python ./scripts/lemonade_server.py run \
     --groups groups.yaml --generate-keys --external-ip 1.2.3.4
 ```
 
@@ -376,6 +447,18 @@ sudo systemctl status lemonade-server
 sudo systemctl stop lemonade-server
 sudo systemctl restart lemonade-server
 sudo journalctl -u lemonade-server -f
+```
+
+### Dynamic Rescaling
+
+Adjust context size and parallel slots without restarting the server:
+
+```bash
+# Via CLI
+python ./scripts/lemonade_server.py rescale --num-users 8
+
+# Via API
+curl -X POST http://localhost:8100/api/lemonade/rescale?num_users=8
 ```
 
 ### Configuration
@@ -446,12 +529,20 @@ config uses `prefer_system: true` with `rocm_bin: /usr/local/bin/llama-server` b
 
 ### Kilo Code Integration
 
+Three deployment modes for kilo.jsonc:
+
+| Mode | CLI Flag | Kilo Points To |
+|------|----------|----------------|
+| **lemonade-direct** | `--lemonade kilo.jsonc` | Lemonade server directly |
+| **gateway-per-user** | `--gateway` | APISIX gateway (per-user API key) |
+| **gateway-per-group** | `--gateway --gateway-per-group` | APISIX gateway (shared group API key) |
+
 1. `setup-lemonade.sh --generate-keys` creates API keys and writes `kilo.jsonc`
-2. `kilo.jsonc` contains: provider (`lemonade`), base URL, API key, model ID (`user.gemma-4-31b-it`),
-   `experimental` flags, and `indexing` config for semantic code search
-3. Base URL resolution: `--external-ip` > Docker bridge gateway > `localhost`
-4. `main.py --lemonade kilo.jsonc` injects config into each sandbox at `/home/vscode/.config/kilo/config.json`
-5. Kilo Code reads the config and connects to the Lemonade server
+2. `kilo.jsonc` is built by deep-merging `config/kilo.jsonc.skeleton` with dynamic fields
+3. Template variables substituted per-user: `$THON_USERNAME`, `$THON_USER_EMAIL`, `$WORKSPACE`
+4. Base URL resolution: `--external-ip` > Docker bridge gateway > `localhost`
+5. `main.py --lemonade kilo.jsonc` injects config into each sandbox at `/home/vscode/.config/kilo/config.json`
+6. Kilo Code reads the config and connects to the Lemonade server
 
 ### Full Workflow
 
@@ -475,6 +566,13 @@ for LLM endpoints. Creates two routes: `/v1/chat/completions` (ai-proxy-multi) a
 |------|-------------|----------|
 | **per-user** (default) | Each user gets own API key and rate limit | Individual accountability |
 | **per-group** | Each group shares one API key with combined limit (`rate_limit × num_users`) | Team-based, shared capacity |
+
+### Rate Limit Scopes
+
+| Scope | Description |
+|-------|-------------|
+| **per-user** | Uniform limits across all models |
+| **per-model** | Different concurrency/token limits per model via `model_concurrency` list |
 
 ### Setup
 
@@ -546,7 +644,7 @@ AUTH_ENABLED=true \
 AUTH_SESSION_SECRET=$(openssl rand -hex 32) \
 AUTH_GITHUB_CLIENT_ID=xxx \
 AUTH_GITHUB_CLIENT_SECRET=xxx \
-python -m app.main
+python -m thon run
 ```
 
 ## REST API Endpoints
@@ -559,6 +657,7 @@ The FastAPI REST API on port 8100 provides Swagger UI at `/docs`.
 |--------|------|-------------|
 | `GET` | `/api/instances` | List instances (filter by state, paginate) |
 | `POST` | `/api/instances` | Create new instance |
+| `GET` | `/api/instances/{id}` | Get instance details |
 | `POST` | `/api/instances/{id}/pause` | Pause instance |
 | `POST` | `/api/instances/{id}/resume` | Resume instance |
 | `DELETE` | `/api/instances/{id}` | Terminate instance |
@@ -580,6 +679,18 @@ The FastAPI REST API on port 8100 provides Swagger UI at `/docs`.
 | `DELETE` | `/api/groups/{group_id}/users/{user_id}` | Delete a user |
 | `POST` | `/api/groups/{group_id}/users/{user_id}/transfer` | Transfer user to another group |
 
+### Users
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/users` | List all users |
+| `POST` | `/api/users` | Create a user |
+| `GET` | `/api/users/{user_id}` | Get user details |
+| `PUT` | `/api/users/{user_id}` | Update user |
+| `DELETE` | `/api/users/{user_id}` | Delete user |
+| `POST` | `/api/users/{user_id}/launch` | Launch sandbox instance for user |
+| `POST` | `/api/users/{user_id}/stop` | Stop user's sandbox instance |
+
 ### Config Files
 
 | Method | Path | Description |
@@ -596,12 +707,23 @@ The FastAPI REST API on port 8100 provides Swagger UI at `/docs`.
 |--------|------|-------------|
 | `GET` | `/api/lemonade/status` | Server status |
 | `GET` | `/api/lemonade/models` | Available models |
+| `GET` | `/api/lemonade/api-info` | API endpoint info |
 | `GET` | `/api/lemonade/health` | Proxy: server health |
 | `GET` | `/api/lemonade/stats` | Proxy: performance stats |
+| `GET` | `/api/lemonade/system-info` | Proxy: hardware details |
+| `GET` | `/api/lemonade/live` | Proxy: liveness probe |
 | `GET` | `/api/lemonade/slots` | Proxy: slot states |
+| `POST` | `/api/lemonade/slots/{id}/save` | Proxy: save slot cache |
+| `POST` | `/api/lemonade/slots/{id}/restore` | Proxy: restore slot cache |
+| `POST` | `/api/lemonade/slots/{id}/erase` | Proxy: erase slot cache |
 | `POST` | `/api/lemonade/pull` | Proxy: pull a model |
+| `GET` | `/api/lemonade/pull/variants` | Proxy: GGUF variants for a checkpoint |
+| `POST` | `/api/lemonade/delete` | Proxy: delete a model |
 | `POST` | `/api/lemonade/load` | Proxy: load a model |
 | `POST` | `/api/lemonade/unload` | Proxy: unload a model |
+| `POST` | `/api/lemonade/install` | Proxy: install a backend |
+| `POST` | `/api/lemonade/uninstall` | Proxy: remove a backend |
+| `POST` | `/api/lemonade/rescale` | Dynamic rescale (adjust ctx_size/np for user count) |
 
 ### Gateway
 
@@ -612,7 +734,17 @@ The FastAPI REST API on port 8100 provides Swagger UI at `/docs`.
 | `POST` | `/api/gateway/consumers` | Create consumer |
 | `DELETE` | `/api/gateway/consumers/{username}` | Delete consumer |
 | `POST` | `/api/gateway/setup` | Full setup |
+| `POST` | `/api/gateway/route` | Create/update AI proxy route |
+| `DELETE` | `/api/gateway/route` | Delete AI proxy route |
 | `POST` | `/api/gateway/cleanup` | Remove all consumers and routes |
+
+### Nginx
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/nginx/status` | Nginx status |
+| `POST` | `/api/nginx/sync` | Regenerate nginx config from active instances |
+| `POST` | `/api/nginx/cleanup` | Remove all THON nginx configs |
 
 ### Auth
 
@@ -632,8 +764,8 @@ The FastAPI REST API on port 8100 provides Swagger UI at `/docs`.
 SecurityError: Failed to register a ServiceWorker — An SSL certificate error occurred
 ```
 
-**Fix**: Use mkcert CA-trusted certs. Remote clients must download and import the
-CA root from `https://<ip>/ca.crt`.
+**Fix**: Use mkcert CA-trusted certs or Let's Encrypt. Remote clients must download and
+import the CA root from `https://<ip>/ca.crt`.
 
 ### Bad Gateway (502)
 
@@ -665,7 +797,15 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 | `SANDBOX_DOMAIN` | Sandbox server address | `localhost:8080` |
 | `SANDBOX_API_KEY` | Sandbox API key | (none) |
 | `SANDBOX_IMAGE` | Docker image | `waterpistol/thon:latest` |
-| `PYTHON_VERSION` | Python version in sandbox | `3.11` |
+| `THON_DB_PATH` | SQLite database path | `~/.thon/thon.db` |
+| `THON_WORKSPACE_DIR` | Workspace directory for groups | `~/.thon/workspace` |
+| `THON_DOMAIN` | Domain name for nginx and Let's Encrypt | (none) |
+| `THON_SSL_PROVIDER` | SSL provider: auto, certbot, mkcert, openssl | `auto` |
+| `THON_CERTBOT_EMAIL` | Email for Let's Encrypt registration | (none) |
+| `THON_KILO_CONFIG` | Path to kilo.jsonc | (none) |
+| `THON_VSCODE_SETTINGS` | Path to VS Code settings file | (none) |
+| `THON_LOG_LEVEL` | Logging level | `INFO` |
+| `PYTHON_VERSION` | Python version in sandbox | `3.12` |
 
 ### Lemonade Server
 
@@ -682,11 +822,16 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 |----------|-------------|---------|
 | `GATEWAY_ENABLED` | Enable AI Gateway | `false` |
 | `GATEWAY_ADMIN_URL` | APISIX Admin API URL | `http://127.0.0.1:9180` |
+| `GATEWAY_ADMIN_KEY` | APISIX Admin API key | (auto-detected) |
 | `GATEWAY_PROXY_PORT` | APISIX proxy port | `9080` |
 | `GATEWAY_REDIS_HOST` | Redis host for rate limiting | (none) |
+| `GATEWAY_REDIS_PORT` | Redis port | `6379` |
+| `GATEWAY_REDIS_PASSWORD` | Redis password | (none) |
 | `GATEWAY_RATE_LIMIT_TOKENS` | Token limit per consumer per window | `500` |
 | `GATEWAY_RATE_LIMIT_WINDOW` | Rate limit time window in seconds | `60` |
 | `GATEWAY_MODE` | Consumer mode: `per-user` or `per-group` | `per-user` |
+| `GATEWAY_RATE_LIMIT_SCOPE` | Rate limit scope: `per-user` or `per-model` | `per-user` |
+| `GATEWAY_CONCURRENCY_LIMIT` | Concurrency limit per consumer | `1` |
 
 ### Dashboard & Database
 
@@ -694,8 +839,8 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 |----------|-------------|---------|
 | `DASHBOARD_HOST` | FastAPI bind address | `0.0.0.0` |
 | `DASHBOARD_PORT` | FastAPI port | `8100` |
-| `THON_DB_PATH` | SQLite database path | `~/.thon/thon.db` |
-| `THON_WORKSPACE_DIR` | Workspace directory for groups | `~/.thon/workspace` |
+| `DASHBOARD_SECRET_KEY` | FastAPI secret key | (none) |
+| `DASHBOARD_DEBUG` | Enable debug/reload mode | `false` |
 
 ### Authentication
 
@@ -711,7 +856,26 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 | `AUTH_LINKEDIN_CLIENT_ID` | LinkedIn OIDC client ID | (none) |
 | `AUTH_LINKEDIN_CLIENT_SECRET` | LinkedIn OIDC client secret | (none) |
 
+### Langfuse
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LANGFUSE_ENABLED` | Enable Langfuse observability | `false` |
+| `LANGFUSE_PUBLIC_KEY` | Langfuse public key | (none) |
+| `LANGFUSE_SECRET_KEY` | Langfuse secret key | (none) |
+| `LANGFUSE_BASEURL` | Langfuse API base URL | `https://cloud.langfuse.com` |
+
 ## File Map
+
+### Unified CLI
+
+| File | Purpose |
+|------|---------|
+| `thon/__main__.py` | Entry point: delegates to `thon.cli.main()` |
+| `thon/cli.py` | Unified CLI: install, init, setup, gateway, run, launch, config, nginx, cleanup |
+| `thon/config.py` | `ThonConfig` + 14 Pydantic settings models (thon.yaml schema) |
+| `thon/install.py` | System package installer (config-free phase) |
+| `thon/interactive.py` | Init wizard with 12 interactive steps |
 
 ### Legacy CLI
 
@@ -720,17 +884,11 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 | `main.py` | Entry point; CLI; groups; sandbox orchestration; kilo.jsonc injection |
 | `scripts/setup.sh` | One-time host prerequisite installation |
 | `scripts/nginx_config.py` | Per-port nginx config generation |
-| `scripts/ssl_cert.py` | SSL certificate generation (mkcert/openssl) |
-| `scripts/lemonade_server.py` | Lemonade server manager (Python CLI) |
+| `scripts/ssl_cert.py` | SSL certificate generation (4 providers: auto, certbot, mkcert, openssl) |
+| `scripts/lemonade_server.py` | Lemonade server manager (Python CLI with rescale subcommand) |
 | `scripts/setup-lemonade.sh` | All-in-one Lemonade setup (shell, recommended) |
-| `scripts/apisix_gateway.py` | APISIX AI Gateway manager |
+| `scripts/apisix_gateway.py` | APISIX AI Gateway manager with per-model concurrency |
 | `scripts/build-amd-mi300x-llama-server.sh` | Build llama.cpp for AMD MI300X (gfx942) |
-
-### Unified CLI
-
-| File | Purpose |
-|------|---------|
-| `thon/` | Unified `thon` CLI package (`python -m thon init`, `python -m thon setup`, `python -m thon run`, `python -m thon config`) |
 
 ### Dashboard Application
 
@@ -738,11 +896,21 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 |------|---------|
 | `app/main.py` | FastAPI application entry point; lifespan; route mounting |
 | `app/config.py` | `AppConfig` — loaded from environment variables |
-| `app/models.py` | Pydantic domain models |
+| `app/models.py` | Pydantic domain models (InstanceInfo, InstanceState, UserInfo, etc.) |
+| `app/db.py` | SQLite persistence (5 tables: sandbox_records, app_settings, event_records, group_records, user_records) |
+| `app/nginx_service.py` | Combined nginx config generator for API server |
+| `app/kilo_config.py` | Kilo config generation with skeleton merging |
 | `app/services/sandbox_service.py` | `SandboxService` — fleet CRUD operations |
-| `app/services/lemonade_service.py` | `LemonadeService` — server status monitoring |
+| `app/services/lemonade_service.py` | `LemonadeService` — server status, rescaling |
+| `app/services/groups_service.py` | `GroupsService` — group/user CRUD with Docker volume management |
+| `app/services/apisix_service.py` | `ApisixService` — APISIX Admin API wrapper |
 | `app/api/routes/instances.py` | REST API: instance endpoints |
-| `app/api/routes/lemonade.py` | REST API: Lemonade endpoints |
+| `app/api/routes/lemonade.py` | REST API: Lemonade endpoints (including rescale) |
+| `app/api/routes/groups.py` | REST API: groups CRUD, events, export |
+| `app/api/routes/users.py` | REST API: users CRUD, launch/stop |
+| `app/api/routes/gateway.py` | REST API: gateway management |
+| `app/api/routes/config_files.py` | REST API: config file CRUD |
+| `app/api/routes/nginx.py` | REST API: nginx sync/cleanup/status |
 | `app/api/routes/auth.py` | REST API: OIDC/OAuth2 endpoints |
 | `app/auth/providers.py` | OIDC/OAuth2 provider implementations |
 | `app/auth/sessions.py` | `SessionStore` — HMAC-signed session management |
@@ -751,8 +919,22 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 
 | File | Purpose |
 |------|---------|
-| `dashboard/streamlit_app.py` | Streamlit dashboard: 5 pages with sidebar navigation |
+| `dashboard/streamlit_app.py` | Streamlit dashboard: 7 pages with sidebar navigation |
 | `dashboard/streamlit_styles.py` | Dark theme CSS injection |
+
+### Development Tools
+
+| File | Purpose |
+|------|---------|
+| `development-tools/azure/bootstrap-ephemeral.sh` | NVMe disk bootstrap for Azure ephemeral storage |
+| `development-tools/azure/ephemeral-setup.service` | systemd unit for boot-time NVMe setup |
+| `development-tools/azure/README.md` | Azure ephemeral NVMe orchestration docs |
+
+### Documentation Site
+
+| File | Purpose |
+|------|---------|
+| `fumadocs/` | Next.js + Fumadocs documentation site |
 
 ### Config
 
@@ -760,5 +942,7 @@ Lemonade manages these arguments internally and rejects them in `llamacpp_args`:
 |------|---------|
 | `config/groups.yaml.example` | Groups and users configuration template |
 | `config/kilo.jsonc.example` | Kilo Code config template |
+| `config/kilo.jsonc.skeleton` | Base kilo.jsonc with experimental flags, permissions, MCP, indexing |
 | `config/vscode-settings.jsonc.example` | VS Code settings template |
-| `Dockerfile` | Sandbox image: python:3.12-slim + code-server |
+| `config/extensions.txt` | VS Code extensions list for Docker image |
+| `Dockerfile` | Sandbox image: ubuntu:24.04 + Node.js 24 + JRE + .NET 10 + Chromium + Open VSX |

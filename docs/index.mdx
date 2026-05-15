@@ -11,18 +11,20 @@ via Lemonade Server.
 
 ## Features
 
-- **Unified CLI**: `thon init`, `thon setup`, `thon run` — one config file (`thon.yaml`) for everything
+- **Unified CLI**: `thon install`, `thon init`, `thon setup`, `thon run`, `thon launch` — one config file (`thon.yaml`) for everything
 - **Multi-Instance**: Multiple concurrent VS Code sandboxes from a single command
 - **Groups-Based**: Define users and groups in YAML or manage via dashboard
-- **Web Dashboard**: Streamlit dashboard for instance, group, Lemonade, and gateway management
-- **SSL/TLS**: Automatic nginx reverse proxy with mkcert or openssl certificates
+- **Web Dashboard**: Streamlit dashboard with 7 pages for instance, group, user, workspace, Lemonade, gateway, and settings management
+- **SSL/TLS**: Automatic nginx reverse proxy with 4 SSL providers (auto, certbot, mkcert, openssl)
+- **Domain Support**: Let's Encrypt certificates and domain-based URLs for production
 - **Persistent Workspaces**: PVC Docker volumes or host bind mounts for workspace persistence
-- **Local LLM**: Optional Lemonade Server integration for local inference
+- **Local LLM**: Optional Lemonade Server integration for local inference with dynamic rescaling
 - **Semantic Indexing**: Embedding model for Kilo Code's semantic code search
-- **AI Gateway**: Optional APISIX gateway with per-user or per-group rate limiting and API keys
+- **AI Gateway**: Optional APISIX gateway with per-user or per-group rate limiting, per-model concurrency, and API keys
 - **Authentication**: Local password for dashboard; OIDC/OAuth2 (GitHub, GitLab, LinkedIn) for REST API
 - **Config Files**: Store and manage groups YAML, kilo.jsonc, and VS Code settings in the database
-- **Kilo Code Ready**: Auto-generated config with experimental flags and indexing for Kilo Code
+- **Kilo Code Ready**: Auto-generated config with skeleton merging, experimental flags, and indexing
+- **LLM Observability**: Optional Langfuse integration for tracing LLM calls
 
 ## Quick Start
 
@@ -59,8 +61,11 @@ This creates a `thon.yaml` config file with all settings.
 # Install prerequisites and configure all components
 python -m thon setup
 
-# Start VS Code instances
+# Start the API server (FastAPI on :8100)
 python -m thon run
+
+# Launch VS Code instances (batch mode from thon.yaml)
+python -m thon launch
 ```
 
 Alternatively, use `main.py` directly:
@@ -109,14 +114,15 @@ Each user gets their own VS Code sandbox at `https://<ip>/<endpoint_path>/`.
 
 | Component | Role |
 |-----------|------|
-| **thon CLI** | Unified entry point: `thon init`, `thon setup`, `thon run`, `thon config` |
+| **thon CLI** | Unified entry point: `thon install`, `thon init`, `thon setup`, `thon run`, `thon launch`, `thon config`, `thon nginx`, `thon gateway`, `thon cleanup` |
 | **main.py** | Orchestrates sandbox creation, nginx configs, workspace setup |
-| **Streamlit Dashboard** | Web UI for instance, group, Lemonade, and gateway management (:8501) |
-| **FastAPI REST API** | Programmatic API for instances, groups, Lemonade, gateway, auth (:8100) |
-| **nginx** | SSL termination + WebSocket proxy (per-port server blocks) |
+| **Streamlit Dashboard** | Web UI with 7 pages for instance, group, user, workspace, Lemonade, gateway, and settings management (:8501) |
+| **FastAPI REST API** | Programmatic API for instances, groups, users, Lemonade, gateway, auth, nginx, config files (:8100) |
+| **nginx** | SSL termination + WebSocket proxy (per-port or combined config) |
 | **code-server** | VS Code in the browser, runs HTTP inside each sandbox |
-| **Lemonade Server** | Optional local LLM inference (chat + embedding models) |
-| **APISIX Gateway** | Optional rate limiting with per-user or per-group API keys |
+| **Lemonade Server** | Optional local LLM inference (chat + embedding models) with dynamic rescaling |
+| **APISIX Gateway** | Optional rate limiting with per-user or per-group API keys and per-model concurrency |
+| **SQLite** | Persistent storage for sandbox records, groups, users, events, and settings |
 
 ### Network Modes
 
@@ -138,11 +144,34 @@ Network mode is **auto-detected** from the server-returned endpoint format:
 PVC volumes are created automatically when users are imported via the dashboard
 or `thon.yaml`. When a sandbox is recreated, the same PVC volume is reattached.
 
+### SSL/TLS
+
+| Provider | Description | Best For |
+|----------|-------------|----------|
+| **auto** (default) | Tries mkcert → certbot → openssl in order | Most setups |
+| **certbot** | Let's Encrypt certificates | Production with domain |
+| **mkcert** | CA-trusted certs, filename includes IP hash | Development |
+| **openssl** | Self-signed certs with IP/domain in SAN | Fallback |
+
+When a domain is configured (`nginx.domain` in `thon.yaml`), nginx uses it as
+`server_name` and Let's Encrypt is preferred for CA-trusted certificates.
+CA cert served at `https://<ip>/ca.crt` for remote clients.
+
+### URL Display
+
+| URL Type | Format | Priority |
+|----------|--------|----------|
+| Domain URL | `https://{domain}/{endpoint_path}/` | Highest (when domain configured) |
+| Public URL | `https://{ip}/{endpoint_path}/` | Medium (via external IP) |
+| Local URL | `http://127.0.0.1:{port}/` | Lowest (local access) |
+
+`InstanceInfo.url` computed property: `domain_url` > `public_url` > `local_url`.
+
 ## Next Steps
 
 - [Installation Guide](./installation) - Detailed setup instructions
-- [Dashboard](./dashboard) - Streamlit web dashboard for instance management
-- [Lemonade Server](./lemonade-server) - Local LLM inference setup
-- [AI Gateway](./gateway) - APISIX rate limiting and API key management
+- [Dashboard](./dashboard) - Streamlit web dashboard with 7 pages
+- [Lemonade Server](./lemonade-server) - Local LLM inference with dynamic rescaling
+- [AI Gateway](./gateway) - APISIX rate limiting, per-model concurrency, and API key management
 - [Configuration](./configuration) - Full configuration reference
 - [CLI Reference](./cli-reference) - Command-line options

@@ -20,19 +20,40 @@ and instance management. It reads from a single `thon.yaml` config file.
 
 | Command | Description |
 |---------|-------------|
+| `thon install` | Install system prerequisites (run once) |
 | `thon init` | Interactive setup wizard (creates `thon.yaml`) |
-| `thon setup` | Install prerequisites + configure from `thon.yaml` |
-| `thon run` | Start VS Code instances from `thon.yaml` |
+| `thon setup` | Configure services from `thon.yaml` |
+| `thon gateway` | Apply APISIX gateway config only |
+| `thon run` | Start the API server (FastAPI) |
+| `thon launch` | Launch VS Code instances (batch mode) |
 | `thon config show` | Display current config |
 | `thon config env` | Export config as `.env` file |
 | `thon config validate` | Validate `thon.yaml` |
+| `thon nginx sync` | Regenerate nginx config from active instances |
+| `thon nginx cleanup` | Remove all THON nginx configs |
 | `thon cleanup` | Tear down all resources |
 
 ### Global Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--config PATH` | ./thon.yaml | Path to `thon.yaml` config file |
+| `--config PATH` | ~/.thon/thon.yaml | Path to `thon.yaml` config file |
+
+### install
+
+```bash
+python -m thon install [OPTIONS]
+```
+
+Installs system prerequisites (python3, nginx, docker.io, mkcert, openssl).
+This is the config-free phase — run once before `thon init`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--non-interactive` | false | Install all optional components without prompting |
+| `--with-apisix` | false | Install APISIX AI Gateway packages |
+| `--with-lemonade` | false | Install Lemonade server packages |
+| `--ssl-dir DIR` | /etc/nginx/ssl | SSL certificate directory |
 
 ### init
 
@@ -46,7 +67,7 @@ sensible defaults, validates choices, and writes a `thon.yaml` config file.
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--non-interactive` | false | Generate config with defaults (no prompts) |
-| `--config PATH` | ./thon.yaml | Output path for config file |
+| `--config PATH` | ~/.thon/thon.yaml | Output path for config file |
 
 ### setup
 
@@ -56,12 +77,19 @@ python -m thon setup [OPTIONS]
 
 Installs system prerequisites and configures all components from `thon.yaml`:
 
-1. System prerequisites (`setup.sh`)
-2. SSL directory
-3. Lemonade Server (if `lemonade.enabled`)
-4. AI Gateway (if `gateway.enabled`)
-5. `.env` file generation
-6. Summary
+1. SSL directory and certificates (with certbot fallback for domains)
+2. Lemonade Server (if `lemonade.enabled`)
+3. AI Gateway (if `gateway.enabled`)
+4. `.env` file generation
+
+### gateway
+
+```bash
+python -m thon gateway
+```
+
+Apply APISIX gateway configuration only (consumers + routes) from `thon.yaml`.
+Useful for re-applying gateway config after changes without running full setup.
 
 ### run
 
@@ -69,12 +97,26 @@ Installs system prerequisites and configures all components from `thon.yaml`:
 python -m thon run [OPTIONS]
 ```
 
-Starts VS Code instances from `thon.yaml`. Delegates to `scripts/main.py`.
+Starts the FastAPI API server. Provides Swagger UI at `/docs`.
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--group GROUP` | (all) | Run only this group |
-| `--config PATH` | ./thon.yaml | Path to config file |
+| `--log-level LEVEL` | From `thon.yaml` or `INFO` | Log level (DEBUG, INFO, WARNING, ERROR) |
+| `--config PATH` | ~/.thon/thon.yaml | Path to config file |
+
+### launch
+
+```bash
+python -m thon launch [OPTIONS]
+```
+
+Launches VS Code instances from `thon.yaml` in batch mode. Delegates to `scripts/main.py`.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--group GROUP` | (all) | Launch only this group |
+| `--demo` | false | Create default workspace when no groups configured |
+| `--config PATH` | ~/.thon/thon.yaml | Path to config file |
 
 ### config show
 
@@ -104,6 +146,23 @@ thon config validate [OPTIONS]
 
 Validates `thon.yaml` for common errors (missing groups, auth without providers, etc.).
 
+### nginx sync
+
+```bash
+python -m thon nginx sync
+```
+
+Regenerates the combined nginx config from active instances. Uses
+`app/nginx_service.py` (single combined config) approach.
+
+### nginx cleanup
+
+```bash
+python -m thon nginx cleanup
+```
+
+Removes all THON nginx configs and reloads nginx.
+
 ### cleanup
 
 ```bash
@@ -121,20 +180,44 @@ python -m thon init
 # Non-interactive (CI-friendly)
 python -m thon init --non-interactive
 
+# Install prerequisites
+python -m thon install
+
+# Install with optional components
+python -m thon install --with-apisix --with-lemonade
+
 # Install prerequisites and configure
 python -m thon setup
 
-# Start instances
+# Start API server
 python -m thon run
 
-# Start only one group
-python -m thon run --group alpha
+# Start API server with debug logging
+python -m thon run --log-level DEBUG
+
+# Launch instances
+python -m thon launch
+
+# Launch only one group
+python -m thon launch --group alpha
+
+# Launch in demo mode
+python -m thon launch --demo
+
+# Apply gateway config only
+python -m thon gateway
 
 # Validate config
 python -m thon config validate
 
 # Export .env file
 python -m thon config env --output .env
+
+# Sync nginx configs
+python -m thon nginx sync
+
+# Remove nginx configs
+python -m thon nginx cleanup
 
 # Clean up all resources
 python -m thon cleanup
@@ -174,7 +257,7 @@ python ./scripts/main.py [OPTIONS]
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `--image IMAGE` | string | waterpistol/thon:latest | Docker image for sandbox |
-| `--python-version VER` | string | 3.11 | Python version in sandbox |
+| `--python-version VER` | string | 3.12 | Python version in sandbox |
 
 #### Security
 
@@ -212,6 +295,15 @@ python ./scripts/main.py [OPTIONS]
 | `--gateway-redis-host HOST` | string | (none) | Redis host for shared rate limiting |
 | `--gateway-rate-limit N` | int | 500 | Token limit per consumer per time window |
 | `--gateway-time-window N` | int | 60 | Rate limit time window in seconds |
+
+#### Langfuse Observability
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `--langfuse` | flag | false | Enable Langfuse LLM observability |
+| `--langfuse-public-key KEY` | string | (none) | Langfuse public key |
+| `--langfuse-secret-key KEY` | string | (none) | Langfuse secret key |
+| `--langfuse-base-url URL` | string | https://cloud.langfuse.com | Langfuse API base URL |
 
 #### Maintenance
 
@@ -424,6 +516,7 @@ python ./lemonade_server.py COMMAND [OPTIONS]
 | `status` | Check server status |
 | `pull` | Pull a model to local cache |
 | `run` | Full setup + keep alive |
+| `rescale` | Dynamic rescale ctx_size/np for user count |
 | `count-users` | Count users from groups.yaml |
 | `write-model-configs` | Write user_models.json and recipe_options.json |
 | `generate-kilo-config` | Generate kilo.jsonc for Kilo Code |
@@ -436,6 +529,19 @@ python lemonade_server.py install
 ```
 
 Installs lemonade-server from PPA.
+
+### rescale
+
+```bash
+python lemonade_server.py rescale --num-users N
+```
+
+Dynamically adjust context size and parallel slots without restarting the server.
+Rewrites `recipe_options.json` and reloads models.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--num-users N` | (required) | Number of parallel users |
 
 ### configure
 
@@ -564,7 +670,7 @@ python lemonade_server.py generate-kilo-config --admin-api-key YOUR_KEY --extern
 | `SANDBOX_DOMAIN` | localhost:8080 | Sandbox server address |
 | `SANDBOX_API_KEY` | (none) | Sandbox API key |
 | `SANDBOX_IMAGE` | waterpistol/thon:latest | Docker image |
-| `PYTHON_VERSION` | 3.11 | Python in sandbox |
+| `PYTHON_VERSION` | 3.12 | Python in sandbox |
 
 ### Lemonade Server
 
@@ -590,6 +696,8 @@ python lemonade_server.py generate-kilo-config --admin-api-key YOUR_KEY --extern
 | `GATEWAY_RATE_LIMIT_TOKENS` | Token limit per consumer per window |
 | `GATEWAY_RATE_LIMIT_WINDOW` | Time window in seconds |
 | `GATEWAY_MODE` | Consumer mode: per-user or per-group |
+| `GATEWAY_RATE_LIMIT_SCOPE` | Rate limit scope: per-user or per-model |
+| `GATEWAY_CONCURRENCY_LIMIT` | Concurrency limit per consumer |
 
 ### Database
 
@@ -597,6 +705,26 @@ python lemonade_server.py generate-kilo-config --admin-api-key YOUR_KEY --extern
 |----------|-------------|
 | `THON_DB_PATH` | SQLite database path (default: `~/.thon/thon.db`) |
 | `THON_WORKSPACE_DIR` | Workspace directory for groups |
+
+### SSL and Domain
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `THON_DOMAIN` | (none) | Domain name for nginx server_name and Let's Encrypt |
+| `THON_SSL_PROVIDER` | `auto` | SSL provider: auto, certbot, mkcert, openssl |
+| `THON_CERTBOT_EMAIL` | (none) | Email for Let's Encrypt registration |
+| `THON_KILO_CONFIG` | (none) | Path to kilo.jsonc |
+| `THON_VSCODE_SETTINGS` | (none) | Path to VS Code settings file |
+| `THON_LOG_LEVEL` | `INFO` | Logging level |
+
+### Langfuse Observability
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LANGFUSE_ENABLED` | `false` | Enable Langfuse observability |
+| `LANGFUSE_PUBLIC_KEY` | (none) | Langfuse public key |
+| `LANGFUSE_SECRET_KEY` | (none) | Langfuse secret key |
+| `LANGFUSE_BASEURL` | `https://cloud.langfuse.com` | Langfuse API base URL |
 
 ### Authentication
 

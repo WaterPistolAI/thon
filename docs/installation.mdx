@@ -9,7 +9,7 @@ description: Complete installation guide for THON - The Hackathon Organizer Node
 
 ### System Requirements
 
-- **OS**: Linux (Ubuntu 20.04+ recommended)
+- **OS**: Linux (Ubuntu 24.04+ recommended)
 - **Docker**: 20.10+ with Docker daemon running
 - **Python**: 3.10+
 - **Memory**: 4GB+ RAM (8GB+ recommended for multiple instances)
@@ -18,6 +18,8 @@ description: Complete installation guide for THON - The Hackathon Organizer Node
 ### Network Requirements
 
 - Ports 443 (nginx HTTPS) and 80 (nginx HTTP) available
+- Port 8100 for FastAPI REST API
+- Port 8501 for Streamlit dashboard
 - Port 13305 available for Lemonade Server (optional)
 - Port 9080 available for APISIX AI Gateway (optional)
 - Unique port per VS Code instance (starting from 8443 by default)
@@ -37,6 +39,12 @@ cd thon
 bash ./scripts/setup.sh
 ```
 
+Or use the unified CLI:
+
+```bash
+python -m thon install
+```
+
 This installs:
 - **python3** and pip
 - **nginx** web server
@@ -44,13 +52,23 @@ This installs:
 - **mkcert** for local CA certificates
 - **openssl** as SSL fallback
 
-#### With AI Gateway (Optional)
+#### With Optional Components
 
 ```bash
+# With AI Gateway
+python -m thon install --with-apisix
+
+# With Lemonade Server packages
+python -m thon install --with-lemonade
+
+# Both
+python -m thon install --with-apisix --with-lemonade
+
+# Or legacy method
 INSTALL_GATEWAY=true bash ./scripts/setup.sh
 ```
 
-Additionally installs:
+The `--with-apisix` flag additionally installs:
 - **apisix** API gateway
 - **etcd-server** configuration store for APISIX
 - **redis-server** for shared rate limiting
@@ -63,7 +81,11 @@ docker build -t waterpistol/thon:latest ./
 
 The image includes:
 - **code-server**: VS Code in the browser
-- **Python 3.12**: Development environment
+- **Node.js 24**: Runtime environment
+- **JRE**: Java development
+- **.NET SDK 10**: .NET development
+- **Chromium**: Browser automation
+- **Open VSX**: Extension marketplace
 - **Non-root user**: Security best practice
 
 ### 4. Configure THON
@@ -128,22 +150,35 @@ gateway:
 python -m thon setup
 ```
 
-This runs a 6-step process:
-1. System prerequisites (`setup.sh`)
-2. SSL directory
-3. Lemonade Server (if `lemonade.enabled`)
-4. AI Gateway (if `gateway.enabled`)
-5. `.env` file generation
-6. Summary
+This runs a 4-step process:
+1. SSL directory and certificates (with certbot fallback for domains)
+2. Lemonade Server (if `lemonade.enabled`)
+3. AI Gateway (if `gateway.enabled`)
+4. `.env` file generation
 
-### 6. Run VS Code Instances
+### 6. Start the API Server
+
+```bash
+# Start the FastAPI API server (Swagger UI at /docs)
+python -m thon run
+
+# With debug logging
+python -m thon run --log-level DEBUG
+```
+
+API docs available at `http://localhost:8100/docs`.
+
+### 7. Launch VS Code Instances
 
 ```bash
 # Start instances from thon.yaml
-python -m thon run
+python -m thon launch
 
 # Start only one group
-python -m thon run --group alpha
+python -m thon launch --group alpha
+
+# Demo mode (default workspace when no groups configured)
+python -m thon launch --demo
 ```
 
 Or use `main.py` directly for more control:
@@ -152,10 +187,10 @@ Or use `main.py` directly for more control:
 python ./scripts/main.py --groups groups.yaml --external-ip YOUR_EXTERNAL_IP
 ```
 
-### 7. Run the Dashboard (Optional)
+### 8. Run the Dashboard (Optional)
 
-The Streamlit dashboard provides a web UI for managing instances, groups,
-and monitoring the Lemonade server:
+The Streamlit dashboard provides a web UI with 7 pages for managing instances,
+groups, users, workspaces, Lemonade server, AI gateway, and settings:
 
 ```bash
 pip install streamlit pandas
@@ -179,7 +214,7 @@ AUTH_ENABLED=true \
 AUTH_SESSION_SECRET=$(openssl rand -hex 32) \
 AUTH_GITHUB_CLIENT_ID=xxx \
 AUTH_GITHUB_CLIENT_SECRET=xxx \
-python -m app.main
+python -m thon run
 ```
 
 See [Dashboard → Authentication](./dashboard#authentication) for full details.
@@ -188,7 +223,7 @@ The FastAPI REST API also provides Swagger UI at `http://localhost:8100/docs`
 for programmatic access:
 
 ```bash
-python -m app.main
+python -m thon run
 ```
 
 See [Dashboard](./dashboard) for full documentation.
@@ -252,13 +287,31 @@ mkcert -cert-file /etc/nginx/ssl/server.crt \
        165.245.138.159 localhost
 ```
 
-#### Option B: Let's Encrypt (Production)
+#### Option B: Let's Encrypt (Production with Domain)
+
+Set in `thon.yaml`:
+
+```yaml
+nginx:
+  domain: "your-domain.com"
+  ssl_provider: "certbot"
+  certbot_email: "admin@your-domain.com"
+```
+
+Then run `python -m thon setup` to generate certificates automatically.
+
+Or manually:
 
 ```bash
 sudo certbot certonly --standalone -d your-domain.com
 sudo cp /etc/letsencrypt/live/your-domain.com/fullchain.pem /etc/nginx/ssl/server.crt
 sudo cp /etc/letsencrypt/live/your-domain.com/privkey.pem /etc/nginx/ssl/server.key
 ```
+
+#### Option C: Self-Signed (Fallback)
+
+Set `ssl_provider: "openssl"` in `thon.yaml`. THON will generate self-signed
+certificates with the IP/domain in the SAN extension.
 
 ## Optional: Lemonade Server Setup
 
@@ -361,6 +414,45 @@ python ./scripts/main.py \
 
 This injects `kilo.jsonc` into each sandbox at `/home/vscode/.config/kilo/config.json`,
 enabling Kilo Code to connect to your local LLM with both chat and semantic indexing.
+
+## Optional: Langfuse Observability
+
+For LLM tracing and observability via Langfuse:
+
+```bash
+# Via CLI flags
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 \
+    --langfuse \
+    --langfuse-public-key "pk-lf-..." \
+    --langfuse-secret-key "sk-lf-..." \
+    --langfuse-base-url "https://cloud.langfuse.com"
+
+# Or via environment variables
+export LANGFUSE_PUBLIC_KEY="pk-lf-..."
+export LANGFUSE_SECRET_KEY="sk-lf-..."
+export LANGFUSE_BASEURL="https://cloud.langfuse.com"
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --langfuse
+
+# Combined with Lemonade + Langfuse
+bash ./scripts/setup-lemonade.sh --groups groups.yaml --generate-keys --external-ip 1.2.3.4 --langfuse
+python ./scripts/main.py --groups groups.yaml --external-ip 1.2.3.4 --lemonade kilo.jsonc --langfuse
+```
+
+When Langfuse is enabled:
+1. `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASEURL` are injected as env vars into each sandbox
+2. `"plugin": ["opencode-plugin-langfuse"]` is added to the generated `kilo.jsonc`
+3. `experimental.openTelemetry` is set to `true` in the kilo config
+4. All LLM traces are automatically sent to your Langfuse dashboard
+
+Or in `thon.yaml`:
+
+```yaml
+langfuse:
+  enabled: true
+  public_key: "pk-lf-..."
+  secret_key: "sk-lf-..."
+  base_url: "https://cloud.langfuse.com"
+```
 
 ## Verification
 

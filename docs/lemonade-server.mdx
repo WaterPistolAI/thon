@@ -276,6 +276,65 @@ These arguments are **managed by Lemonade** and cannot be in `llamacpp_args`:
 --model, -m, --port, --embedding, --embeddings, --mmproj*, --rerank*
 ```
 
+## Dynamic Rescaling
+
+Adjust context size and parallel slots without restarting the server:
+
+```bash
+# Via Python CLI
+python ./scripts/lemonade_server.py rescale --num-users 8
+
+# Via REST API
+curl -X POST "http://localhost:8100/api/lemonade/rescale?num_users=8"
+```
+
+This rewrites `recipe_options.json` with new `ctx_size` and `-np` values based
+on the user count, then reloads models so new settings take effect immediately.
+
+The rescaling uses the `lemonade.llamacpp` settings from `thon.yaml` to construct
+the `llamacpp_args` string. If no `thon.yaml` exists, sensible defaults are used.
+
+## llamacpp Tuning Parameters
+
+The `lemonade.llamacpp` section in `thon.yaml` controls inference tuning:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `ctk` | `q8_0` | Cache type K |
+| `ctv` | `q8_0` | Cache type V |
+| `batch_size` | `8192` | Batch size (`-b`) |
+| `ubatch_size` | `8192` | Micro-batch size (`-ub`) |
+| `split_mode` | `""` | Multi-GPU split mode (`--split-mode`) |
+| `main_gpu` | `-1` | Primary GPU index (`--main-gpu`) |
+| `cpu_moe` | `false` | Offload MoE to CPU (`--cpu-moe`) |
+| `n_cpu_moe` | `0` | Number of CPU MoE experts (`--n-cpu-moe`) |
+| `min_p` | `0.0` | Minimum P sampling (`--min-p`) |
+| `presence_penalty` | `0.0` | Presence penalty (`--presence-penalty`) |
+
+Additional args always included: `-to 3600 --temp 1.0 --top-k 64 --top-p 0.95
+--repeat-penalty 1.0 --no-webui --threads-http -1 --threads -1 -np <num_users>`
+
+## Chat Models
+
+The `lemonade.chat_models` list in `thon.yaml` allows registering multiple models
+for selection in Kilo Code:
+
+```yaml
+lemonade:
+  chat_models:
+    - name: "gemma-4-31b-it"
+      checkpoint: "unsloth/gemma-4-31B-it-GGUF:Q8_K_XL"
+      context: 262144
+      output: 4096
+    - name: "qwen3.6-27b"
+      checkpoint: "unsloth/Qwen3.6-27B-GGUF:Q8_K_XL"
+      context: 262144
+      output: 4096
+```
+
+Each entry generates a model in `user_models.json` and a corresponding entry in
+`recipe_options.json` with scaled parameters.
+
 ## API Keys
 
 | Variable | Scope | Location |
