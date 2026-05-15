@@ -115,6 +115,8 @@ class NginxConfig:
     ssl_dir: str = "/etc/nginx/ssl"
     external_ip: Optional[str] = field(default_factory=lambda: os.getenv("EXTERNAL_IP"))
     domain: str = field(default_factory=lambda: os.getenv("THON_DOMAIN", ""))
+    ssl_provider: str = field(default_factory=lambda: os.getenv("THON_SSL_PROVIDER", "auto"))
+    certbot_email: str = field(default_factory=lambda: os.getenv("THON_CERTBOT_EMAIL", ""))
 
 
 @dataclass
@@ -220,4 +222,19 @@ class AppConfig:
         if groups_file:
             p = Path(groups_file)
             cfg.groups_file = p if p.exists() else None
+
+        thon_yaml = Path.home() / ".thon" / "thon.yaml"
+        if thon_yaml.is_file():
+            try:
+                from thon.config import ThonConfig
+
+                tc = ThonConfig.from_yaml(thon_yaml)
+                tc.apply_env()
+                cfg = cls()
+                if groups_file:
+                    p = Path(groups_file)
+                    cfg.groups_file = p if p.exists() else None
+            except Exception:
+                pass
+
         return cfg

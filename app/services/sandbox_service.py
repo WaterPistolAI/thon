@@ -79,6 +79,7 @@ class SandboxService:
             try:
                 self._nginx = NginxConfigGenerator(
                     domain=self._config.nginx.domain,
+                    ssl_dir=self._config.nginx.ssl_dir,
                 )
             except Exception as exc:
                 logger.debug("Nginx init failed: %s", exc)

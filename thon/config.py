@@ -366,6 +366,13 @@ class ThonConfig(BaseModel):
         ):
             env["LANGFUSE_BASEURL"] = self.langfuse.base_url
 
+        if self.nginx.domain:
+            env["THON_DOMAIN"] = self.nginx.domain
+        if self.nginx.ssl_provider and self.nginx.ssl_provider != "auto":
+            env["THON_SSL_PROVIDER"] = self.nginx.ssl_provider
+        if self.nginx.certbot_email:
+            env["THON_CERTBOT_EMAIL"] = self.nginx.certbot_email
+
         if self.kilo.config_file:
             env["THON_KILO_CONFIG"] = self.kilo.config_file
         if self.vscode.settings_file:
