@@ -502,6 +502,70 @@ def run_interactive(
                     )
                     if lemonade.llamacpp_bin == "builtin":
                         lemonade.prefer_system = False
+
+            _info(
+                "llama.cpp tuning: cache types, batch sizes, multi-GPU, MoE options. "
+                "These map directly to llama-server CLI flags."
+            )
+            lemonade.llamacpp.ctk = _prompt(
+                "KV cache type (ctk)",
+                default=lemonade.llamacpp.ctk,
+                choices=["f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1", "iq4_nl"],
+            )
+            lemonade.llamacpp.ctv = _prompt(
+                "KV cache type values (ctv)",
+                default=lemonade.llamacpp.ctv,
+                choices=["f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "q5_0", "q5_1", "iq4_nl"],
+            )
+            lemonade.llamacpp.batch_size = int(
+                _prompt(
+                    "Batch size (-b)",
+                    default=str(lemonade.llamacpp.batch_size),
+                )
+            )
+            lemonade.llamacpp.ubatch_size = int(
+                _prompt(
+                    "Micro-batch size (-ub)",
+                    default=str(lemonade.llamacpp.ubatch_size),
+                )
+            )
+            if _yes_no("Configure multi-GPU split mode?", default=False):
+                lemonade.llamacpp.split_mode = _prompt(
+                    "Split mode (--split-mode)",
+                    default=lemonade.llamacpp.split_mode or "layer",
+                    choices=["none", "layer", "row", "tensor"],
+                )
+                lemonade.llamacpp.main_gpu = int(
+                    _prompt(
+                        "Main GPU index (--main-gpu, -1 = auto)",
+                        default=str(lemonade.llamacpp.main_gpu),
+                    )
+                )
+            else:
+                lemonade.llamacpp.split_mode = ""
+                lemonade.llamacpp.main_gpu = -1
+            if _yes_no("Enable CPU offload for MoE models (--cpu-moe)?", default=False):
+                lemonade.llamacpp.cpu_moe = True
+                lemonade.llamacpp.n_cpu_moe = int(
+                    _prompt(
+                        "Number of MoE layers to keep on CPU (0 = all)",
+                        default=str(lemonade.llamacpp.n_cpu_moe),
+                    )
+                )
+
+            lemonade.llamacpp.min_p = float(
+                _prompt(
+                    "Min-P sampling (--min-p, 0 = disabled)",
+                    default=str(lemonade.llamacpp.min_p),
+                )
+            )
+            lemonade.llamacpp.presence_penalty = float(
+                _prompt(
+                    "Presence penalty (--presence-penalty, 0 = disabled)",
+                    default=str(lemonade.llamacpp.presence_penalty),
+                )
+            )
+
             if lemonade.api_key:
                 _info("API key already loaded from systemd (press Enter to keep)")
                 if not _yes_no("Regenerate API keys?", default=False):

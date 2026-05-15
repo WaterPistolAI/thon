@@ -282,10 +282,24 @@ class LemonadeServerManager:
         llamacpp_bin: str = DEFAULT_LLMACPP_BIN,
         rocm_channel: str = "preview",
     ) -> None:
-        """Write config.json and optionally set API keys in systemd override."""
+        """Write config.json and optionally set API keys in systemd override.
+
+        Lemonade config.json ``llamacpp.backend`` only accepts ``auto``,
+        ``vulkan``, or ``cpu``.  Values like ``rocm``, ``metal``, or
+        ``system`` are mapped to ``auto`` here because the system-compiled
+        binary (enabled via ``prefer_system``) handles GPU detection itself.
+        """
         import shutil
 
         existing = _sudo_read_json(self.config_path) or {}
+
+        lemonade_backend = llamacpp_backend
+        if llamacpp_backend in ("rocm", "metal", "system"):
+            lemonade_backend = "auto"
+            print(
+                f"[Lemonade] Mapping backend '{llamacpp_backend}' -> 'auto' "
+                f"for config.json (prefer_system={prefer_system})"
+            )
 
         resolved_bin = llamacpp_bin
         if prefer_system:
@@ -324,16 +338,16 @@ class LemonadeServerManager:
             "llamacpp": {
                 **LLAMACPP_DEFAULTS,
                 **existing.get("llamacpp", {}),
-                "backend": llamacpp_backend,
+                "backend": lemonade_backend,
                 "prefer_system": prefer_system,
                 "rocm_bin": bin_value
-                if llamacpp_backend in ("auto", "rocm")
+                if lemonade_backend in ("auto",) or llamacpp_backend in ("rocm",)
                 else "builtin",
                 "vulkan_bin": bin_value
-                if llamacpp_backend in ("auto", "vulkan")
+                if lemonade_backend in ("auto", "vulkan")
                 else "builtin",
                 "cpu_bin": bin_value
-                if llamacpp_backend in ("auto", "cpu")
+                if lemonade_backend in ("auto", "cpu")
                 else "builtin",
             },
             "whispercpp": {
@@ -570,6 +584,8 @@ class LemonadeServerManager:
         ctx_size_per_user: int = PER_USER_CTX,
         embedding_ctx_size_per_user: int = EMBEDDING_PER_USER_CTX,
         llamacpp_backend: Optional[str] = None,
+        chat_args: Optional[str] = None,
+        emb_args: Optional[str] = None,
     ) -> None:
         """Rescale the Lemonade server for a different number of parallel users.
 
@@ -582,6 +598,8 @@ class LemonadeServerManager:
             ctx_size_per_user: Context size per user for chat models.
             embedding_ctx_size_per_user: Context size per user for embedding models.
             llamacpp_backend: Override backend (None = keep existing).
+            chat_args: Pre-built chat llamacpp_args. If None, uses defaults.
+            emb_args: Pre-built embedding llamacpp_args. If None, uses defaults.
         """
         if num_users < 1:
             num_users = 1
@@ -592,24 +610,26 @@ class LemonadeServerManager:
         total_ctx = ctx_size_per_user * num_users
         total_emb_ctx = embedding_ctx_size_per_user * num_users
 
-        chat_args = (
-            f"-b 8192 -ub 8192 "
-            f"-to 3600 "
-            f"-ctk q8_0 -ctv q8_0 "
-            f"--temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.0 "
-            f"--repeat-penalty 1.0 "
-            f"--no-webui "
-            f"--threads-http -1 --threads -1 "
-            f"-np {num_users}"
-        )
-        emb_args = (
-            f"-b 8192 -ub 8192 "
-            f"-to 3600 "
-            f"-ctk q8_0 -ctv q8_0 "
-            f"--no-webui "
-            f"--threads-http -1 --threads -1 "
-            f"-np {num_users}"
-        )
+        if chat_args is None:
+            chat_args = (
+                f"-b 8192 -ub 8192 "
+                f"-to 3600 "
+                f"-ctk q8_0 -ctv q8_0 "
+                f"--temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.0 "
+                f"--repeat-penalty 1.0 "
+                f"--no-webui "
+                f"--threads-http -1 --threads -1 "
+                f"-np {num_users}"
+            )
+        if emb_args is None:
+            emb_args = (
+                f"-b 8192 -ub 8192 "
+                f"-to 3600 "
+                f"-ctk q8_0 -ctv q8_0 "
+                f"--no-webui "
+                f"--threads-http -1 --threads -1 "
+                f"-np {num_users}"
+            )
 
         embedding_labels = {"embedding", "embeddings"}
         updated_models: list[str] = []
@@ -670,6 +690,7 @@ class LemonadeServerManager:
         llamacpp_backend: str = "auto",
         mmproj: Optional[str] = None,
         per_user_ctx: int = PER_USER_CTX,
+        llamacpp_args: Optional[str] = None,
     ) -> None:
         """Write user_models.json, server_models.json, and recipe_options.json.
 
@@ -680,6 +701,7 @@ class LemonadeServerManager:
             llamacpp_backend: llama.cpp backend (auto, vulkan, cpu).
             mmproj: Multimodal projection model filename (e.g. "mmproj-BF16.gguf").
             per_user_ctx: Context size per user; total = per_user_ctx * num_users.
+            llamacpp_args: Pre-built args string. If None, uses built-in defaults.
         """
         user_models_path = self.config_dir / "user_models.json"
         server_models_path = self.config_dir / "server_models.json"
@@ -725,16 +747,17 @@ class LemonadeServerManager:
         print(f"[Lemonade] server_models.json updated with {model_name}")
 
         total_ctx = per_user_ctx * num_users
-        llamacpp_args = (
-            f"-b 8192 -ub 8192 "
-            f"-to 3600 "
-            f"-ctk q8_0 -ctv q8_0 "
-            f"--temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.0 "
-            f"--repeat-penalty 1.0 "
-            f"--no-webui "
-            f"--threads-http -1 --threads -1 "
-            f"-np {num_users}"
-        )
+        if llamacpp_args is None:
+            llamacpp_args = (
+                f"-b 8192 -ub 8192 "
+                f"-to 3600 "
+                f"-ctk q8_0 -ctv q8_0 "
+                f"--temp 1.0 --top-k 64 --top-p 0.95 --min-p 0.0 "
+                f"--repeat-penalty 1.0 "
+                f"--no-webui "
+                f"--threads-http -1 --threads -1 "
+                f"-np {num_users}"
+            )
 
         existing_options = _sudo_read_json(recipe_options_path) or {}
 
@@ -749,9 +772,13 @@ class LemonadeServerManager:
                 f"[Lemonade] Removed auto-generated recipe options: {prefixed_auto_name}"
             )
 
+        lemonade_backend = llamacpp_backend
+        if lemonade_backend in ("rocm", "metal", "system"):
+            lemonade_backend = "auto"
+
         existing_options[prefixed_name] = {
             "ctx_size": total_ctx,
-            "llamacpp_backend": llamacpp_backend,
+            "llamacpp_backend": lemonade_backend,
             "llamacpp_args": llamacpp_args,
         }
         _sudo_write_json(recipe_options_path, existing_options)
@@ -769,6 +796,7 @@ class LemonadeServerManager:
         num_users: int = 1,
         llamacpp_backend: str = "auto",
         per_user_ctx: int = EMBEDDING_PER_USER_CTX,
+        llamacpp_args: Optional[str] = None,
     ) -> None:
         """Write embedding model entries into user_models.json and recipe_options.json.
 
@@ -778,6 +806,7 @@ class LemonadeServerManager:
             num_users: Number of parallel users; scales ctx-size and -np.
             llamacpp_backend: llama.cpp backend (auto, vulkan, cpu).
             per_user_ctx: Context size per user; total = per_user_ctx * num_users.
+            llamacpp_args: Pre-built args string. If None, uses built-in defaults.
         """
         user_models_path = self.config_dir / "user_models.json"
         server_models_path = self.config_dir / "server_models.json"
@@ -804,21 +833,26 @@ class LemonadeServerManager:
         )
 
         total_ctx = per_user_ctx * num_users
-        llamacpp_args = (
-            f"-b 8192 -ub 8192 "
-            f"-to 3600 "
-            f"-ctk q8_0 -ctv q8_0 "
-            f"--no-webui "
-            f"--threads-http -1 --threads -1 "
-            f"-np {num_users}"
-        )
+        if llamacpp_args is None:
+            llamacpp_args = (
+                f"-b 8192 -ub 8192 "
+                f"-to 3600 "
+                f"-ctk q8_0 -ctv q8_0 "
+                f"--no-webui "
+                f"--threads-http -1 --threads -1 "
+                f"-np {num_users}"
+            )
+
+        lemonade_backend = llamacpp_backend
+        if lemonade_backend in ("rocm", "metal", "system"):
+            lemonade_backend = "auto"
 
         existing_options = _sudo_read_json(recipe_options_path) or {}
 
         prefixed_name = f"user.{model_name}"
         existing_options[prefixed_name] = {
             "ctx_size": total_ctx,
-            "llamacpp_backend": llamacpp_backend,
+            "llamacpp_backend": lemonade_backend,
             "llamacpp_args": llamacpp_args,
         }
         _sudo_write_json(recipe_options_path, existing_options)
@@ -996,6 +1030,8 @@ async def cmd_run(
     ctx_size_per_user: int = PER_USER_CTX,
     embedding_ctx_size_per_user: int = EMBEDDING_PER_USER_CTX,
     additional_models: Optional[list[dict]] = None,
+    llamacpp_args: Optional[str] = None,
+    embedding_llamacpp_args: Optional[str] = None,
 ) -> None:
     if groups_file:
         num_users = load_user_count(groups_file, group_filter)
@@ -1026,6 +1062,7 @@ async def cmd_run(
         llamacpp_backend=llamacpp_backend,
         mmproj=mmproj,
         per_user_ctx=ctx_size_per_user,
+        llamacpp_args=llamacpp_args,
     )
 
     if additional_models:
@@ -1051,6 +1088,7 @@ async def cmd_run(
             num_users=num_users,
             llamacpp_backend=llamacpp_backend,
             per_user_ctx=embedding_ctx_size_per_user,
+            llamacpp_args=embedding_llamacpp_args,
         )
 
     manager.configure(
@@ -1363,7 +1401,15 @@ Examples:
         "--llamacpp-backend",
         type=str,
         default="auto",
-        help="llama.cpp backend: auto, cpu, vulkan, rocm, metal, system (default: auto)",
+        help="llama.cpp backend: auto, cpu, vulkan, rocm, metal, system (default: auto). "
+        "Note: rocm/metal/system are mapped to 'auto' in Lemonade config.json; "
+        "set --prefer-system for self-compiled binaries.",
+    )
+    run_parser.add_argument(
+        "--llamacpp-args",
+        type=str,
+        default=None,
+        help="Custom llamacpp_args string for recipe_options.json (overrides all defaults)",
     )
     run_parser.add_argument(
         "--prefer-system",
@@ -1494,6 +1540,18 @@ Examples:
             "(e.g. 'glm-4-flash:unsloth/GLM-4.7-Flash-GGUF:GLM-4.7-Flash-UD-TQ1_0.gguf:131072'). "
             "May be specified multiple times."
         ),
+    )
+    run_parser.add_argument(
+        "--llamacpp-args",
+        type=str,
+        default=None,
+        help="Custom llamacpp_args for chat models in recipe_options.json (overrides all defaults)",
+    )
+    run_parser.add_argument(
+        "--embedding-llamacpp-args",
+        type=str,
+        default=None,
+        help="Custom llamacpp_args for embedding models in recipe_options.json (overrides all defaults)",
     )
 
     count_users_parser = subparsers.add_parser(
@@ -1768,6 +1826,8 @@ Examples:
                 ctx_size_per_user=args.ctx_size_per_user,
                 embedding_ctx_size_per_user=args.embedding_ctx_size_per_user,
                 additional_models=_parse_additional_models(args.additional_model),
+                llamacpp_args=getattr(args, "llamacpp_args", None),
+                embedding_llamacpp_args=getattr(args, "embedding_llamacpp_args", None),
             )
         )
     elif args.command == "count-users":

@@ -76,6 +76,70 @@ class ModelOption(BaseModel):
     output: int = 4096
 
 
+class LlamacppSettings(BaseModel):
+    """llama.cpp inference tuning parameters.
+
+    These map to llama-server CLI flags and are written into
+    recipe_options.json ``llamacpp_args``.  They are independent of the
+    Lemonade backend selection (auto/vulkan/cpu).
+    """
+
+    ctk: str = "q8_0"
+    ctv: str = "q8_0"
+    batch_size: int = 8192
+    ubatch_size: int = 8192
+    split_mode: str = ""
+    main_gpu: int = -1
+    cpu_moe: bool = False
+    n_cpu_moe: int = 0
+    min_p: float = 0.0
+    presence_penalty: float = 0.0
+
+    def to_args(self, num_users: int = 1, timeout: int = 3600) -> str:
+        """Build the llamacpp_args string for recipe_options.json."""
+        parts: list[str] = []
+        parts.append(f"-b {self.batch_size}")
+        parts.append(f"-ub {self.ubatch_size}")
+        parts.append(f"-to {timeout}")
+        parts.append(f"-ctk {self.ctk}")
+        parts.append(f"-ctv {self.ctv}")
+        if self.split_mode:
+            parts.append(f"--split-mode {self.split_mode}")
+        if self.main_gpu >= 0:
+            parts.append(f"--main-gpu {self.main_gpu}")
+        if self.cpu_moe:
+            parts.append("--cpu-moe")
+        if self.n_cpu_moe > 0:
+            parts.append(f"--n-cpu-moe {self.n_cpu_moe}")
+        parts.append("--temp 1.0 --top-k 64 --top-p 0.95")
+        if self.min_p > 0:
+            parts.append(f"--min-p {self.min_p}")
+        parts.append("--repeat-penalty 1.0")
+        if self.presence_penalty > 0:
+            parts.append(f"--presence-penalty {self.presence_penalty}")
+        parts.append("--no-webui")
+        parts.append("--threads-http -1 --threads -1")
+        parts.append(f"-np {num_users}")
+        return " ".join(parts)
+
+    def to_embedding_args(self, num_users: int = 1, timeout: int = 3600) -> str:
+        """Build llamacpp_args for embedding models (no sampling params)."""
+        parts: list[str] = []
+        parts.append(f"-b {self.batch_size}")
+        parts.append(f"-ub {self.ubatch_size}")
+        parts.append(f"-to {timeout}")
+        parts.append(f"-ctk {self.ctk}")
+        parts.append(f"-ctv {self.ctv}")
+        if self.split_mode:
+            parts.append(f"--split-mode {self.split_mode}")
+        if self.main_gpu >= 0:
+            parts.append(f"--main-gpu {self.main_gpu}")
+        parts.append("--no-webui")
+        parts.append("--threads-http -1 --threads -1")
+        parts.append(f"-np {num_users}")
+        return " ".join(parts)
+
+
 class LemonadeSettings(BaseModel):
     """Lemonade local LLM inference server settings."""
 
@@ -99,6 +163,7 @@ class LemonadeSettings(BaseModel):
     generate_keys: bool = True
     api_key: str = ""
     admin_api_key: str = ""
+    llamacpp: LlamacppSettings = Field(default_factory=LlamacppSettings)
     chat_models: list[ModelOption] = Field(
         default_factory=lambda: [
             ModelOption(

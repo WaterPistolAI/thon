@@ -285,6 +285,12 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 "--rocm-channel",
                 config.lemonade.rocm_channel,
             ]
+
+            llamacpp_args = config.lemonade.llamacpp.to_args(num_users)
+            cmd.extend(["--llamacpp-args", llamacpp_args])
+
+            embedding_args = config.lemonade.llamacpp.to_embedding_args(num_users)
+            cmd.extend(["--embedding-llamacpp-args", embedding_args])
             if config.lemonade.generate_keys:
                 cmd.append("--generate-keys")
             if config.external_ip:
