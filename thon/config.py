@@ -480,6 +480,11 @@ class ThonConfig(BaseModel):
         return result
 
     def apply_env(self) -> None:
-        """Push config values into os.environ (non-overwriting)."""
+        """Push config values into os.environ.
+
+        Values from thon.yaml are always written, even if an env var
+        already exists.  This ensures the dashboard and API pick up
+        settings like ``THON_DOMAIN`` that are never manually exported.
+        """
         for key, value in self.to_env_dict().items():
-            os.environ.setdefault(key, value)
+            os.environ[key] = value

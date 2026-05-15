@@ -527,6 +527,40 @@ def cmd_config_validate(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+
+
+def cmd_nginx(args: argparse.Namespace) -> None:
+    """Manage nginx reverse proxy configs."""
+    from app.config import AppConfig
+    from app.services.sandbox_service import SandboxService
+
+    cfg = AppConfig.from_env()
+    print(f"[Nginx] Domain: {cfg.nginx.domain or '(none)'}")
+    print(f"[Nginx] External IP: {cfg.nginx.external_ip or '(none)'}")
+    print(f"[Nginx] SSL provider: {cfg.nginx.ssl_provider}")
+
+    svc = SandboxService(cfg)
+
+    if args.nginx_command == "sync":
+        ports = svc.sync_nginx()
+        if ports:
+            print(f"[Nginx] Synced {len(ports)} port(s): {ports}")
+        else:
+            print("[Nginx] No active instance ports found")
+            # Even with no ports, regenerate config with correct SSL
+            ng = svc.nginx
+            if ng:
+                ng.cleanup_all()
+                print("[Nginx] Cleaned up (no active instances)")
+    elif args.nginx_command == "cleanup":
+        ng = svc.nginx
+        if ng:
+            ng.cleanup_all()
+            print("[Nginx] All THON configs removed")
+        else:
+            print("[Nginx] Not available (external_ip not configured)")
+
+
 def cmd_cleanup(args: argparse.Namespace) -> None:
     main_py = PROJECT_ROOT / "scripts" / "main.py"
     if main_py.is_file():
@@ -723,6 +757,12 @@ Examples:
     env_sub.add_argument("--output", type=str, default=None, help="Output .env path")
     config_sub.add_parser("validate", help="Validate thon.yaml")
 
+    # nginx
+    nginx_parser = subparsers.add_parser("nginx", help="Nginx management")
+    nginx_sub = nginx_parser.add_subparsers(dest="nginx_command", help="Nginx sub-command")
+    nginx_sub.add_parser("sync", help="Regenerate nginx config from active instances")
+    nginx_sub.add_parser("cleanup", help="Remove all THON nginx configs")
+
     # cleanup
     subparsers.add_parser("cleanup", help="Tear down all resources")
 
@@ -754,6 +794,11 @@ Examples:
             cmd_config_env(args)
         elif args.config_command == "validate":
             cmd_config_validate(args)
+    elif args.command == "nginx":
+        if not args.nginx_command:
+            print("Usage: thon nginx <sync|cleanup>")
+            sys.exit(1)
+        cmd_nginx(args)
     elif args.command == "cleanup":
         cmd_cleanup(args)
 

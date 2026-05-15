@@ -234,7 +234,10 @@ class AppConfig:
                 if groups_file:
                     p = Path(groups_file)
                     cfg.groups_file = p if p.exists() else None
-            except Exception:
-                pass
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning(
+                    "Failed to load thon.yaml for env vars: %s", exc
+                )
 
         return cfg
