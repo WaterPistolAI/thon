@@ -448,12 +448,18 @@ def run_interactive(
                     default=str(lemonade.embedding_dimensions),
                 )
             )
+            _info(
+                "Lemonade's llamacpp.backend only accepts auto, cpu, or vulkan. "
+                "Use 'auto' with prefer_system=true for self-compiled llama.cpp."
+            )
             lemonade.llamacpp_backend = _prompt(
                 "llama.cpp backend",
                 default=lemonade.llamacpp_backend,
-                choices=["auto", "cpu", "vulkan", "rocm", "metal", "system"],
+                choices=["auto", "cpu", "vulkan"],
             )
-            if lemonade.llamacpp_backend == "rocm":
+            if lemonade.llamacpp_backend == "auto" and _yes_no(
+                "Does this system have an AMD GPU with ROCm?", default=False
+            ):
                 lemonade.rocm_channel = _prompt(
                     "ROCm channel",
                     default=lemonade.rocm_channel,
@@ -464,30 +470,11 @@ def run_interactive(
                     "stable: Upstream llama.cpp releases. "
                     "nightly: Bleeding-edge experimental builds."
                 )
-            if lemonade.llamacpp_backend == "system":
-                _info(
-                    "System backend uses a system-installed llama-server binary. "
-                    "Requires llama-server in PATH."
-                )
-                lemonade.prefer_system = True
-            else:
-                lemonade.prefer_system = _yes_no(
-                    "Prefer system-installed llama-server over Lemonade's packaged version?",
-                    default=lemonade.prefer_system,
-                )
-            if not lemonade.prefer_system and lemonade.llamacpp_backend != "system":
-                lemonade.llamacpp_bin = _prompt(
-                    "llama.cpp binary source",
-                    default=lemonade.llamacpp_bin,
-                    choices=["builtin", "latest"],
-                )
-                if lemonade.llamacpp_bin == "latest":
-                    _info(
-                        "Will track the most recent upstream release on first install"
-                    )
-                else:
-                    _info("Using Lemonade's packaged and tested version")
-            elif lemonade.prefer_system or lemonade.llamacpp_backend == "system":
+            lemonade.prefer_system = _yes_no(
+                "Prefer system-installed llama-server over Lemonade's packaged version?",
+                default=lemonade.prefer_system,
+            )
+            if lemonade.prefer_system:
                 import shutil
 
                 system_llama = shutil.which("llama-server")
@@ -502,6 +489,18 @@ def run_interactive(
                     )
                     if lemonade.llamacpp_bin == "builtin":
                         lemonade.prefer_system = False
+            else:
+                lemonade.llamacpp_bin = _prompt(
+                    "llama.cpp binary source",
+                    default=lemonade.llamacpp_bin,
+                    choices=["builtin", "latest"],
+                )
+                if lemonade.llamacpp_bin == "latest":
+                    _info(
+                        "Will track the most recent upstream release on first install"
+                    )
+                else:
+                    _info("Using Lemonade's packaged and tested version")
 
             _info(
                 "llama.cpp tuning: cache types, batch sizes, multi-GPU, MoE options. "
