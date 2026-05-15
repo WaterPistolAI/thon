@@ -265,10 +265,13 @@ class LemonadeService:
         ctx_size_per_user: int = 262144,
         embedding_ctx_size_per_user: int = 32768,
         llamacpp_backend: Optional[str] = None,
+        llamacpp_args: Optional[str] = None,
+        embedding_llamacpp_args: Optional[str] = None,
     ) -> dict:
         """Rescale the Lemonade server for a different number of parallel users.
 
-        Updates recipe_options.json and restarts the service.
+        Updates recipe_options.json and restarts the service, then reloads
+        models so new recipe_options take effect immediately.
         """
         import sys
         from pathlib import Path
@@ -291,6 +294,10 @@ class LemonadeService:
         ]
         if llamacpp_backend:
             cmd += ["--llamacpp-backend", llamacpp_backend]
+        if llamacpp_args:
+            cmd += ["--llamacpp-args", llamacpp_args]
+        if embedding_llamacpp_args:
+            cmd += ["--embedding-llamacpp-args", embedding_llamacpp_args]
 
         env = {**os.environ, "LEMONADE_API_KEY": self._cfg.api_key}
         if self._cfg.admin_api_key:

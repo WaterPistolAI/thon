@@ -682,6 +682,20 @@ class LemonadeServerManager:
         self.restart()
         print("[Lemonade] Server restarted with new settings")
 
+        # Reload models so new recipe_options take effect immediately.
+        # Without this, models load lazily on first inference with stale args.
+        import time
+
+        print("[Lemonade] Waiting for server to be ready...")
+        time.sleep(3)
+        if self.status():
+            for model_key in updated_models:
+                bare_name = model_key.removeprefix("user.")
+                print(f"[Lemonade] Reloading model: {bare_name}")
+                self.load_model(bare_name)
+        else:
+            print("[Lemonade] Warning: server not ready, models will load on first request")
+
     def write_model_configs(
         self,
         model: str = DEFAULT_MODEL,
@@ -1675,6 +1689,18 @@ Examples:
         default=None,
         help="Override llama.cpp backend (keeps current if not set)",
     )
+    rescale_parser.add_argument(
+        "--llamacpp-args",
+        type=str,
+        default=None,
+        help="Custom llamacpp_args for chat models (overrides defaults)",
+    )
+    rescale_parser.add_argument(
+        "--embedding-llamacpp-args",
+        type=str,
+        default=None,
+        help="Custom llamacpp_args for embedding models (overrides defaults)",
+    )
 
     generate_kilo_parser = subparsers.add_parser(
         "generate-kilo-config",
@@ -1855,6 +1881,8 @@ Examples:
             ctx_size_per_user=args.ctx_size_per_user,
             embedding_ctx_size_per_user=args.embedding_ctx_size_per_user,
             llamacpp_backend=args.llamacpp_backend,
+            chat_args=getattr(args, "llamacpp_args", None),
+            emb_args=getattr(args, "embedding_llamacpp_args", None),
         )
     elif args.command == "generate-kilo-config":
         mgr = LemonadeServerManager(

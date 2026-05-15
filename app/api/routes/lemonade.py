@@ -243,10 +243,29 @@ async def lemonade_rescale(
 ) -> dict:
     """Rescale the Lemonade server for a different number of parallel users.
 
-    Updates recipe_options.json (ctx_size, -np) and restarts the service.
+    Updates recipe_options.json (ctx_size, -np), restarts the service,
+    and reloads models so new settings take effect immediately.
     """
     svc = _get_service()
     try:
-        return svc.rescale(num_users=num_users)
+        from pathlib import Path
+
+        from thon.config import ThonConfig
+
+        thon_yaml = Path.home() / ".thon" / "thon.yaml"
+        chat_args = None
+        emb_args = None
+        if thon_yaml.is_file():
+            try:
+                tc = ThonConfig.from_yaml(thon_yaml)
+                chat_args = tc.lemonade.llamacpp.to_args(num_users)
+                emb_args = tc.lemonade.llamacpp.to_embedding_args(num_users)
+            except Exception:
+                pass
+        return svc.rescale(
+            num_users=num_users,
+            llamacpp_args=chat_args,
+            embedding_llamacpp_args=emb_args,
+        )
     except LemonadeConnectionError as exc:
         _handle_connection_error(exc)
