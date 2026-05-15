@@ -1401,15 +1401,8 @@ Examples:
         "--llamacpp-backend",
         type=str,
         default="auto",
-        help="llama.cpp backend: auto, cpu, vulkan, rocm, metal, system (default: auto). "
-        "Note: rocm/metal/system are mapped to 'auto' in Lemonade config.json; "
-        "set --prefer-system for self-compiled binaries.",
-    )
-    run_parser.add_argument(
-        "--llamacpp-args",
-        type=str,
-        default=None,
-        help="Custom llamacpp_args string for recipe_options.json (overrides all defaults)",
+        help="llama.cpp backend: auto, cpu, vulkan (default: auto). "
+        "Use --prefer-system for self-compiled llama-server binaries.",
     )
     run_parser.add_argument(
         "--prefer-system",
