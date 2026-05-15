@@ -334,7 +334,7 @@ def page_instances() -> None:
     rows = []
     for inst in filtered:
         label = f"{inst.user.group}/{inst.user.username}"
-        endpoint = inst.domain_url or inst.public_url or inst.endpoint or "-"
+        endpoint = getattr(inst, 'domain_url', None) or inst.public_url or inst.endpoint or "-"
         rows.append(
             {
                 "User": label,
@@ -461,13 +461,15 @@ def _instance_detail(svc: SandboxService, inst) -> None:
     st.write(f"**ID:** `{inst.id}`")
     st.write(f"**State:** {_state_badge(inst.state.value)}")
     st.write(f"**Port:** {inst.port}")
-    if inst.domain_url:
-        st.write(f"**Domain URL:** [{inst.domain_url}]({inst.domain_url})")
+    domain_url = getattr(inst, 'domain_url', None)
+    local_url = getattr(inst, 'local_url', None)
+    if domain_url:
+        st.write(f"**Domain URL:** [{domain_url}]({domain_url})")
     if inst.public_url:
         st.write(f"**IP URL:** [{inst.public_url}]({inst.public_url})")
-    if inst.local_url:
-        st.write(f"**Local URL:** [{inst.local_url}]({inst.local_url})")
-    if not inst.domain_url and not inst.public_url and inst.endpoint:
+    if local_url:
+        st.write(f"**Local URL:** [{local_url}]({local_url})")
+    if not domain_url and not inst.public_url and inst.endpoint:
         st.write(f"**Endpoint:** `{inst.endpoint}`")
     if inst.password:
         st.write(f"**Password:** `{inst.password}`")

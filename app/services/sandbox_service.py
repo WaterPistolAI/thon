@@ -513,6 +513,7 @@ class SandboxService:
                 port = rec.port
             password = rec.password
             db_external_ip = rec.external_ip
+        domain = self._config.nginx.domain
         return InstanceInfo(
             id=info.id,
             user=user,
@@ -521,6 +522,10 @@ class SandboxService:
             endpoint=endpoint,
             public_url=self._build_public_url(endpoint, fallback_ip=db_external_ip)
             if endpoint
+            else None,
+            local_url=self._build_local_url(endpoint) if endpoint else None,
+            domain_url=self._build_domain_url(endpoint, domain)
+            if endpoint and domain
             else None,
             password=password,
             image=image_str,
@@ -726,12 +731,16 @@ class SandboxService:
 
         self._sync_nginx()
 
+        domain = self._config.nginx.domain
         return InstanceInfo(
             id=sandbox_id,
             user=user,
             state=InstanceState.RUNNING,
             port=endpoint_port,
             endpoint=endpoint_str,
+            public_url=self._build_public_url(endpoint_str),
+            local_url=self._build_local_url(endpoint_str),
+            domain_url=self._build_domain_url(endpoint_str, domain) if domain else None,
             password=password,
             image=self._sandbox_cfg.image,
             metadata=metadata,
