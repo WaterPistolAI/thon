@@ -221,10 +221,10 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 )
             except Exception:
                 pass
-            try:
-                from scripts.ssl_cert import SSLCertificateGenerator
+            from scripts.ssl_cert import SSLCertificateGenerator
 
-                ssl_gen = SSLCertificateGenerator(output_dir=ssl_dir)
+            ssl_gen = SSLCertificateGenerator(output_dir=ssl_dir)
+            try:
                 cert, key = ssl_gen.generate_server_cert(
                     domain=config.nginx.domain,
                     ssl_provider="certbot",
@@ -237,6 +237,15 @@ def cmd_setup(args: argparse.Namespace) -> None:
                 print(
                     f"  You can retry manually: sudo certbot --nginx -d {config.nginx.domain}"
                 )
+                print("  Falling back to mkcert/openssl cert for nginx...")
+                try:
+                    cert, key = ssl_gen.generate_server_cert(
+                        server_ip=config.external_ip or None,
+                    )
+                    print(f"  Fallback cert: {cert}")
+                    print(f"  Fallback key:  {key}")
+                except Exception as fallback_err:
+                    print(f"  Fallback cert generation also failed: {fallback_err}")
         else:
             print("  Provider: mkcert/openssl (no domain configured)")
     else:

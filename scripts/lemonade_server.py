@@ -154,16 +154,23 @@ def _run_cmd(
 
 def _sudo_write_json(path: Path, data: dict) -> None:
     content = json.dumps(data, indent=2)
+    service_user = _get_lemonade_user()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
+        if service_user and os.getuid() == 0:
+            _run_cmd(
+                ["chown", f"{service_user}:{service_user}", str(path)], sudo=True
+            )
     except PermissionError:
         _run_cmd(["mkdir", "-p", str(path.parent)], sudo=True)
         tmp_path = Path(f"/tmp/{path.name}")
         tmp_path.write_text(content)
         _run_cmd(["cp", str(tmp_path), str(path)], sudo=True)
-        service_user = _get_lemonade_user()
-        _run_cmd(["chown", f"{service_user}:{service_user}", str(path)], sudo=True)
+        if service_user:
+            _run_cmd(
+                ["chown", f"{service_user}:{service_user}", str(path)], sudo=True
+            )
         tmp_path.unlink(missing_ok=True)
 
 
