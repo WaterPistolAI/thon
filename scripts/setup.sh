@@ -130,7 +130,8 @@ docker build -t waterpistol/thon:latest -f "${REPO_DIR}/Dockerfile" "${REPO_DIR}
 echo "[Setup] Installing OpenSandbox server and CLI..."
 python3 -m venv ~/.venv
 . ~/.venv/bin/activate
-pip install opensandbox opensandbox-cli
+pip install -r requirements.txt
+# pip install opensandbox opensandbox-cli
 
 echo "[Setup] Initializing OpenSandbox server configuration..."
 opensandbox-server init-config "$HOME/.sandbox.toml" --example docker
